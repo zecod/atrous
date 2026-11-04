@@ -50,6 +50,7 @@ Fedra was built and tested on Windows 11 with herdr-app 0.1.12. On macOS and Lin
 - **Account launchers:** `accounts/*.sh` are used instead of the PowerShell ones.
 - **Claude Code on macOS:** logins live in the Keychain, and the usage card and Accounts read them from there. macOS may ask once to allow access. For extra accounts it's best effort; if the card shows one as logged out, launching agents on it still works.
 - **Browser panel on macOS:** uses the streamed view with Google Chrome (the native page view is Windows-only).
+- **Browser panel on Windows:** the fast native page view (WebView2) builds itself the first time Browser opens, which needs the [.NET 9 SDK](https://dotnet.microsoft.com/download). Without it the panel uses the streamed view.
 
 ## Layout
 

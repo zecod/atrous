@@ -552,13 +552,16 @@ export default class UsageCard extends View {
           const r = pairRows(g.tool, g.au.rows)[0] ?? null;
           const pct = r?.pct == null ? null : Math.max(0, Math.min(100, Math.round(r.pct)));
           const color = pct == null ? t.dim : pct >= 90 ? t.blocked : pct >= 70 ? t.ansi3 : t.ansi2;
+          // The tool's small logo, then its ring with the percentage in the middle.
           return v_flex().id(`rail-usage-${g.tool}`).h(46).items_center().gap(2)
             .tooltip(r ? `${TOOLS[g.tool].name} · ${r.label} ${pct}%` : TOOLS[g.tool].name)
-            .child(div().relative().size(28).flex_none()
-              .child(svg("mods/usage-card/rings/track.svg").absolute().left(0).top(0).size(28).text_color(t.border))
-              .when(pct != null, (el) => el.child(svg(`mods/usage-card/rings/p${pct}.svg`).absolute().left(0).top(0).size(28).text_color(color)))
-              .child(div().absolute().left(7).top(7).size(14).child(image(TOOLS[g.tool].icon).w(14).h(14))))
-            .child(div().text_size(10).text_color(pct == null ? t.dim : t.muted).child(pct == null ? "!" : `${pct}%`));
+            .child(image(TOOLS[g.tool].icon).w(11).h(11).flex_none())
+            .child(div().relative().size(30).flex_none()
+              .child(svg("mods/usage-card/rings/track.svg").absolute().left(0).top(0).size(30).text_color(t.border))
+              .when(pct != null, (el) => el.child(svg(`mods/usage-card/rings/p${pct}.svg`).absolute().left(0).top(0).size(30).text_color(color)))
+              .child(div().absolute().left(0).top(0).size(30).flex().items_center().justify_center()
+                .text_size(pct === 100 ? 8.5 : 9.5).font_semibold().text_color(pct == null ? t.dim : t.foreground)
+                .child(pct == null ? "!" : `${pct}%`)));
         }));
     }
     return sized(v_flex().id("usage")).size_full().bg(t.chrome).px(8).pt(4).pb(8)
