@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 200">
+  <!-- Fedra: spaces tree + usage card | tab pills | agent pane, files panel | quick terminal -->
+  <rect width="320" height="200" rx="6" fill="#121716"/>
+  <!-- sidebar -->
+  <rect x="0" y="0" width="70" height="200" rx="6" fill="#0f1312"/>
+  <rect x="70" y="0" width="1" height="200" fill="#26302d"/>
+  <circle cx="9" cy="9" r="3.5" fill="#e8ece9"/>
+  <rect x="16" y="7" width="20" height="4" rx="2" fill="#c9d1cd"/>
+  <rect x="7" y="20" width="16" height="2.5" rx="1.2" fill="#56625d"/>
+  <!-- space row (selected) -->
+  <rect x="4" y="27" width="62" height="11" rx="3" fill="#1d2523"/>
+  <path d="M8 30.5h3l1 1h4v4.5h-8z" fill="none" stroke="#e8ece9" stroke-width="1"/>
+  <rect x="19" y="31" width="26" height="3.5" rx="1.7" fill="#e8ece9"/>
+  <rect x="49" y="31" width="13" height="3.5" rx="1.7" fill="#4caf7d"/>
+  <!-- tree lines -->
+  <path d="M11 38v17M11 44h5M11 55h5" fill="none" stroke="#3a4743" stroke-width="1"/>
+  <path d="M11 55v11q0 3 3 3h2" fill="none" stroke="#3a4743" stroke-width="1"/>
+  <!-- agents -->
+  <rect x="17" y="41.5" width="5" height="5" rx="1" fill="#d97757"/>
+  <rect x="24" y="42.5" width="26" height="3" rx="1.5" fill="#aeb8b3"/>
+  <circle cx="61" cy="44" r="1.6" fill="#6b7772"/>
+  <rect x="15" y="50" width="51" height="10" rx="3" fill="#1d2523"/>
+  <rect x="17" y="52.5" width="5" height="5" rx="1" fill="#d97757"/>
+  <rect x="24" y="53.5" width="24" height="3" rx="1.5" fill="#e8ece9"/>
+  <path d="M61 52.6a2.4 2.4 0 1 1 -2.4 2.4" fill="none" stroke="#e0b24a" stroke-width="1.1"/>
+  <!-- worktree -->
+  <path d="M18 66v6M18 68a3 3 0 0 0 3 3h1" fill="none" stroke="#aeb8b3" stroke-width="1"/>
+  <rect x="25" y="67" width="17" height="3" rx="1.5" fill="#aeb8b3"/>
+  <rect x="45" y="66" width="15" height="5" rx="1.5" fill="none" stroke="#3a4743" stroke-width="0.8"/>
+  <!-- usage card -->
+  <rect x="4" y="150" width="62" height="28" rx="4" fill="#1a2120" stroke="#2a3431" stroke-width="0.8"/>
+  <rect x="8" y="155" width="4" height="4" rx="1" fill="#d97757"/>
+  <rect x="15" y="156.3" width="20" height="1.6" rx="0.8" fill="#3a4743"/>
+  <rect x="15" y="156.3" width="13" height="1.6" rx="0.8" fill="#8fb6d8"/>
+  <rect x="40" y="156.3" width="20" height="1.6" rx="0.8" fill="#3a4743"/>
+  <rect x="8" y="166" width="4" height="4" rx="1" fill="#6d7cf0"/>
+  <rect x="15" y="167.3" width="20" height="1.6" rx="0.8" fill="#3a4743"/>
+  <rect x="40" y="167.3" width="20" height="1.6" rx="0.8" fill="#3a4743"/>
+  <rect x="40" y="167.3" width="2" height="1.6" rx="0.8" fill="#8fb6d8"/>
+  <rect x="7" y="185" width="22" height="3" rx="1.5" fill="#56625d"/>
+  <rect x="7" y="192" width="28" height="3" rx="1.5" fill="#3d4945"/>
+  <!-- tab bar -->
+  <rect x="76" y="4" width="46" height="9" rx="3" fill="#1d2523" stroke="#2f3a37" stroke-width="0.8"/>
+  <rect x="79" y="7" width="4" height="3.5" rx="0.8" fill="#d97757"/>
+  <rect x="86" y="7.2" width="30" height="3" rx="1.5" fill="#e8ece9"/>
+  <rect x="127" y="7" width="4" height="3.5" rx="0.8" fill="#d97757"/>
+  <rect x="134" y="7.2" width="28" height="3" rx="1.5" fill="#6b7772"/>
+  <rect x="236" y="5" width="16" height="7" rx="2" fill="#1d2523"/>
+  <rect x="256" y="6.5" width="14" height="3.5" rx="1.7" fill="#6b7772"/>
+  <rect x="274" y="6.5" width="14" height="3.5" rx="1.7" fill="#6b7772"/>
+  <rect x="296" y="7" width="5" height="2.5" fill="#56625d"/><rect x="305" y="6" width="4" height="4" fill="none" stroke="#56625d" stroke-width="0.8"/><path d="M312 6l4 4M316 6l-4 4" stroke="#56625d" stroke-width="0.8"/>
+  <rect x="71" y="17" width="249" height="0.8" fill="#26302d"/>
+  <!-- agent pane -->
+  <rect x="76" y="22" width="150" height="104" rx="5" fill="#141a19" stroke="#8fb6d8" stroke-width="0.9"/>
+  <rect x="81" y="27" width="4" height="4" rx="1" fill="#d97757"/>
+  <rect x="88" y="27.7" width="22" height="2.6" rx="1.3" fill="#c9d1cd"/>
+  <rect x="113" y="27.7" width="50" height="2.6" rx="1.3" fill="#3d4945"/>
+  <rect x="76" y="34" width="150" height="0.7" fill="#26302d"/>
+  <circle cx="83" cy="42" r="1.3" fill="#e8ece9"/>
+  <rect x="87" y="41" width="96" height="2.4" rx="1.2" fill="#c9d1cd"/>
+  <rect x="87" y="46" width="120" height="2.4" rx="1.2" fill="#8e9994"/>
+  <rect x="87" y="51" width="70" height="2.4" rx="1.2" fill="#8e9994"/>
+  <rect x="83" y="58" width="136" height="5" fill="#3a1f22"/><rect x="87" y="59.3" width="90" height="2.4" rx="1.2" fill="#e88a8a"/>
+  <rect x="83" y="63" width="136" height="5" fill="#1d3426"/><rect x="87" y="64.3" width="104" height="2.4" rx="1.2" fill="#8fd6a4"/>
+  <circle cx="83" cy="75" r="1.3" fill="#e8ece9"/>
+  <rect x="87" y="74" width="110" height="2.4" rx="1.2" fill="#c9d1cd"/>
+  <rect x="87" y="79" width="84" height="2.4" rx="1.2" fill="#8e9994"/>
+  <rect x="81" y="92" width="58" height="2.6" rx="1.3" fill="#d98a4e"/>
+  <rect x="81" y="102" width="140" height="0.7" fill="#3a4743"/>
+  <rect x="81" y="106" width="3" height="5" fill="#e8ece9"/>
+  <rect x="81" y="115" width="140" height="0.7" fill="#3a4743"/>
+  <rect x="81" y="119" width="60" height="2.4" rx="1.2" fill="#d96a6a"/>
+  <!-- files panel -->
+  <rect x="231" y="22" width="84" height="104" rx="5" fill="#141a19" stroke="#26302d" stroke-width="0.8"/>
+  <rect x="236" y="27" width="16" height="3" rx="1.5" fill="#e8ece9"/>
+  <rect x="231" y="34" width="84" height="0.7" fill="#26302d"/>
+  <g fill="none" stroke="#8e9994" stroke-width="0.8">
+    <path d="M238 40.5h3l1 1h4v4h-8z"/><path d="M238 49.5h3l1 1h4v4h-8z"/><path d="M238 58.5h3l1 1h4v4h-8z"/><path d="M238 67.5h3l1 1h4v4h-8z"/>
+  </g>
+  <rect x="249" y="42" width="24" height="2.4" rx="1.2" fill="#aeb8b3"/>
+  <rect x="249" y="51" width="16" height="2.4" rx="1.2" fill="#e0b24a"/><rect x="306" y="50.5" width="3" height="3.5" fill="#e0b24a"/>
+  <rect x="249" y="60" width="20" height="2.4" rx="1.2" fill="#8fd6a4"/><rect x="306" y="59.5" width="3" height="3.5" fill="#8fd6a4"/>
+  <rect x="249" y="69" width="26" height="2.4" rx="1.2" fill="#aeb8b3"/>
+  <rect x="249" y="78" width="22" height="2.4" rx="1.2" fill="#6b7772"/>
+  <rect x="249" y="87" width="30" height="2.4" rx="1.2" fill="#6b7772"/>
+  <rect x="249" y="96" width="18" height="2.4" rx="1.2" fill="#6b7772"/>
+  <!-- quick terminal -->
+  <rect x="76" y="131" width="239" height="54" rx="5" fill="#141a19" stroke="#26302d" stroke-width="0.8"/>
+  <rect x="80" y="135" width="30" height="7" rx="2" fill="#1d2523"/>
+  <rect x="83" y="137.5" width="22" height="2.2" rx="1.1" fill="#c9d1cd"/>
+  <path d="M115 136.5v4M113 138.5h4" stroke="#6b7772" stroke-width="0.8"/>
+  <rect x="76" y="145" width="239" height="0.7" fill="#26302d"/>
+  <rect x="81" y="151" width="64" height="2.6" rx="1.3" fill="#aeb8b3"/>
+  <rect x="148" y="150.5" width="3" height="4" fill="#e8ece9"/>
+  <!-- status bar -->
+  <rect x="71" y="190" width="249" height="0.7" fill="#26302d"/>
+  <rect x="78" y="193.5" width="22" height="2.6" rx="1.3" fill="#56625d"/>
+  <rect x="104" y="193.5" width="12" height="2.6" rx="1.3" fill="#56625d"/>
+  <rect x="122" y="192" width="22" height="6" rx="2" fill="#1d2523"/>
+  <rect x="282" y="193.5" width="32" height="2.6" rx="1.3" fill="#3d4945"/>
+</svg>

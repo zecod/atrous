@@ -1,0 +1,1 @@
+{ "place": "none", "title": "Settings", "overlay": { "kind": "dialog", "width": 960, "height": 660 }, "cloned_from": { "name": "frame/settings", "version": "0.1.12" } }
