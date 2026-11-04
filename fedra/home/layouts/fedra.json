@@ -34,16 +34,6 @@
           "min": 90
         },
         {
-          "id": "usage",
-          "type": "block",
-          "content": {
-            "mod": "usage-card"
-          },
-          "size": {
-            "px": 106
-          }
-        },
-        {
           "id": "sidebar-footer",
           "type": "block",
           "content": {
@@ -54,6 +44,16 @@
           },
           "size": {
             "px": 69
+          }
+        },
+        {
+          "id": "usage",
+          "type": "block",
+          "content": {
+            "mod": "usage-card"
+          },
+          "size": {
+            "px": 106
           }
         }
       ],

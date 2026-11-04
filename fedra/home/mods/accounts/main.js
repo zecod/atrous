@@ -267,80 +267,87 @@ export default class Accounts extends View {
   }
 
   // ---- drawing ----
+  // Simple on purpose: a header (tool, title, x), one status line with a short hint, and a
+  // footer bar: "Details" on the left, the buttons on the right. The dialog takes its content's
+  // height (no fixed height), so there is no empty block.
 
   button(t, id, label, onClick, kind, disabled) {
-    return div().id(id).flex_none().px(12).py(6).rounded(7).text_size(13)
+    return div().id(id).flex_none().h(30).px(12).flex().items_center().rounded(7).text_size(12.5).font_medium()
       .when(Boolean(disabled), (el) => el.opacity(0.45))
       .when(!disabled, (el) => el.cursor_pointer().on_click(onClick))
-      .when(kind === "primary", (el) => el.bg(t.accent).text_color(t.accent_foreground).font_medium().when(!disabled, (e) => e.hover((s) => s.opacity(0.9))))
-      .when(kind === "danger", (el) => el.text_color(t.blocked).when(!disabled, (e) => e.hover((s) => s.bg(t.hover))))
-      .when(!kind, (el) => el.border_1().border_color(t.border).bg(t.raised).text_color(t.foreground).when(!disabled, (e) => e.hover((s) => s.bg(t.hover))))
+      .when(kind === "primary", (el) => el.bg(t.solid).text_color(t.solid_foreground).when(!disabled, (e) => e.hover((s) => s.opacity(0.88))))
+      .when(kind === "ghost", (el) => el.text_color(t.muted).when(!disabled, (e) => e.hover((s) => s.bg(t.hover).text_color(t.foreground))))
+      .when(!kind, (el) => el.border_1().border_color(t.border).text_color(t.foreground).when(!disabled, (e) => e.hover((s) => s.bg(t.hover))))
       .child(label);
   }
 
-  badge(t, kind) {
-    const c = kind === "ok" ? t.accent : kind === "bad" ? t.blocked : t.input;
-    const el = div().size(44).flex_none().rounded(22).flex().items_center().justify_center();
-    if (kind === "ok") return el.bg(alpha(c, "24")).child(svg(I("check")).size(20).text_color(c));
-    if (kind === "bad") return el.bg(alpha(c, "24")).child(svg(I("x")).size(20).text_color(c));
-    return el.border_1().border_dashed().border_color(c).child(svg(I("spinner")).size(16).text_color(t.muted).spin(900));
+  // The state as one small mark before the title: a spinner, a check, or an x.
+  mark(t, kind) {
+    const round = (c) => div().size(20).flex_none().rounded_full().bg(alpha(c, "2e")).flex().items_center().justify_center();
+    if (kind === "ok") return round(t.ansi2).child(svg(I("check")).size(12).text_color(t.ansi2));
+    if (kind === "bad") return round(t.blocked).child(svg(I("x")).size(11).text_color(t.blocked));
+    return div().size(20).flex_none().flex().items_center().justify_center().child(svg(I("spinner")).size(15).text_color(t.muted).spin(900));
+  }
+
+  status(t, kind, title, hint) {
+    return h_flex().gap(12).items_start()
+      .child(this.mark(t, kind))
+      .child(v_flex().flex_1().min_w(0).gap(3)
+        .child(div().text_size(14).font_medium().line_height("20px").text_color(t.foreground).child(title))
+        .when(Boolean(hint), (el) => el.child(div().text_size(12.5).line_height("18px").text_color(t.dim).child(hint))));
   }
 
   waiting(t, name) {
     const claude = this.tool === "claude";
-    const linkReady = Boolean(this.url);
-    return v_flex().gap(18)
-      .child(h_flex().gap(14).items_center()
-        .child(this.badge(t, "wait"))
-        .child(v_flex().flex_1().min_w(0).gap(4)
-          .child(div().text_size(14.5).font_medium().text_color(t.foreground).child(this.phase === "starting" ? "Opening your browser…" : `Sign in to ${name} in your browser`))
-          .child(div().text_size(12.5).line_height("18px").text_color(t.dim)
-            .child("Your browser opened. If it's signed in to another account, switch there first or use a private window."))))
-      .when(claude && this.phase === "waiting", (el) => el.child(v_flex().gap(6)
+    return v_flex().gap(14)
+      .child(this.status(t, "wait", this.phase === "starting" ? "Opening your browser…" : `Sign in to ${name} in your browser`,
+        "Signed in to another account there? Switch first, or open the link in a private window."))
+      .when(claude && this.phase === "waiting", (el) => el.child(v_flex().gap(6).pl(32)
         .child(div().text_size(12).text_color(this.codeError ? t.blocked : t.dim)
-          .child(this.codeError ?? (this.sent ? "Code sent. Finishing the sign-in…" : "Did the page show a code instead? Paste it here.")))
+          .child(this.codeError ?? (this.sent ? "Code sent. Finishing the sign-in…" : "Got a code instead? Paste it here.")))
         .child(h_flex().gap(8).items_center()
-          .child(Input.new(this.code).flex_1().min_w(0).h(32).px(10).rounded(7).border_1().border_color(t.input).bg(t.background).text_size(13).text_color(t.foreground))
-          .child(this.button(t, "si-send", "Submit", (_e, cx) => this.sendCode(cx), "primary")))))
-      .child(h_flex().gap(8).items_center()
-        .child(this.button(t, "si-copy", Date.now() - this.copied < 2000 ? "Copied" : "Copy link", (_e, cx) => { cx.write_to_clipboard(this.url); this.copied = Date.now(); cx.notify(); }, null, !linkReady))
-        .child(this.button(t, "si-open", "Open again", (_e, cx) => cx.open_url(this.url), null, !linkReady))
-        .child(div().flex_1())
-        .child(this.button(t, "si-cancel", "Cancel", (_e, cx) => this.cancel(cx), "danger")));
+          .child(Input.new(this.code).flex_1().min_w(0).h(30).px(10).rounded(7).border_1().border_color(t.input).bg(t.background).text_size(13).text_color(t.foreground))
+          .child(this.button(t, "si-send", "Submit", (_e, cx) => this.sendCode(cx))))));
+  }
+
+  waitingButtons(t) {
+    const linkReady = Boolean(this.url);
+    return [
+      this.button(t, "si-copy", Date.now() - this.copied < 2000 ? "Copied" : "Copy link",
+        (_e, cx) => { cx.write_to_clipboard(this.url); this.copied = Date.now(); cx.notify(); }, "ghost", !linkReady),
+      this.button(t, "si-open", "Open again", (_e, cx) => cx.open_url(this.url), "ghost", !linkReady),
+      this.button(t, "si-cancel", "Cancel", (_e, cx) => this.cancel(cx)),
+    ];
   }
 
   success(t) {
-    const st = currentState();
     const a = this.account();
-    const active = a && st.active[a.tool] === a.id;
-    return v_flex().gap(18)
-      .child(h_flex().gap(14).items_center()
-        .child(this.badge(t, "ok"))
-        .child(v_flex().flex_1().min_w(0).gap(4)
-          .child(div().text_size(14.5).font_medium().text_color(t.foreground).child("Signed in"))
-          .child(div().text_size(13).text_color(t.muted).truncate().child([this.email ?? displayName(a), this.plan].filter(Boolean).join(" · ")))))
-      .child(h_flex().gap(8).items_center()
-        .child(div().flex_1())
-        .when(!active, (el) => el.child(this.button(t, "si-use", "Use for new agents", (_e, cx) => this.done(cx, true), "primary")))
-        .child(this.button(t, "si-done", "Done", (_e, cx) => this.done(cx, false), active ? "primary" : null)));
+    return this.status(t, "ok", "Signed in", [this.email ?? displayName(a), this.plan].filter(Boolean).join(" · "));
+  }
+
+  successButtons(t) {
+    const a = this.account();
+    const active = a && currentState().active[a.tool] === a.id;
+    return active
+      ? [this.button(t, "si-done", "Done", (_e, cx) => this.done(cx, false), "primary")]
+      : [this.button(t, "si-done", "Done", (_e, cx) => this.done(cx, false)),
+         this.button(t, "si-use", "Use for new agents", (_e, cx) => this.done(cx, true), "primary")];
   }
 
   failure(t) {
-    return v_flex().gap(18)
-      .child(h_flex().gap(14).items_center()
-        .child(this.badge(t, "bad"))
-        .child(v_flex().flex_1().min_w(0).gap(4)
-          .child(div().text_size(14.5).font_medium().text_color(t.foreground).child("The sign-in didn't finish"))
-          .child(div().text_size(12.5).line_height("18px").text_color(t.muted).child(this.reason ?? ""))))
-      .child(h_flex().gap(8).items_center()
-        .child(div().flex_1())
-        .child(this.button(t, "si-close", "Close", (_e, cx) => this.closeAfterFailure(cx)))
-        .child(this.button(t, "si-retry", "Try again", (_e, cx) => this.tryAgain(cx), "primary")));
+    return this.status(t, "bad", "The sign-in didn't finish", this.reason ?? "");
+  }
+
+  failureButtons(t) {
+    return [
+      this.button(t, "si-close", "Close", (_e, cx) => this.closeAfterFailure(cx)),
+      this.button(t, "si-retry", "Try again", (_e, cx) => this.tryAgain(cx), "primary"),
+    ];
   }
 
   detailsBox(t) {
     const lines = String(this.screen ?? "").split(/\r?\n/).map((l) => l.replace(/\s+$/, "")).filter((l, i, all) => l || (i > 0 && all[i - 1]));
-    return div().id("si-log").h(160).p(10).rounded(8).border_1().border_color(t.border).bg(t.background).overflow_y_scroll()
+    return div().id("si-log").h(140).p(10).rounded(8).border_1().border_color(t.border).bg(t.background).overflow_y_scroll()
       .child(v_flex().children((lines.length ? lines.slice(-40) : ["(nothing yet)"]).map((l) =>
         div().font_family("JetBrains Mono").text_size(11).line_height("16px").text_color(t.muted).child(l.length > 220 ? `${l.slice(0, 220)}…` : l || " "))));
   }
@@ -349,24 +356,35 @@ export default class Accounts extends View {
     if (this.role !== "signin") return div();
     const t = theme();
     const name = TOOLS[this.tool]?.name ?? "the tool";
-    const body = this.phase === "success" ? this.success(t) : this.phase === "failure" ? this.failure(t) : this.phase === "closing"
-      ? h_flex().gap(8).items_center().child(svg(I("spinner")).size(14).text_color(t.muted).spin(900)).child(div().text_size(13).text_color(t.muted).child("Closing…"))
+    const closing = this.phase === "closing";
+    const body = this.phase === "success" ? this.success(t)
+      : this.phase === "failure" ? this.failure(t)
+      : closing ? this.status(t, "wait", "Closing…", null)
       : this.waiting(t, name);
-    return v_flex().id("signin").track_focus(this.handle).size_full().bg(t.popover).px(24).pt(18).pb(16).gap(18)
-      .child(h_flex().gap(10).items_center()
-        .child(image(TOOLS[this.tool]?.icon ?? "icons/agent.svg").size(18).flex_none())
-        .child(div().flex_1().text_size(13).font_semibold().text_color(t.muted).child(this.fresh ? `New ${name} account` : `${name} · ${displayName(this.account())}`))
+    const buttons = this.phase === "success" ? this.successButtons(t)
+      : this.phase === "failure" ? this.failureButtons(t)
+      : closing ? [] : this.waitingButtons(t);
+    return v_flex().id("signin").track_focus(this.handle).w_full().bg(t.popover)
+      // header
+      .child(h_flex().px(20).pt(14).gap(10).items_center()
+        .child(image(TOOLS[this.tool]?.icon ?? "icons/agent.svg").size(16).flex_none())
+        .child(div().flex_1().text_size(13).font_semibold().text_color(t.foreground)
+          .child(this.fresh ? `Add a ${name} account` : `${name} · ${displayName(this.account())}`))
         .child(div().id("si-hide").size(24).flex_none().flex().items_center().justify_center().rounded(6).cursor_pointer()
           .text_color(t.dim).hover((s) => s.bg(t.hover).text_color(t.foreground))
           .tooltip(this.phase === "waiting" ? "Hide: the sign-in keeps waiting for your browser" : "Close")
           .on_click((_e, cx) => (this.phase === "failure" ? this.closeAfterFailure(cx) : this.phase === "success" ? this.done(cx, false) : this.close()))
-          .child(svg(I("x")).size(13))))
-      // The dialog keeps its size: the details take the body's place while shown.
-      .child(this.details ? this.detailsBox(t) : body)
-      .child(div().flex_1())
-      .child(h_flex().items_center()
-        .child(div().id("si-details").text_size(12).text_color(t.dim).cursor_pointer().hover((s) => s.text_color(t.foreground))
+          .child(svg(I("x")).size(12))))
+      // body
+      .child(v_flex().px(20).pt(16).pb(20).gap(12)
+        .child(body)
+        .when(this.details, (el) => el.child(this.detailsBox(t))))
+      // footer
+      .child(h_flex().px(16).py(10).gap(6).items_center().border_t(1).border_color(t.border)
+        .child(div().id("si-details").px(4).text_size(12).text_color(t.dim).cursor_pointer().hover((s) => s.text_color(t.foreground))
           .on_click((_e, cx) => { this.details = !this.details; cx.notify(); this.poll(cx); })
-          .child(this.details ? "Hide details" : "Show details")));
+          .child(this.details ? "Hide details" : "Details"))
+        .child(div().flex_1())
+        .children(buttons));
   }
 }

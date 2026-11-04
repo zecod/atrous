@@ -565,7 +565,7 @@ export default class UsageCard extends View {
         }));
     }
     return sized(v_flex().id("usage")).size_full().bg(t.chrome).px(8).pt(4).pb(8)
-      .child(v_flex().id("usage-card").flex_1().p(10).gap(10).rounded(10).border_1().border_color(t.border).bg(t.raised)
+      .child(v_flex().id("usage-card").flex_1().p(10).gap(10).rounded(10).border_1().border_color(t.border).bg("#00000000") // transparent: the sidebar shows through
         .child(h_flex().h(20).gap(2).items_center()
           .child(this.iconButton("usage-refresh", "rotate-cw", busy ? "Updating…" : "Refresh (each Claude account at most every 5 minutes)", t, (_e, cx) => this.pass(cx, { manual: true }), busy))
           .child(this.iconButton("usage-fold", this.collapsed ? "chevron-right" : "chevron-down", this.collapsed ? "Expand" : "Collapse", t, (_e, cx) => this.toggle(cx)))

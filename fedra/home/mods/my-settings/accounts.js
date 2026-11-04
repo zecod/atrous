@@ -247,7 +247,7 @@ export class AccountsPage extends View {
     this.menu = null;
     const L = this.logins[key];
     this.logins[key] = { address: L?.address ?? null, seen: L?.seen ?? false, since: Date.now(), fresh: Boolean(fresh || a.pending), done: false };
-    openOverlay({ mod: "accounts", kind: "dialog", modal: true, width: 520, height: 290, props: { role: "signin", tool: a.tool, id: a.id, fresh: Boolean(fresh || a.pending) } });
+    openOverlay({ mod: "accounts", kind: "dialog", modal: true, width: 480, props: { role: "signin", tool: a.tool, id: a.id, fresh: Boolean(fresh || a.pending) } });
     cx.notify();
   }
 
