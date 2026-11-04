@@ -412,8 +412,7 @@ export default class UsageCard extends View {
     if (!gs.length) return frame + 16;
     if (this.collapsed) return frame + gs.length * 18 + 6 * (gs.length - 1);
     const body = (u) => (u.rows?.length ? u.rows.length * 16 + (u.rows.length - 1) * 4 : 16);
-    const others = (g) => (g.others.length ? 6 + g.others.length * 18 + (g.others.length - 1) * 4 : 0);
-    return frame + gs.reduce((s, g) => s + 18 + 6 + body(g.au) + others(g), 0) + 10 * (gs.length - 1);
+    return frame + gs.reduce((s, g) => s + 18 + 6 + body(g.au), 0) + 10 * (gs.length - 1);
   }
 
   // Commands don't run from render(): called after a refresh, a fold, and when the block's size changes.
@@ -478,30 +477,15 @@ export default class UsageCard extends View {
     return `${TOOLS[g.tool].short}${name}${u.plan ? ` · ${u.plan}` : ""}: ${u.rows.map((r) => `${r.label} ${r.pct == null ? "—" : `${Math.round(r.pct)}%`}`).join(", ")}${f ? ` (${f})` : ""}`;
   }
 
-  // The tool's icon, the active account's name when there are several, and its pair of limits.
+  // The tool's icon and its pair of limits (the active account's; its name is in the tooltip).
   compactRow(t, g) {
     const u = g.au;
     const text = u.rows?.length ? null : u.fetching ? "Updating…" : u.error ?? u.note ?? "Reading…";
     return h_flex().id(`compact-${g.tool}`).h(18).gap(8).items_center().text_size(11.5)
       .tooltip(this.summary(g, g.active, u))
       .child(image(TOOLS[g.tool].icon).w(14).h(14).flex_none())
-      .when(g.multi, (el) => el.child(div().max_w(72).flex_none().truncate().font_medium().text_color(t.muted).child(shortName(g.active, u.who))))
       .when(Boolean(text), (el) => el.child(div().flex_1().min_w(0).truncate().text_color(u.error ? t.blocked : t.dim).child(text)))
-      .when(!text, (el) => el.children(this.bars(t, g.tool, u, g.multi)));
-  }
-
-  // Another logged-in account: its name and its pair of limits; a click makes it active.
-  otherRow(t, g, a) {
-    const u = g.usage[keyOf(a)] ?? {};
-    const text = u.rows?.length ? null : u.fetching ? "Updating…" : u.error ?? u.note ?? "No numbers yet";
-    return h_flex().id(`other-${keyOf(a)}`).h(18).gap(8).items_center().text_size(11.5).rounded(4).cursor_pointer()
-      .hover((s) => s.bg(t.hover))
-      .tooltip(`${this.summary(g, a, u)}\nClick: new ${TOOLS[g.tool].name} agents start on ${displayName(a, u.who)}`)
-      .on_click((_e, cx) => this.use(a, cx))
-      .child(div().w(14).flex_none().flex().justify_center().child(div().size(6).rounded(3).border_1().border_color(t.dim)))
-      .child(div().w(64).flex_none().truncate().text_color(t.muted).child(shortName(a, u.who)))
-      .when(Boolean(text), (el) => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(text)))
-      .when(!text, (el) => el.children(this.bars(t, g.tool, u, true)));
+      .when(!text, (el) => el.children(this.bars(t, g.tool, u, false)));
   }
 
   section(t, g) {
@@ -513,17 +497,12 @@ export default class UsageCard extends View {
       .child(h_flex().h(18).gap(7).items_center()
         .child(image(TOOLS[g.tool].icon).w(14).h(14).flex_none())
         .child(div().flex_none().text_size(12.5).font_semibold().text_color(t.foreground).child(TOOLS[g.tool].short))
-        .when(g.multi, (el) => el.child(div().id(`acct-${g.tool}`).min_w(0).truncate().text_size(12).font_medium().text_color(t.muted).cursor_pointer()
-          .hover((s) => s.text_color(t.foreground)).tooltip(`New agents start on ${displayName(g.active, u.who)} · open Accounts`)
-          .on_click(() => openOverlay({ mod: "my-settings", kind: "dialog", width: 960, height: 660, props: { section: "accounts" } }))
-          .child(shortName(g.active, u.who))))
         .when(Boolean(u.plan), (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(u.plan)))
         .child(div().flex_1())
         .when(Boolean(fresh), (el) => el.child(div().flex_none().text_size(10.5).text_color(t.dim).child(fresh))))
       .child(text
         ? div().h(16).text_size(11.5).text_color(u.error ? t.blocked : t.dim).truncate().child(text)
-        : v_flex().gap(4).children(rows.map((r, n) => this.bar(t, { ...r, key: `${g.tool}-${n}` }))))
-      .when(g.others.length > 0, (el) => el.child(v_flex().gap(4).children(g.others.map((a) => this.otherRow(t, g, a)))));
+        : v_flex().gap(4).children(rows.map((r, n) => this.bar(t, { ...r, key: `${g.tool}-${n}` }))));
   }
 
   iconButton(id, icon, tip, t, action, spin) {
@@ -565,7 +544,7 @@ export default class UsageCard extends View {
         }));
     }
     return sized(v_flex().id("usage")).size_full().bg(t.chrome).px(8).pt(4).pb(8)
-      .child(v_flex().id("usage-card").flex_1().p(10).gap(10).rounded(10).border_1().border_color(t.border).bg("#00000000") // transparent: the sidebar shows through
+      .child(v_flex().id("usage-card").flex_1().p(10).gap(10).rounded(10).border_1().border_color(t.border).bg(t.raised)
         .child(h_flex().h(20).gap(2).items_center()
           .child(this.iconButton("usage-refresh", "rotate-cw", busy ? "Updating…" : "Refresh (each Claude account at most every 5 minutes)", t, (_e, cx) => this.pass(cx, { manual: true }), busy))
           .child(this.iconButton("usage-fold", this.collapsed ? "chevron-right" : "chevron-down", this.collapsed ? "Expand" : "Collapse", t, (_e, cx) => this.toggle(cx)))
