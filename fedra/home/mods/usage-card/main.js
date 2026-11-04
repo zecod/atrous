@@ -407,7 +407,7 @@ export default class UsageCard extends View {
   // The block's height for what's shown, kept in sync with the drawing below.
   needed(narrow) {
     const gs = this.groups();
-    if (narrow) return gs.length ? 12 + gs.length * 34 : 0;
+    if (narrow) return gs.length ? 12 + gs.length * 46 + 4 * (gs.length - 1) : 0;
     const frame = 12 + 2 + 20 + 20 + 10; // outer padding, border, card padding, header + gap
     if (!gs.length) return frame + 16;
     if (this.collapsed) return frame + gs.length * 18 + 6 * (gs.length - 1);
@@ -546,9 +546,20 @@ export default class UsageCard extends View {
       // The rail: each tool's icon and the active account's most-used limit.
       return sized(v_flex().id("usage")).size_full().bg(t.chrome).pt(4).pb(8).gap(4).items_center().cursor_pointer()
         .tooltip("Refresh usage").on_click((_e, cx) => this.pass(cx, { manual: true }))
-        .children(gs.map((g) => v_flex().h(30).items_center().gap(2)
-          .child(image(TOOLS[g.tool].icon).w(14).h(14))
-          .child(div().text_size(10).text_color(t.muted).child(g.au.rows?.length ? `${Math.round(Math.max(0, ...g.au.rows.map((r) => r.pct ?? 0)))}%` : "!"))));
+        .children(gs.map((g) => {
+          // A ring around the logo filled to the limit that matters now: Claude's 5-hour session
+          // while one runs, else its week; Codex's 5 hours, else its week (pairRows' first).
+          const r = pairRows(g.tool, g.au.rows)[0] ?? null;
+          const pct = r?.pct == null ? null : Math.max(0, Math.min(100, Math.round(r.pct)));
+          const color = pct == null ? t.dim : pct >= 90 ? t.blocked : pct >= 70 ? t.ansi3 : t.ansi2;
+          return v_flex().id(`rail-usage-${g.tool}`).h(46).items_center().gap(2)
+            .tooltip(r ? `${TOOLS[g.tool].name} · ${r.label} ${pct}%` : TOOLS[g.tool].name)
+            .child(div().relative().size(28).flex_none()
+              .child(svg("mods/usage-card/rings/track.svg").absolute().left(0).top(0).size(28).text_color(t.border))
+              .when(pct != null, (el) => el.child(svg(`mods/usage-card/rings/p${pct}.svg`).absolute().left(0).top(0).size(28).text_color(color)))
+              .child(div().absolute().left(7).top(7).size(14).child(image(TOOLS[g.tool].icon).w(14).h(14))))
+            .child(div().text_size(10).text_color(pct == null ? t.dim : t.muted).child(pct == null ? "!" : `${pct}%`));
+        }));
     }
     return sized(v_flex().id("usage")).size_full().bg(t.chrome).px(8).pt(4).pb(8)
       .child(v_flex().id("usage-card").flex_1().p(10).gap(10).rounded(10).border_1().border_color(t.border).bg(t.raised)
@@ -565,38 +576,3 @@ export default class UsageCard extends View {
         .when(!this.collapsed, (el) => el.children(gs.map((g) => this.section(t, g)))));
   }
 }
-
-// >>> PERF-PROBE (temporary, remove) >>>
-import { writeTextFile as __pwrite, appHome as __phome, props as __pprops } from "herdr";
-import * as __pfs from "fs/promises";
-{
-  const P = UsageCard.prototype, r0 = P.render, i0 = P.init;
-  const dir = `${String(__phome()).replace(/\\/g, "/")}/data/zz-perf-probe`;
-  P.render = function (cx) {
-    const S = this.__probe ??= { renders: 0, ms: 0, max: 0, slow: 0 };
-    const t = Date.now();
-    try { return r0.call(this, cx); }
-    finally { const d = Date.now() - t; S.renders++; S.ms += d; if (d > S.max) S.max = d; if (d >= 16) S.slow++; }
-  };
-  P.init = function (props, cx) {
-    const out = i0 ? i0.call(this, props, cx) : undefined;
-    const S = this.__probe ??= { renders: 0, ms: 0, max: 0, slow: 0 };
-    let label = "";
-    try { const p = __pprops() ?? {}; label = p.part ?? (p.footer ? "footer" : "") ?? ""; } catch {}
-    const id = `usage-card${label ? "-" + label : ""}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
-    const born = Date.now();
-    let last = null;
-    cx.timer.every(5000, (cx) => {
-      cx.spawn(async () => {
-        try {
-          await __pfs.mkdir(dir, { recursive: true }).catch(() => {});
-          const text = JSON.stringify({ mod: "usage-card", label, id, born, at: Date.now(), ...S });
-          await __pwrite(`${dir}/${id}.json`, text, last);
-          last = text;
-        } catch {}
-      });
-    });
-    return out;
-  };
-}
-// <<< PERF-PROBE <<<

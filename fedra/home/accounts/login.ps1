@@ -1,26 +1,22 @@
-# herdr accounts: the terminal behind Settings > Accounts' login dialog.
-#   powershell.exe -NoProfile -ExecutionPolicy Bypass -File login.ps1 <claude|codex> <account folder> [name]
-# Runs `claude auth login` (CLAUDE_CONFIG_DIR = the folder) or `codex login` (CODEX_HOME = the
-# folder), so the login is saved in that account's folder only. Logged in: says so and ends after
-# two seconds (the dialog closes with it). Not logged in (cancelled in the browser, an error): says
-# so and waits for Enter. Settings watches this terminal: a new account whose login didn't finish is
-# removed again. ASCII only (Windows PowerShell 5.1 reads files without a BOM as ANSI).
-param([string]$Tool, [string]$Dir, [string]$Name)
+# herdr accounts: the sign-in behind Settings > Accounts (Windows; the macOS / Linux twin is login.sh).
+#   powershell.exe -NoProfile -ExecutionPolicy Bypass -File login.ps1 <claude|codex> <account folder>
+# Started in a background herdr-core terminal named login-<tool>-<id> by the sign-in dialog
+# (mods/accounts), which reads this terminal (`hc read`: the sign-in link, Claude Code's code prompt)
+# and its exit code (`hc get`), and types a pasted code into it (`hc send`). Nobody needs to look at
+# this terminal; it ends by itself:
+# - runs `claude auth login` (CLAUDE_CONFIG_DIR = the folder) or `codex login` (CODEX_HOME = the
+#   folder), so the login lands in that account's folder only;
+# - then exits 0 when the account is logged in, else 1, after a last line "herdr-login: ok|failed".
+# It never waits for a key: closing the dialog doesn't end the sign-in; only Cancel does (it kills
+# this terminal). Only one `codex login` can run at a time (a second one cancels the first: they share
+# localhost:1455), so the dialog refuses to start a second sign-in of the same tool.
+# ASCII only (Windows PowerShell 5.1 reads files without a BOM as ANSI).
+param([string]$Tool, [string]$Dir)
 
-$label = if ($Tool -eq 'codex') { 'Codex' } else { 'Claude Code' }
 if (-not $Dir -or -not (Test-Path -LiteralPath (Join-Path $Dir '.herdr-account.json'))) {
-  Write-Host "This account's folder is missing." -ForegroundColor Red
-  Read-Host 'Press Enter to close' | Out-Null
+  Write-Host "herdr-login: failed (the account's folder is missing)"
   exit 1
 }
-$what = if ($Name) { "$label ($Name)" } else { $label }
-try { $Host.UI.RawUI.WindowTitle = "Log in to $what" } catch { }
-
-Write-Host ''
-Write-Host "  Log in to $what" -ForegroundColor Cyan
-Write-Host '  Your browser opens next. If it is signed in to your main account, switch account'
-Write-Host '  there first (or open the link in a private window), then approve.'
-Write-Host ''
 
 if ($Tool -eq 'codex') {
   $env:CODEX_HOME = $Dir
@@ -31,14 +27,9 @@ if ($Tool -eq 'codex') {
   & claude auth login
   & claude auth status --json *> $null
 }
-$ok = ($LASTEXITCODE -eq 0)
-
-Write-Host ''
-if ($ok) {
-  Write-Host '  Logged in. This window closes in a moment.' -ForegroundColor Green
-  Start-Sleep -Seconds 2
+if ($LASTEXITCODE -eq 0) {
+  Write-Host 'herdr-login: ok'
   exit 0
 }
-Write-Host '  Not logged in. Close this window; the new account is not kept.' -ForegroundColor Yellow
-Read-Host '  Press Enter to close' | Out-Null
+Write-Host 'herdr-login: failed'
 exit 1

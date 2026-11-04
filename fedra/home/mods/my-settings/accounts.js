@@ -10,20 +10,20 @@
 // launch at once.
 //
 // Adding an account: `node accounts/profile.mjs create` makes its folder, the state gets
-// { pending: true } (never active, never shown by the card), and a dialog over Settings runs
-// accounts/login.ps1 in a terminal named login-<tool>-<id>. This page watches that terminal and the
-// account's credential file:
+// { pending: true } (never active, never shown by the card), and the sign-in dialog (mods/accounts,
+// role "signin") runs the tool's login in a background terminal named login-<tool>-<id> and walks
+// the person through it. The login doesn't depend on any window: hiding the dialog or closing
+// Settings leaves it waiting for the browser. This page only watches (that terminal by name, the
+// account's credentials) and never removes an account by itself:
 // - credentials appear: pending goes, "Logged in as <email>" shows with a button to use it;
-// - the terminal ends without them (cancelled in the browser, the dialog's x, Cancel here): the
-//   account is removed again (state first, then the folder; links are deleted as links), and a quiet
-//   "Login cancelled" shows;
-// - Settings closed meanwhile: on the next open, a pending account whose login terminal is still
-//   running shows as waiting again; one without it offers Finish login / Discard.
+// - the sign-in runs: the row says so, with Open (the dialog again) and Cancel;
+// - it ended without credentials (the dialog shows why): the row offers Finish login / Discard.
+// An account is removed only by Cancel, Discard, Remove, or Close in the dialog after a failure.
 // Removing an account: state first (no new agent starts on it), then its folder.
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Popover } from "gpui-base";
-import { exec, hc, home, theme, shared, terminals, openOverlay, run, window } from "herdr";
+import { exec, hc, theme, shared, terminals, openOverlay, run } from "herdr";
 import { TOOLS, TOOL_KEYS, keyOf, readState, updateState, publish, currentState, setActive, accountsOf, activeOf, readLogin, readEmail, pairRows, displayName, accountsDir } from "./accounts-core.js";
 
 const I = (name) => `mods/my-settings/${name}.svg`;
@@ -106,6 +106,16 @@ export class AccountsPage extends View {
       const { st } = await readState();
       publish(st);
       const live = st.accounts.some((a) => a.id !== "default") ? await this.liveTerminals() : [];
+      // Finished sign-in terminals (the dialog keeps them for its details) whose account no longer
+      // waits for a sign-in: tidy them away.
+      try {
+        const all = await hc(["ls", "--all", "--json"]);
+        for (const t of JSON.parse(all.stdout).terminals ?? []) {
+          const m = /^login-(claude|codex)-(.+)$/.exec(t.name ?? "");
+          if (!m || t.state === "live") continue;
+          if (!st.accounts.find((x) => x.tool === m[1] && x.id === m[2])?.pending) hc(["rm", t.address]).catch(() => null);
+        }
+      } catch {}
       const emails = {};
       const finished = [];
       for (const a of st.accounts) {
@@ -159,12 +169,15 @@ export class AccountsPage extends View {
     } else if (this.ticks % 10 === 0) this.load(cx);
   }
 
-  // A running login: credentials appeared (done), or the terminal ended without them (cancelled).
+  // A running sign-in: credentials appeared (done), or its terminal ended without them (the row
+  // then offers Finish login / Discard; nothing is removed here).
   async checkLogin(key, liveList, cx) {
     const L = this.logins[key];
     const a = currentState().accounts.find((x) => keyOf(x) === key);
     if (!L) return;
     if (!a) { delete this.logins[key]; return; }
+    const t = (liveList ?? []).find((x) => x.name === loginName(a) || (L.address && x.address === L.address));
+    if (t) { L.address = t.address; L.seen = true; }
     if (!L.done) {
       const login = await readLogin(a).catch(() => ({ state: "out" }));
       if (login.state === "in") {
@@ -182,12 +195,9 @@ export class AccountsPage extends View {
       }
     }
     if (!liveList) return; // hc didn't answer: decide next time
-    const live = liveList.some((t) => t.address === L.address);
-    if (live || Date.now() - L.since < 4000) return;
+    // Ended: it was seen running and is gone, or it never showed up within 20 s.
+    if (t || (!L.seen && Date.now() - L.since < 20000)) return;
     delete this.logins[key];
-    if (L.done) return;
-    if (L.fresh) await this.discard(a, cx);
-    this.notes[a.tool] = { kind: "cancel", text: "Login cancelled", at: Date.now() };
   }
 
   // ---- actions ----
@@ -229,48 +239,34 @@ export class AccountsPage extends View {
     });
   }
 
-  // A dialog over Settings: a title bar (mods/accounts) and a terminal running login.ps1 for the
-  // account's folder. It closes when that terminal ends: by itself after a login, else with Enter
-  // or the bar's x. `fresh`: a new account, removed again if the login doesn't finish.
+  // The sign-in dialog (mods/accounts): it starts the tool's login in a background terminal, or
+  // follows the one already running for this account. `fresh`: a new account, which the dialog
+  // removes again only on Cancel or on Close after a failure.
   async startLogin(a, fresh, cx) {
     const key = keyOf(a);
     this.menu = null;
-    try {
-      let address = this.liveLogin(a, await this.liveTerminals())?.address;
-      if (!address) {
-        const r = await hc(["run", "--bg", "--json", "--no-parent", "--no-notify", "--rm", "--name", loginName(a), "--cwd", home(), "--",
-          // login.ps1 on Windows, its twin login.sh on macOS / Linux.
-          ...(window()?.platform === "windows"
-            ? ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", `${accountsDir()}/login.ps1`]
-            : ["sh", `${accountsDir()}/login.sh`]),
-          a.tool, a.dir, a.pending ? "" : displayName(a, this.info[key]?.email)]);
-        if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim() || "Couldn't open the login window.");
-        address = JSON.parse(r.stdout).address;
-      }
-      this.logins[key] = { address, since: Date.now(), fresh, done: false };
-      openOverlay({
-        kind: "dialog",
-        modal: true,
-        width: 760,
-        height: 460,
-        layout: {
-          type: "column",
-          children: [
-            { type: "block", size: { px: 34 }, content: { mod: "accounts", props: { role: "titlebar", terminal: address, title: `Log in to ${TOOLS[a.tool].name}` } } },
-            { type: "block", content: { terminal: address } },
-          ],
-        },
-      });
-    } catch (e) {
-      if (fresh) await this.discard(a, cx);
-      this.notes[a.tool] = { kind: "error", text: String(e?.message ?? e), at: Date.now() };
-    }
+    const L = this.logins[key];
+    this.logins[key] = { address: L?.address ?? null, seen: L?.seen ?? false, since: Date.now(), fresh: Boolean(fresh || a.pending), done: false };
+    openOverlay({ mod: "accounts", kind: "dialog", modal: true, width: 520, height: 290, props: { role: "signin", tool: a.tool, id: a.id, fresh: Boolean(fresh || a.pending) } });
     cx.notify();
   }
 
-  cancelLogin(a) {
-    const L = this.logins[keyOf(a)];
-    if (L) run("terminal.kill", { terminal: L.address });
+  // Ends the running sign-in; a new account goes with it.
+  cancelLogin(a, cx) {
+    const key = keyOf(a);
+    this.busy[key] = "cancelling";
+    cx.notify();
+    cx.spawn(async (cx) => {
+      const t = this.liveLogin(a, await this.liveTerminals());
+      if (t) {
+        await hc(["kill", t.address]).catch(() => null);
+        await hc(["rm", t.address]).catch(() => null);
+      }
+      delete this.logins[key];
+      if (a.pending) await this.discard(a, cx);
+      delete this.busy[key];
+      cx.notify();
+    });
   }
 
   // Out of the state first (no new agent starts on it), then its folder (profile.mjs deletes the
@@ -468,8 +464,8 @@ export class AccountsPage extends View {
     const plan = info.plan || u?.plan || "";
 
     let second = null;
-    if (waiting) second = h_flex().gap(6).items_center().child(this.spinner(t)).child(div().text_size(12).text_color(t.muted).child("Waiting for you to log in…"));
-    else if (unfinished) second = div().text_size(12).text_color(t.dim).child("The login didn't finish");
+    if (waiting) second = h_flex().gap(6).items_center().child(this.spinner(t)).child(div().text_size(12).text_color(t.muted).child("Waiting for you to sign in…"));
+    else if (unfinished) second = div().text_size(12).text_color(t.dim).child("The sign-in didn't finish");
     else if (checking) second = h_flex().gap(6).items_center().child(this.spinner(t)).child(div().text_size(12).text_color(t.muted).child("Checking…"));
     else if (login && !login.done) second = h_flex().gap(6).items_center().child(this.spinner(t)).child(div().text_size(12).text_color(t.muted).child("Logging in…"));
     else if (info.state === "expired") second = div().text_size(12).text_color(t.blocked).child(email ? `${email} · login expired` : "Login expired");
@@ -496,13 +492,16 @@ export class AccountsPage extends View {
 
     // Right: what can be done now.
     const right = h_flex().flex_none().gap(8).items_center();
-    if (this.busy[key]) right.child(this.spinner(t)).child(div().text_size(12).text_color(t.muted).child("Removing…"));
+    if (this.busy[key]) right.child(this.spinner(t)).child(div().text_size(12).text_color(t.muted).child(this.busy[key] === "cancelling" ? "Cancelling…" : "Removing…"));
     else if (edit?.action === "rename") right.child(this.smallButton(t, `ac-rn-cancel-${key}`, "Cancel", (_e, cx) => this.cancelEdit(cx))).child(this.smallButton(t, `ac-rn-save-${key}`, "Save", (_e, cx) => this.saveRename(cx), "primary"));
     else if (edit?.action === "remove") {
       right.child(div().text_size(12.5).text_color(t.muted).child(running ? `${running} agent${running === 1 ? " uses" : "s use"} it. Remove?` : "Remove this account?"))
         .child(this.smallButton(t, `ac-rm-cancel-${key}`, "Cancel", (_e, cx) => this.cancelEdit(cx)))
         .child(this.smallButton(t, `ac-rm-go-${key}`, "Remove", (_e, cx) => this.remove(a, cx), "danger"));
-    } else if (waiting) right.child(this.smallButton(t, `ac-wait-cancel-${key}`, "Cancel", () => this.cancelLogin(a)));
+    } else if (waiting) {
+      right.child(this.smallButton(t, `ac-wait-cancel-${key}`, "Cancel", (_e, cx) => this.cancelLogin(a, cx)))
+        .child(this.smallButton(t, `ac-wait-open-${key}`, "Open", (_e, cx) => this.startLogin(a, true, cx), "primary"));
+    }
     else if (unfinished) {
       right.child(this.smallButton(t, `ac-discard-${key}`, "Discard", (_e, cx) => cx.spawn(async (cx) => { await this.discard(a, cx); cx.notify(); })))
         .child(this.smallButton(t, `ac-finish-${key}`, "Finish login", (_e, cx) => cx.spawn(async (cx) => this.startLogin(a, true, cx)), "primary"));

@@ -1,7 +1,7 @@
 // Accounts core: the multi-account state, read and written the same way by the usage card
 // (fetches limits, switches automatically) and Settings > Accounts (manages accounts).
 // A mod can't import from another mod's folder: this file is kept identical in
-// mods/usage-card/ and mods/my-settings/. Change both.
+// mods/usage-card/, mods/my-settings/ and mods/accounts/ (the sign-in dialog). Change all three.
 //
 // ONE SOURCE OF TRUTH: ~/.config/herdr-app/accounts/state.json, also read by accounts/launch.ps1
 // at every agent launch:

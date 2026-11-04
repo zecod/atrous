@@ -17,7 +17,7 @@ const out = path.join(here, "home");
 
 const MODS = [
   "accounts", "add-project", "agent-menu", "browser-panel", "my-chrome", "my-files", "my-menu",
-  "my-new-menu", "my-pane", "my-settings", "my-spaces", "my-status", "my-tabs", "my-worktree",
+  "my-new-menu", "my-pane", "my-settings", "my-spaces", "my-status", "my-tabs", "my-worktree", "open-in",
   "snap-split", "usage-card", "usage-stats",
 ];
 const SKIP = (name) => name === "gpui-kit.d.ts" || name === "jsconfig.json" || name === "node_modules"

@@ -127,7 +127,7 @@ export default class WorkspaceStatus extends View {
   // ---- the layout file: only the quick-terminal node and its terminal block ----
 
   async editLayout(mutate) {
-    const name = shared("layout") ?? "my-main";
+    const name = shared("layout") ?? "fedra";
     const path = `${appHome()}/layouts/${name}.json`;
     for (let attempt = 0; attempt < 3; attempt++) {
       const text = await readTextFile(path);
@@ -322,6 +322,25 @@ export default class WorkspaceStatus extends View {
       .child(button("qt-hide", "x", "Hide (Ctrl+`)", () => run("my-status.hide")));
   }
 
+  // Tokens per second of an agent's last finished turn (published by my-spaces as shared
+  // "agents.speed"): the agent you're looking at, else the one that finished last.
+  speedLine(list) {
+    const speeds = shared("agents.speed") ?? {};
+    const f = focused();
+    const here = list.find((a) => a.address === f?.agent) ?? list.find((a) => a.focused);
+    let addr = here && speeds[here.address] ? here.address : null;
+    if (!addr) addr = Object.keys(speeds).filter((k) => list.some((a) => a.address === k))
+      .sort((x, y) => (speeds[y].endedAt ?? 0) - (speeds[x].endedAt ?? 0))[0] ?? null;
+    if (!addr) return null;
+    const s = speeds[addr], a = list.find((x) => x.address === addr);
+    const secs = (ms) => (ms >= 60000 ? `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s` : `${((ms ?? 0) / 1000).toFixed(1)}s`);
+    const who = a ? (a.title || a.program?.name || addr) : addr;
+    return {
+      label: here && here.address === addr ? s.label : `${s.label} · ${who}`,
+      tip: `${who}: last turn ${s.outputTokens ?? 0} output tokens in ${secs(s.modelMs)} of model time (${secs(s.wallMs)} in all)`,
+    };
+  }
+
   render(_cx) {
     const t = theme();
     const part = props()?.part;
@@ -331,6 +350,7 @@ export default class WorkspaceStatus extends View {
     const list = agents();
     const needs = list.filter(a => a.status === "blocked").length;
     const open = this.visible();
+    const speed = this.speedLine(list);
     const qt = find(layout(), "quick-terminal");
     this.shownNow = Boolean(qt) && !qt.hidden;
     if (open || this.shownNow) this.followSoon(_cx);
@@ -340,6 +360,8 @@ export default class WorkspaceStatus extends View {
       .when(Boolean(space?.branch), el => el.child(label("branch", space.branch)))
       .child(h_flex().gap(6).items_center().child(div().size(6).rounded(3).bg(t.dim)).child(`${list.length} agents`)
         .when(needs > 0, el => el.child(div().text_color(t.blocked).child(`· ${needs} needs you`))))
+      .when(Boolean(speed), el => el.child(h_flex().id("agent-speed").gap(5).items_center().text_color(t.muted)
+        .tooltip(speed.tip).child(svg(I("zap")).size(12).text_color(t.ansi3)).child(speed.label)))
       .child(h_flex().id("quick-terminal-toggle").h(20).px(7).gap(5).items_center().rounded(5).cursor_pointer()
         .when(open, el => el.bg(t.selected).text_color(t.foreground))
         .hover(s => s.bg(t.hover).text_color(t.foreground))
@@ -352,38 +374,3 @@ export default class WorkspaceStatus extends View {
       .child(div().id("palette").text_color(t.dim).on_click(() => run("app.palette")).child(this.hint(t)));
   }
 }
-
-// >>> PERF-PROBE (temporary, remove) >>>
-import { writeTextFile as __pwrite, appHome as __phome, props as __pprops } from "herdr";
-import * as __pfs from "fs/promises";
-{
-  const P = WorkspaceStatus.prototype, r0 = P.render, i0 = P.init;
-  const dir = `${String(__phome()).replace(/\\/g, "/")}/data/zz-perf-probe`;
-  P.render = function (cx) {
-    const S = this.__probe ??= { renders: 0, ms: 0, max: 0, slow: 0 };
-    const t = Date.now();
-    try { return r0.call(this, cx); }
-    finally { const d = Date.now() - t; S.renders++; S.ms += d; if (d > S.max) S.max = d; if (d >= 16) S.slow++; }
-  };
-  P.init = function (props, cx) {
-    const out = i0 ? i0.call(this, props, cx) : undefined;
-    const S = this.__probe ??= { renders: 0, ms: 0, max: 0, slow: 0 };
-    let label = "";
-    try { const p = __pprops() ?? {}; label = p.part ?? (p.footer ? "footer" : "") ?? ""; } catch {}
-    const id = `my-status${label ? "-" + label : ""}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
-    const born = Date.now();
-    let last = null;
-    cx.timer.every(5000, (cx) => {
-      cx.spawn(async () => {
-        try {
-          await __pfs.mkdir(dir, { recursive: true }).catch(() => {});
-          const text = JSON.stringify({ mod: "my-status", label, id, born, at: Date.now(), ...S });
-          await __pwrite(`${dir}/${id}.json`, text, last);
-          last = text;
-        } catch {}
-      });
-    });
-    return out;
-  };
-}
-// <<< PERF-PROBE <<<

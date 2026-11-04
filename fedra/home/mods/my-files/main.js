@@ -318,38 +318,3 @@ export default class Files extends View {
       .when(Boolean(this.file) && !(this.text != null && this.mdMode !== "raw"), el => el.child(this.code ? Editor.new(this.code).flex_1().min_h(0) : div().p(12).text_color(t.dim).child(this.fileError || "Loading file…")));
   }
 }
-
-// >>> PERF-PROBE (temporary, remove) >>>
-import { writeTextFile as __pwrite, appHome as __phome, props as __pprops } from "herdr";
-import * as __pfs from "fs/promises";
-{
-  const P = Files.prototype, r0 = P.render, i0 = P.init;
-  const dir = `${String(__phome()).replace(/\\/g, "/")}/data/zz-perf-probe`;
-  P.render = function (cx) {
-    const S = this.__probe ??= { renders: 0, ms: 0, max: 0, slow: 0 };
-    const t = Date.now();
-    try { return r0.call(this, cx); }
-    finally { const d = Date.now() - t; S.renders++; S.ms += d; if (d > S.max) S.max = d; if (d >= 16) S.slow++; }
-  };
-  P.init = function (props, cx) {
-    const out = i0 ? i0.call(this, props, cx) : undefined;
-    const S = this.__probe ??= { renders: 0, ms: 0, max: 0, slow: 0 };
-    let label = "";
-    try { const p = __pprops() ?? {}; label = p.part ?? (p.footer ? "footer" : "") ?? ""; } catch {}
-    const id = `my-files${label ? "-" + label : ""}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
-    const born = Date.now();
-    let last = null;
-    cx.timer.every(5000, (cx) => {
-      cx.spawn(async () => {
-        try {
-          await __pfs.mkdir(dir, { recursive: true }).catch(() => {});
-          const text = JSON.stringify({ mod: "my-files", label, id, born, at: Date.now(), ...S });
-          await __pwrite(`${dir}/${id}.json`, text, last);
-          last = text;
-        } catch {}
-      });
-    });
-    return out;
-  };
-}
-// <<< PERF-PROBE <<<

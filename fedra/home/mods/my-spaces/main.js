@@ -53,7 +53,7 @@ function programIcon(p, size, color) {
 
 const RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
 const AGENT_ROW = 26; // px
-const LEVEL = 16; // px between tree levels
+const LEVEL = 24; // px between tree levels: a child line drops from the centre of its parent's icon
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -459,8 +459,41 @@ export default class Spaces extends View {
     const before = shown();
     cx.spawn(async (cx) => {
       try { for (const a of due) await lastTurnSpeed(a, terms.get(a.address)).catch(() => null); }
-      finally { this.speedBusy = false; if (shown() !== before) cx.notify(); }
+      finally {
+        this.speedBusy = false;
+        if (shown() !== before) { this.publishSpeeds(); cx.notify(); }
+      }
     });
+  }
+
+  // shared "agents.speed": address -> last finished turn's speed, read by the status bar (my-status).
+  publishSpeeds() {
+    const map = {};
+    for (const a of agents()) {
+      const r = peekSpeed(a.address);
+      if (r?.tps) map[a.address] = { tps: Math.round(r.tps), label: formatSpeed(r), outputTokens: r.outputTokens, modelMs: r.modelMs, wallMs: r.wallMs, endedAt: r.endedAt };
+    }
+    const sig = JSON.stringify(map);
+    if (sig === this.speedSig) return;
+    this.speedSig = sig;
+    setShared("agents.speed", map);
+  }
+
+  // A "border beam": a bright arc running around `inner`'s edge (the active agent while it
+  // works). One wedge (beam.svg) spins, centred on the element, seen only through four thin
+  // strips along the edges (each clips its own copy), so it never covers the content: herdr
+  // paints the animated shape above backgrounds. The strips stop short of the rounded corners.
+  // Native animation: no timers, it stops when not shown.
+  beam(t, inner, { id, w, h, radius }) {
+    const d = Math.ceil(Math.hypot(w, h)) + 6, k = 1.5, r = Math.max(2, radius - 1);
+    const strip = (n, x, y, sw, sh) => div().id(`${id}-beam-${n}`).absolute().left(x).top(y).w(sw).h(sh).overflow_hidden()
+      .child(svg("mods/my-spaces/beam.svg").absolute().w(d).h(d).left((w - d) / 2 - x).top((h - d) / 2 - y).text_color(t.working).spin(1700));
+    return div().id(`${id}-beam`).relative().w(w).h(h).flex_none()
+      .child(inner.w(w).h(h).rounded(radius).border_1().border_color(t.border))
+      .child(strip("t", r, 0, w - 2 * r, k))
+      .child(strip("b", r, h - k, w - 2 * r, k))
+      .child(strip("l", 0, r, k, h - 2 * r))
+      .child(strip("r", w - k, r, k, h - 2 * r));
   }
 
   // "94 tok/s" and its tooltip line, for an agent that isn't working.
@@ -534,9 +567,10 @@ export default class Spaces extends View {
 
   treeRow(t, { id, lines, base, first, on, pic, title, status, tip, muted, action, drag, speed, menu }) { // smart split: drag
     const x = base + (lines.length - 1) * LEVEL;
-    return h_flex().relative().id(id).h(AGENT_ROW).flex_none().items_center().text_size(12.5)
-      .children(this.connectors(lines, base, first, t))
-      .child(h_flex().id(`${id}-body`).ml(x + 11).flex_1().min_w(0).h(AGENT_ROW - 2).pl(6).pr(8).gap(7).items_center().rounded(7)
+    const sidebarW = find(layout(), "sidebar")?.size?.px ?? 240;
+    const beaming = on && status === "working" && this.windowActive !== false;
+    const bodyW = Math.max(60, sidebarW - 16 - (x + 11) - 1);
+    const body = h_flex().id(`${id}-body`).when(!beaming, (el) => el.ml(x + 11).flex_1()).min_w(0).h(AGENT_ROW - 2).pl(6).pr(8).gap(7).items_center().rounded(7)
         .when(on, (el) => el.bg(t.selected))
         .when(!on, (el) => el.hover((s) => s.bg(t.hover)))
         .cursor_pointer()
@@ -547,7 +581,12 @@ export default class Spaces extends View {
         .when(Boolean(pic), (el) => el.child(pic))
         .child(div().flex_1().min_w(0).truncate().text_color(muted ? t.muted : t.foreground).child(title))
         .when(Boolean(speed), (el) => el.child(div().flex_none().text_size(10.5).text_color(t.dim).child(speed)))
-        .child(this.statusMark(t, status, id)));
+        .child(this.statusMark(t, status, id));
+    return h_flex().relative().id(id).h(AGENT_ROW).flex_none().items_center().text_size(12.5)
+      .children(this.connectors(lines, base, first, t))
+      .child(beaming
+        ? div().ml(x + 11).child(this.beam(t, body.bg(t.selected), { id, w: bodyW, h: AGENT_ROW - 2, radius: 7 }))
+        : body);
   }
 
   // A space and what hangs under it, one tree: its agents, then its worktrees (branch
@@ -579,7 +618,6 @@ export default class Spaces extends View {
         id: `ag-${a.address}`, lines: [...lead, last ? "└" : "├"], base, first: i === 0, on: a.focused,
         pic: programIcon(a.program, 14, t.foreground), title, status: a.status,
         tip: [title, a.program?.name !== title ? a.program?.name : null, msg, this.speedOf(a)?.tip].filter(Boolean).join(" · "),
-        speed: this.speedOf(a)?.label,
         muted: a.status === "idle" && !a.focused,
         action: () => run("pane.focus", { pane: a.pane }),
         menu: () => this.agentMenu(a.address, title, a.program?.name, a.pane, a.pinned),
@@ -653,9 +691,9 @@ export default class Spaces extends View {
       .when(Boolean(branch), (el) => el.children(this.connectors(branch.lines, this.iconX(false), branch.first, t, rowHeight({ tree }))))
       .child(
         h_flex()
-          .gap(9)
+          .gap(tree ? 7 : 9) // a worktree's name starts where agent titles do
           .items_center()
-          .when(Boolean(tree), el => el.pl(branch ? 18.5 : 22).child(h_flex().id(`fold-${w.id}`).size(16).flex_none().items_center().justify_center().rounded(4)
+          .when(Boolean(tree), el => el.pl(branch ? 26 : 22).child(h_flex().id(`fold-${w.id}`).size(14).flex_none().items_center().justify_center().rounded(4)
             .when(mine.length > 0, el => el.cursor_pointer().hover(s => s.bg(t.hover))
               .tooltip(folded ? "Show agents" : "Hide agents")
               .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
@@ -695,6 +733,15 @@ export default class Spaces extends View {
     const tile = (a) => {
       const color = t[a.status] ?? t.dim;
       const pic = programIcon(a.program, 12, a.status === "idle" ? t.muted : color);
+      const beaming = a.focused && a.status === "working" && this.windowActive !== false;
+      if (beaming) {
+        return h_flex().id(`rail-${a.address}`).h(26).flex_none().justify_center().items_center()
+          .tooltip(`${agentTitle(a)} · working`)
+          .on_click(() => run("pane.focus", { pane: a.pane }))
+          .on_mouse_down("left", (e) => smartPress(this, a.address, e)) // smart split
+          .child(this.beam(t, h_flex().items_center().justify_center().bg(t.chrome).child(pic ?? div().size(6).rounded(3).bg(color)),
+            { id: `rail-tile-${a.address}`, w: 22, h: 22, radius: 6 }));
+      }
       return h_flex().id(`rail-${a.address}`).h(26).flex_none().justify_center().items_center()
         .tooltip(`${agentTitle(a)} · ${a.status === "blocked" ? "needs you" : a.status === "done" ? "just finished" : a.status}`)
         .on_click(() => run("pane.focus", { pane: a.pane }))
@@ -737,7 +784,8 @@ export default class Spaces extends View {
     // The app's machines changed, or the window is back in front: ask hc about them now.
     const msig = JSON.stringify(machines().map((m) => [m.name, m.layout]));
     const active = this.windowActive;
-    if ((this.msig !== undefined && msig !== this.msig) || (active && this.wasActive === false)) this.refreshMachines(cx);
+    const back = active && this.wasActive === false && Date.now() - this.machinesAt > 10000;
+    if ((this.msig !== undefined && msig !== this.msig) || back) this.refreshMachines(cx);
     this.msig = msig;
     this.wasActive = active;
     // Git (and tok/s) for what this redraw's data made due, once the redraw is done.
@@ -747,6 +795,7 @@ export default class Spaces extends View {
       .id("smart-split").on_mouse_move((e) => smartMove(this, e)).on_mouse_up("left", () => smartRelease(this))
       .on_hover((over) => { if (!over) smartMove(this, null); })
       .child(h_flex().h(31).pl(16).pr(10).items_center().justify_between().text_size(11.5).text_color(t.dim)
+        .when(collapsed, el => el.px(0).justify_center()) // the rail: "+" centred over the column
         .when(!collapsed, el => el.child("Spaces"))
         .child(div().id("space-new").size(26).flex_none().flex().items_center().justify_center().rounded(6).hover(s => s.bg(t.hover).text_color(t.foreground))
           .tooltip("Add a project")
@@ -756,38 +805,3 @@ export default class Spaces extends View {
         .children(this.grouped(t, collapsed)));
   }
 }
-
-// >>> PERF-PROBE (temporary, remove) >>>
-import { writeTextFile as __pwrite, appHome as __phome, props as __pprops } from "herdr";
-import * as __pfs from "fs/promises";
-{
-  const P = Spaces.prototype, r0 = P.render, i0 = P.init;
-  const dir = `${String(__phome()).replace(/\\/g, "/")}/data/zz-perf-probe`;
-  P.render = function (cx) {
-    const S = this.__probe ??= { renders: 0, ms: 0, max: 0, slow: 0 };
-    const t = Date.now();
-    try { return r0.call(this, cx); }
-    finally { const d = Date.now() - t; S.renders++; S.ms += d; if (d > S.max) S.max = d; if (d >= 16) S.slow++; }
-  };
-  P.init = function (props, cx) {
-    const out = i0 ? i0.call(this, props, cx) : undefined;
-    const S = this.__probe ??= { renders: 0, ms: 0, max: 0, slow: 0 };
-    let label = "";
-    try { const p = __pprops() ?? {}; label = p.part ?? (p.footer ? "footer" : "") ?? ""; } catch {}
-    const id = `my-spaces${label ? "-" + label : ""}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
-    const born = Date.now();
-    let last = null;
-    cx.timer.every(5000, (cx) => {
-      cx.spawn(async () => {
-        try {
-          await __pfs.mkdir(dir, { recursive: true }).catch(() => {});
-          const text = JSON.stringify({ mod: "my-spaces", label, id, born, at: Date.now(), ...S });
-          await __pwrite(`${dir}/${id}.json`, text, last);
-          last = text;
-        } catch {}
-      });
-    });
-    return out;
-  };
-}
-// <<< PERF-PROBE <<<

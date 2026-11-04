@@ -1,6 +1,6 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { spaces, panes, run, openOverlay, theme, window, shared, layout, settings } from "herdr";
+import { spaces, panes, run, openOverlay, theme, window, shared, setShared, layout, settings, focused, exec, appHome, readTextFile, notify } from "herdr";
 import { tabTerminal, armDrag, dragMove, dragLeft, disarm } from "./drag-out.js"; // smart split: drag a tab's agent down onto the tab
 
 function find(node, id) {
@@ -35,10 +35,56 @@ export function sessionTitle(p) {
   return live;
 }
 
+const home_ = () => appHome().replaceAll("\\", "/");
+
 export default class Tabs extends View {
-  init() {
+  init(_props, cx) {
     this.pressed = null;
     this.panels = JSON.parse(localStorage.getItem("panels") ?? "{}");
+    // "Open in IDE": the editors found on this machine (mods/open-in/detect.mjs -> data/ides.json).
+    this.ides = null;
+    cx.spawn(async (cx) => {
+      const text = await readTextFile(`${home_()}/data/ides.json`).catch(() => null);
+      this.ides = text ? JSON.parse(text) : null;
+      cx.notify();
+      if (!this.ides || Date.now() - (this.ides.updated ?? 0) > 7 * 86400000) {
+        const r = await exec("node", [`${home_()}/mods/open-in/detect.mjs`, appHome()]).catch(() => null);
+        if (r?.code === 0) { this.ides = JSON.parse(r.stdout); cx.notify(); }
+      }
+    });
+  }
+
+  // The shown project's folder: the focused terminal's git checkout (a worktree is its own),
+  // else that terminal's folder, else the space's.
+  async projectFolder() {
+    const space = spaces().find((s) => s.active);
+    const f = focused();
+    const cwd = (f?.space === space?.id ? f?.cwd : null) || panes().find((p) => space?.tabs?.some((t) => t.id === p.tab) && p.cwd)?.cwd || space?.folder;
+    if (!cwd) return null;
+    const r = await exec("git", ["rev-parse", "--show-toplevel"], { cwd }).catch(() => null);
+    return r?.code === 0 && r.stdout.trim() ? r.stdout.trim() : cwd;
+  }
+
+  defaultIde() {
+    const list = this.ides?.ides ?? [];
+    return list.find((i) => i.id === shared("ide.default")) ?? list.find((i) => !i.system) ?? list[0] ?? null;
+  }
+
+  openIde(cx, ide) {
+    if (!ide) return this.ideMenu(cx);
+    cx.spawn(async () => {
+      const folder = await this.projectFolder();
+      if (!folder) return notify({ title: "No folder to open", level: "warning" });
+      const r = await exec("node", [`${home_()}/mods/open-in/open.mjs`, JSON.stringify(ide), folder]).catch((e) => ({ code: 1, stderr: String(e) }));
+      if (r.code !== 0) notify({ title: `Couldn't open ${ide.name}`, body: (r.stderr ?? "").trim(), level: "error" });
+    });
+  }
+
+  ideMenu(cx) {
+    cx.spawn(async () => {
+      const folder = await this.projectFolder();
+      openOverlay({ mod: "open-in", kind: "popup", width: 240, height: 320, props: { folder } });
+    });
   }
 
   // The side panel is remembered per space: switching shows that space's choice
@@ -67,6 +113,24 @@ export default class Tabs extends View {
     if (this.panels[space.id] === now) return;
     this.panels[space.id] = now;
     localStorage.setItem("panels", JSON.stringify(this.panels));
+  }
+
+  // [ <default editor's icon> Open | ▾ ]: opens the shown project in that editor; ▾ lists the
+  // editors installed here (mods/open-in) and picking one makes it the default.
+  openButton(t, stop) {
+    const ide = this.defaultIde();
+    const half = (id) => h_flex().id(id).h(26).items_center().flex_none().text_size(12).text_color(t.muted)
+      .hover((s) => s.bg(t.hover).text_color(t.foreground)).on_mouse_down("left", stop);
+    return h_flex().id("open-ide").h(26).flex_none().items_center().rounded(6).border_1().border_color(t.border).mr(4)
+      .child(half("open-ide-main").pl(7).pr(8).gap(6).rounded_l(6)
+        .tooltip(ide ? `Open the project in ${ide.name}` : "Open the project in an editor")
+        .on_click((_e, cx) => this.openIde(cx, ide))
+        .child(ide?.icon ? image(ide.icon).w(14).h(14).flex_none() : svg("mods/files/file.svg").size(14))
+        .child("Open"))
+      .child(div().w(1).h(16).bg(t.border))
+      .child(half("open-ide-menu").px(5).rounded_r(6).tooltip("Choose an editor")
+        .on_click((_e, cx) => this.ideMenu(cx))
+        .child(svg("mods/my-tabs/chevron-down.svg").size(12)));
   }
 
   render() {
@@ -129,6 +193,7 @@ export default class Tabs extends View {
       .on_scroll_wheel(e => { if (Math.abs(e.delta.y) >= 1) run(e.delta.y > 0 ? "tab.prev" : "tab.next"); })
       .child(h_flex().id("tab-scroll").flex_1().min_w(0).h_full().items_center().gap(3).overflow_x_scrollbar().children(shown.map(item)))
       .child(button("tab-new", "+", () => openOverlay({ mod: "my-new-menu", kind: "popup", width: 250, height: 512 })))
+      .child(this.openButton(t, stop))
       .when(Boolean(panel && find(root, "files")) && enabled.includes("files"), el => el.child(panelButton("files", "Files", "mods/files/file.svg")))
       .when(Boolean(panel && find(root, "changes")) && enabled.includes("changes"), el => el.child(panelButton("changes", "Changes", "mods/changes/changes.svg")))
       // A real Chrome in the side panel (mods/browser-panel); agents drive it over CDP at 127.0.0.1:9333.
@@ -138,38 +203,3 @@ export default class Tabs extends View {
         .child(button("close-window", w.platform === "windows" ? svg("mods/my-tabs/win-close.svg").size(16) : svg("mods/pane/close.svg").size(13), () => run("window.close"))));
   }
 }
-
-// >>> PERF-PROBE (temporary, remove) >>>
-import { writeTextFile as __pwrite, appHome as __phome, props as __pprops } from "herdr";
-import * as __pfs from "fs/promises";
-{
-  const P = Tabs.prototype, r0 = P.render, i0 = P.init;
-  const dir = `${String(__phome()).replace(/\\/g, "/")}/data/zz-perf-probe`;
-  P.render = function (cx) {
-    const S = this.__probe ??= { renders: 0, ms: 0, max: 0, slow: 0 };
-    const t = Date.now();
-    try { return r0.call(this, cx); }
-    finally { const d = Date.now() - t; S.renders++; S.ms += d; if (d > S.max) S.max = d; if (d >= 16) S.slow++; }
-  };
-  P.init = function (props, cx) {
-    const out = i0 ? i0.call(this, props, cx) : undefined;
-    const S = this.__probe ??= { renders: 0, ms: 0, max: 0, slow: 0 };
-    let label = "";
-    try { const p = __pprops() ?? {}; label = p.part ?? (p.footer ? "footer" : "") ?? ""; } catch {}
-    const id = `my-tabs${label ? "-" + label : ""}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
-    const born = Date.now();
-    let last = null;
-    cx.timer.every(5000, (cx) => {
-      cx.spawn(async () => {
-        try {
-          await __pfs.mkdir(dir, { recursive: true }).catch(() => {});
-          const text = JSON.stringify({ mod: "my-tabs", label, id, born, at: Date.now(), ...S });
-          await __pwrite(`${dir}/${id}.json`, text, last);
-          last = text;
-        } catch {}
-      });
-    });
-    return out;
-  };
-}
-// <<< PERF-PROBE <<<
