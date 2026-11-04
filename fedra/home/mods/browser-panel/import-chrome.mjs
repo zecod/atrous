@@ -1,5 +1,9 @@
 // Import from Chrome: copies the person's own Chrome profile data into the browser panel's
-// profile (%LOCALAPPDATA%\herdr-browser\profile). Run it while the panel's Chrome is stopped.
+// profile. The panel's profile: Windows %LOCALAPPDATA%\herdr-browser\profile (or, with --dest,
+// the native view's WebView2 profile), macOS ~/Library/Application Support/herdr-browser/profile,
+// Linux $XDG_DATA_HOME/herdr-browser/profile. Chrome's: %LOCALAPPDATA%\Google\Chrome\User Data,
+// ~/Library/Application Support/Google/Chrome, ~/.config/google-chrome. Run it while the panel's
+// browser is stopped.
 //
 // The source is only ever read: files are opened read-only and copied into a temp folder;
 // nothing in Chrome's own "User Data" folder is written, renamed or deleted. Databases are
@@ -27,9 +31,15 @@ const opt = {};
   const a = process.argv.slice(2);
   for (let i = 0; i < a.length; i++) if (a[i].startsWith("--")) opt[a[i].slice(2)] = a[i + 1]?.startsWith("--") ? "true" : a[++i];
 }
-const LOCAL = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
-const BASE = path.join(LOCAL, "herdr-browser");
-const SOURCE = opt.source || path.join(LOCAL, "Google", "Chrome", "User Data");
+const WIN = process.platform === "win32", MAC = process.platform === "darwin";
+const LOCAL = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"); // Windows
+// The panel's browser data, and Chrome's, where each OS keeps them.
+const BASE = WIN ? path.join(LOCAL, "herdr-browser")
+  : MAC ? path.join(os.homedir(), "Library", "Application Support", "herdr-browser")
+  : path.join(process.env.XDG_DATA_HOME || path.join(os.homedir(), ".local", "share"), "herdr-browser");
+const SOURCE = opt.source || (WIN ? path.join(LOCAL, "Google", "Chrome", "User Data")
+  : MAC ? path.join(os.homedir(), "Library", "Application Support", "Google", "Chrome")
+  : path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "google-chrome"));
 const DEST = opt.dest || path.join(BASE, "profile");
 const REPORT = opt.report || path.join(BASE, "import-report.json");
 const STAMP = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
@@ -63,7 +73,10 @@ function same(a, b) { return path.resolve(a).toLowerCase() === path.resolve(b).t
 // unreadable, and Chrome deletes what it can't read), so readable v10 values are re-encrypted
 // from your Chrome's key to this browser's key, in memory, on the copies. Nothing is printed.
 
+// macOS and Linux keep Chrome's key in the keychain / keyring, shared by every profile of the
+// same Chrome: secrets copied between its profiles read as they are, nothing to move.
 function dpapiKey(localState) {
+  if (!WIN) return Promise.resolve(null);
   const raw = Buffer.from(localState?.os_crypt?.encrypted_key ?? "", "base64");
   if (raw.subarray(0, 5).toString() !== "DPAPI") return Promise.resolve(null);
   return new Promise((resolve) => {

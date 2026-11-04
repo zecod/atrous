@@ -479,23 +479,6 @@ export default class Spaces extends View {
     setShared("agents.speed", map);
   }
 
-  // A "border beam": a bright arc running around `inner`'s edge (the active agent while it
-  // works). One wedge (beam.svg) spins, centred on the element, seen only through four thin
-  // strips along the edges (each clips its own copy), so it never covers the content: herdr
-  // paints the animated shape above backgrounds. The strips stop short of the rounded corners.
-  // Native animation: no timers, it stops when not shown.
-  beam(t, inner, { id, w, h, radius }) {
-    const d = Math.ceil(Math.hypot(w, h)) + 6, k = 1.5, r = Math.max(2, radius - 1);
-    const strip = (n, x, y, sw, sh) => div().id(`${id}-beam-${n}`).absolute().left(x).top(y).w(sw).h(sh).overflow_hidden()
-      .child(svg("mods/my-spaces/beam.svg").absolute().w(d).h(d).left((w - d) / 2 - x).top((h - d) / 2 - y).text_color(t.working).spin(1700));
-    return div().id(`${id}-beam`).relative().w(w).h(h).flex_none()
-      .child(inner.w(w).h(h).rounded(radius).border_1().border_color(t.border))
-      .child(strip("t", r, 0, w - 2 * r, k))
-      .child(strip("b", r, h - k, w - 2 * r, k))
-      .child(strip("l", 0, r, k, h - 2 * r))
-      .child(strip("r", w - k, r, k, h - 2 * r));
-  }
-
   // "94 tok/s" and its tooltip line, for an agent that isn't working.
   speedOf(a) {
     if (a.status === "working") return null;
@@ -567,10 +550,7 @@ export default class Spaces extends View {
 
   treeRow(t, { id, lines, base, first, on, pic, title, status, tip, muted, action, drag, speed, menu }) { // smart split: drag
     const x = base + (lines.length - 1) * LEVEL;
-    const sidebarW = find(layout(), "sidebar")?.size?.px ?? 240;
-    const beaming = on && status === "working" && this.windowActive !== false;
-    const bodyW = Math.max(60, sidebarW - 16 - (x + 11) - 1);
-    const body = h_flex().id(`${id}-body`).when(!beaming, (el) => el.ml(x + 11).flex_1()).min_w(0).h(AGENT_ROW - 2).pl(6).pr(8).gap(7).items_center().rounded(7)
+    const body = h_flex().id(`${id}-body`).ml(x + 11).flex_1().min_w(0).h(AGENT_ROW - 2).pl(6).pr(8).gap(7).items_center().rounded(7)
         .when(on, (el) => el.bg(t.selected))
         .when(!on, (el) => el.hover((s) => s.bg(t.hover)))
         .cursor_pointer()
@@ -584,9 +564,7 @@ export default class Spaces extends View {
         .child(this.statusMark(t, status, id));
     return h_flex().relative().id(id).h(AGENT_ROW).flex_none().items_center().text_size(12.5)
       .children(this.connectors(lines, base, first, t))
-      .child(beaming
-        ? div().ml(x + 11).child(this.beam(t, body.bg(t.selected), { id, w: bodyW, h: AGENT_ROW - 2, radius: 7 }))
-        : body);
+      .child(body);
   }
 
   // A space and what hangs under it, one tree: its agents, then its worktrees (branch
@@ -731,31 +709,25 @@ export default class Spaces extends View {
       .on_click(() => run("space.select", { id: w.id }))
       .child(svg(`mods/${tree ? "workspace-chrome/branch" : "my-spaces/folder"}.svg`).size(tree ? 13 : 15).text_color(w.active ? t.foreground : t.muted));
     const tile = (a) => {
-      const color = t[a.status] ?? t.dim;
-      const pic = programIcon(a.program, 12, a.status === "idle" ? t.muted : color);
-      const beaming = a.focused && a.status === "working" && this.windowActive !== false;
-      if (beaming) {
-        return h_flex().id(`rail-${a.address}`).h(26).flex_none().justify_center().items_center()
-          .tooltip(`${agentTitle(a)} · working`)
-          .on_click(() => run("pane.focus", { pane: a.pane }))
-          .on_mouse_down("left", (e) => smartPress(this, a.address, e)) // smart split
-          .child(this.beam(t, h_flex().items_center().justify_center().bg(t.chrome).child(pic ?? div().size(6).rounded(3).bg(color)),
-            { id: `rail-tile-${a.address}`, w: 22, h: 22, radius: 6 }));
-      }
-      return h_flex().id(`rail-${a.address}`).h(26).flex_none().justify_center().items_center()
-        .tooltip(`${agentTitle(a)} · ${a.status === "blocked" ? "needs you" : a.status === "done" ? "just finished" : a.status}`)
+      const pic = programIcon(a.program, 13, a.status === "idle" ? t.muted : t.foreground);
+      const working = a.status === "working";
+      const dot = a.status === "blocked" ? t.blocked : a.status === "done" ? t.done : null;
+      const said = a.status === "blocked" ? "needs you" : a.status === "done" ? "just finished" : a.status;
+      return h_flex().id(`rail-${a.address}`).h(30).flex_none().justify_center().items_center()
+        .tooltip(`${agentTitle(a)} · ${said}`)
         .on_click(() => run("pane.focus", { pane: a.pane }))
         .on_mouse_down("left", (e) => smartPress(this, a.address, e)) // smart split
-        .child(h_flex().id(`rail-tile-${a.address}`).size(22).flex_none().items_center().justify_center().rounded(6)
-          .border_1()
-          .border_color(a.status === "idle" ? t.border : color)
-          .bg(a.status === "idle" ? t.chrome : color + "2e")
-          .when(a.focused, (el) => el.border_color(t.foreground))
-          .when(a.status === "idle" && !a.focused, (el) => el.opacity(0.55))
-          .when(a.status === "working" && this.windowActive !== false, (el) => el.loop("opacity", { from: 0.55, to: 1, period: 1400 }))
-          .when(a.status === "blocked" && this.windowActive !== false, (el) => el.loop("opacity", { from: 0.35, to: 1, period: 900 }))
-          .hover((s) => s.opacity(1))
-          .child(pic ?? div().size(6).rounded(3).bg(color)));
+        .child(div().id(`rail-tile-${a.address}`).relative().size(26).flex_none()
+          // a thin ring: brighter for the agent you're on
+          .child(svg("mods/my-spaces/ring-track.svg").absolute().left(0).top(0).size(26).text_color(a.focused ? t.muted : t.border))
+          // working: an arc turning around the logo (native animation, no timers)
+          .when(working && this.windowActive !== false, (el) => el.child(svg("mods/my-spaces/ring-arc.svg").absolute().left(0).top(0).size(26).text_color(t.working).spin(1100)))
+          .when(working && this.windowActive === false, (el) => el.child(svg("mods/my-spaces/ring-arc.svg").absolute().left(0).top(0).size(26).text_color(t.working)))
+          .child(div().absolute().left(5).top(5).size(16).rounded_full().flex().items_center().justify_center()
+            .when(a.status === "idle" && !a.focused, (el) => el.opacity(0.5))
+            .child(pic ?? div().size(6).rounded(3).bg(t.dim)))
+          // needs you / just finished: a dot at the corner
+          .when(Boolean(dot), (el) => el.child(div().absolute().right(0).top(0).size(8).rounded_full().bg(dot).border_1().border_color(t.chrome))));
     };
     return [head, ...mine.map(tile)];
   }

@@ -1,6 +1,13 @@
 // herdr browser helper (Node 22+, no dependencies).
 //
-// Runs or reuses a headless Chrome (Edge as a fallback) with the DevTools Protocol on
+// Native mode (--native, Windows): the page is drawn natively by herdr-browser-host (native/,
+// a WebView2 in a popup kept over the panel's page area, built with dotnet on first use into
+// %LOCALAPPDATA%\herdr-browser\host). The helper starts it, drives it over the same DevTools
+// Protocol (WebView2's, on <cdp-port>) for everything but drawing: tabs go through the host,
+// there is no screencast, and the pick/annotate hover outline is drawn in the page itself.
+// If the host can't be built or started, the helper falls back to the screencast below.
+//
+// Screencast mode (any OS): runs or reuses a headless Chrome (Edge as a fallback) with the DevTools Protocol on
 // 127.0.0.1:<cdp-port>, follows one page target, streams it with Page.startScreencast
 // into JPEG files the browser-panel mod shows with image(), and answers a tiny HTTP API
 // on 127.0.0.1:<port> (navigate, back/forward/reload, mouse, wheel, keys, text, resize, state).
@@ -27,6 +34,7 @@
 //   node helper.mjs [--port 9334] [--cdp-port 9333] [--home ~/.config/herdr-app]
 //                   [--frames mods/browser-panel-frames] [--profile <dir>] [--browser <exe>]
 //                   [--width 800 --height 600 --scale 1.25] [--url https://...] [--headed] [--log-frames]
+//                   [--native [--host-port 9335] [--herdr-pid <pid>]]
 //
 // API (JSON, 127.0.0.1 only): GET /state[?since=<ver>&wait=<ms>] (long poll; ?peek=1 doesn't
 // count as watching), GET /cookie-stats (cookie counts per site, never values);
@@ -44,7 +52,7 @@
 // (and the panel's render numbers, matched to them); POST /tune {minFrameMs, castScale}: debugging.
 // Every tab keeps a session (console, network) from when it appears; only the shown one is cast.
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import http from "node:http";
 import net from "node:net";
 import fs from "node:fs";
@@ -52,6 +60,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { createHash } from "node:crypto";
+import { fileURLToPath } from "node:url";
 
 // ---- options ----------------------------------------------------------------------------
 
@@ -69,9 +78,14 @@ const opt = {};
 
 const CDP_PORT = Number(opt["cdp-port"] ?? 9333);
 const API_PORT = Number(opt.port ?? 9334);
-const LOCAL = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
-const BASE = path.join(LOCAL, "herdr-browser");
-const PROFILE = opt.profile || path.join(BASE, "profile");
+const WIN = process.platform === "win32", MAC = process.platform === "darwin";
+const LOCAL = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"); // Windows
+// Where the browser's own data lives (profile, logs, shots): per-user app data on each OS.
+const BASE = WIN ? path.join(LOCAL, "herdr-browser")
+  : MAC ? path.join(os.homedir(), "Library", "Application Support", "herdr-browser")
+  : path.join(process.env.XDG_DATA_HOME || path.join(os.homedir(), ".local", "share"), "herdr-browser");
+// One profile per helper port: a second Chrome on the same profile would only hand off to the first.
+const PROFILE = opt.profile || path.join(BASE, API_PORT === 9334 ? "profile" : `profile-${API_PORT}`);
 const HOME = opt.home || path.join(os.homedir(), ".config", "herdr-app");
 const FRAMES_REL = (opt.frames || "mods/browser-panel-frames").replace(/\\/g, "/").replace(/\/+$/, "");
 const FRAMES_DIR = path.resolve(HOME, FRAMES_REL);
@@ -88,7 +102,14 @@ let lastInputAt = 0;
 const frameGap = () => MIN_FRAME_MS || (Date.now() - lastInputAt < ACTIVE_FOR_MS ? ACTIVE_GAP_MS : IDLE_GAP_MS);
 const IDLE_MS = 5000; // nobody asked for state this long: stop the screencast
 const RUN = Date.now().toString(36); // frame names never repeat, across runs too
-const TMP_DIR = path.join(LOCAL, "herdr-browser", `tmp${API_PORT === 9334 ? "" : `-${API_PORT}`}`); // frames are written here, then moved in
+const TMP_DIR = path.join(BASE, `tmp${API_PORT === 9334 ? "" : `-${API_PORT}`}`); // frames are written here, then moved in
+// Native mode (Windows): the WebView2 host draws the page; see the top of this file.
+let NATIVE = opt.native === "true" && WIN;
+const HOST_PORT = Number(opt["host-port"] ?? 9335);
+const HOST = `http://127.0.0.1:${HOST_PORT}`;
+const HOST_DIR = path.join(BASE, "host");
+const HOST_EXE = path.join(HOST_DIR, "herdr-browser-host.exe");
+const NATIVE_SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), "native");
 const DEFAULT_URL = "https://www.google.com"; // a newly started Chrome opens this unless told otherwise
 
 fs.mkdirSync(BASE, { recursive: true });
@@ -106,6 +127,16 @@ function log(...parts) {
 // ---- browser discovery and launch -------------------------------------------------------
 
 function browserCandidates() {
+  if (MAC) {
+    const apps = ["/Applications", path.join(os.homedir(), "Applications")];
+    const names = [["Google Chrome.app", "Google Chrome"], ["Chromium.app", "Chromium"], ["Microsoft Edge.app", "Microsoft Edge"]];
+    return [opt.browser, ...apps.flatMap((a) => names.map(([app, bin]) => path.join(a, app, "Contents", "MacOS", bin)))].filter(Boolean);
+  }
+  if (!WIN) {
+    const dirs = (process.env.PATH || "/usr/bin:/usr/local/bin").split(path.delimiter).filter(Boolean);
+    const names = ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "microsoft-edge", "microsoft-edge-stable"];
+    return [opt.browser, ...names.flatMap((n) => dirs.map((d) => path.join(d, n)))].filter(Boolean);
+  }
   const pf = process.env.ProgramFiles || "C:\\Program Files";
   const pf86 = process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
   return [
@@ -125,6 +156,15 @@ function findBrowser() {
 // The installed version's major number, from its version folder (never runs the exe:
 // on Windows `chrome.exe --version` opens the user's own browser instead of printing).
 function majorVersion(exe) {
+  if (MAC) {
+    try {
+      const plist = fs.readFileSync(path.join(path.dirname(exe), "..", "Info.plist"), "utf8");
+      return /<key>CFBundleShortVersionString<\/key>\s*<string>(\d+)/.exec(plist)?.[1] ?? null;
+    } catch { return null; }
+  }
+  if (!WIN) {
+    try { return /(\d+)\.\d+/.exec(spawnSync(exe, ["--version"], { encoding: "utf8", timeout: 5000 }).stdout)?.[1] ?? null; } catch { return null; }
+  }
   try {
     const dirs = fs.readdirSync(path.dirname(exe)).filter((d) => /^\d+\.\d+\.\d+\.\d+$/.test(d));
     dirs.sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
@@ -188,11 +228,22 @@ async function launchOnce() {
     opt.url || DEFAULT_URL,
   ];
   log("launching", exe);
-  // herdr-core ends a terminal's whole process tree when the terminal ends, so a Chrome this
-  // helper spawns would die with the helper. Started through WMI, Chrome belongs to no terminal
-  // and outlives the helper (agents keep their session; a new helper reattaches).
+  await launchDetached(exe, args);
+  for (let i = 0; i < 60; i++) {
+    const v = await cdpVersion();
+    if (v) return v;
+    await sleep(150);
+  }
+  throw new Error(`Browser did not open its DevTools port ${CDP_PORT}`);
+}
+
+// herdr-core ends a terminal's whole process tree when the terminal ends, so a browser this
+// helper spawns would die with the helper. On Windows it's started through WMI, so it belongs to
+// no terminal and outlives the helper (agents keep their session; a new helper reattaches);
+// elsewhere a detached spawn in its own process group does the same.
+async function launchDetached(exe, args) {
   let independent = false;
-  if (process.platform === "win32") {
+  if (WIN) {
     try {
       const out = await powershell(
         "$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $env:HERDR_BROWSER_CMD }; \"$($r.ReturnValue) $($r.ProcessId)\"",
@@ -203,15 +254,96 @@ async function launchOnce() {
   }
   if (!independent) {
     const child = spawn(exe, args, { detached: true, stdio: "ignore", windowsHide: true });
-    child.on("error", (e) => log("browser spawn error", e.message));
+    child.on("error", (e) => log("spawn error", e.message));
     child.unref();
   }
-  for (let i = 0; i < 60; i++) {
+}
+
+// ---- the native host (Windows) ------------------------------------------------------------
+
+async function hostState(ms = 1500) {
+  try {
+    const r = await fetch(`${HOST}/state`, { signal: AbortSignal.timeout(ms) });
+    return r.ok ? await r.json() : null;
+  } catch { return null; }
+}
+
+async function hostPost(p, body, ms = 15000) {
+  const r = await fetch(`${HOST}${p}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body ?? {}), signal: AbortSignal.timeout(ms) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.ok === false) throw new Error(j.error || `host ${p}: ${r.status}`);
+  return j;
+}
+
+function runQuiet(cmd, args, opts = {}) {
+  return new Promise((resolve) => {
+    const p = spawn(cmd, args, { windowsHide: true, ...opts });
+    let out = "";
+    p.stdout?.on("data", (d) => (out += d));
+    p.stderr?.on("data", (d) => (out += d));
+    const timer = setTimeout(() => p.kill(), opts.timeout ?? 300000);
+    p.on("error", (e) => { clearTimeout(timer); resolve({ code: -1, out: e.message }); });
+    p.on("close", (code) => { clearTimeout(timer); resolve({ code, out }); });
+  });
+}
+
+// The host is built from native/ (sources only in the mod) into BASE/host, the first time and
+// whenever a source is newer than the exe. The build runs in BASE/host-build, so no bin/obj
+// ever lands in the mod folder.
+async function ensureHostBuilt() {
+  let srcs = [];
+  try { srcs = fs.readdirSync(NATIVE_SRC).filter((f) => /\.(cs|csproj|manifest|json)$/i.test(f)); } catch {}
+  if (!srcs.length) throw new Error(`no native sources in ${NATIVE_SRC}`);
+  const newest = Math.max(...srcs.map((f) => fs.statSync(path.join(NATIVE_SRC, f)).mtimeMs));
+  let built = 0;
+  try { built = fs.statSync(HOST_EXE).mtimeMs; } catch {}
+  if (built && built >= newest) return;
+  const work = path.join(BASE, "host-build");
+  fs.mkdirSync(work, { recursive: true });
+  for (const f of srcs) fs.copyFileSync(path.join(NATIVE_SRC, f), path.join(work, f));
+  S.phase = "Building the native browser view (first run, about a minute)…";
+  bump();
+  log("building the native host:", "dotnet build -c Release -o", HOST_DIR);
+  const r = await runQuiet("dotnet", ["build", "-c", "Release", "-o", HOST_DIR, "--nologo", "-v", "q"], { cwd: work, timeout: 600000 });
+  S.phase = "";
+  if (r.code !== 0) {
+    log("host build failed:", r.out.slice(-1500));
+    if (!built) throw new Error("the native host didn't build (is the .NET 9 SDK installed?)");
+    log("keeping the host built before");
+  }
+}
+
+// The first native start brings the panel's sign-ins, history and bookmarks over from the
+// screencast's Chrome profile (import-chrome.mjs with that profile as the source), once.
+async function migrateProfile() {
+  const data = path.join(BASE, HOST_PORT === 9335 ? "webview2" : `webview2-${HOST_PORT}`, "EBWebView");
+  const marker = path.join(BASE, `migrated${SUFFIX}`);
+  if (fs.existsSync(marker) || fs.existsSync(path.join(data, "Default")) || !fs.existsSync(path.join(PROFILE, "Default"))) return;
+  S.phase = "Bringing this browser's sign-ins over…";
+  bump();
+  const importer = path.join(path.dirname(fileURLToPath(import.meta.url)), "import-chrome.mjs");
+  const r = await runQuiet(process.execPath, [importer, "--source", PROFILE, "--dest", data, "--report", path.join(BASE, `migrate-report${SUFFIX}.json`),
+    "--cdp-port", String(CDP_PORT)], { timeout: 180000 });
+  try { fs.writeFileSync(marker, new Date().toISOString()); } catch {}
+  log("profile migration", r.code === 0 ? "done" : `failed (${r.code})`, r.out.replace(/s+/g, " ").slice(-500));
+  S.phase = "";
+}
+
+async function launchHost() {
+  await ensureHostBuilt();
+  await migrateProfile().catch((e) => log("profile migration:", e.message));
+  const args = ["--home", HOME, "--port", String(HOST_PORT), "--cdp-port", String(CDP_PORT), "--frames", FRAMES_REL,
+    "--url", opt.url || DEFAULT_URL];
+  if (opt["herdr-pid"]) args.push("--herdr-pid", String(opt["herdr-pid"]));
+  if (opt["host-args"]) args.push(...String(opt["host-args"]).split(" ").filter(Boolean));
+  log("launching", HOST_EXE, args.join(" "));
+  await launchDetached(HOST_EXE, args);
+  for (let i = 0; i < 100; i++) {
     const v = await cdpVersion();
     if (v) return v;
     await sleep(150);
   }
-  throw new Error(`Browser did not open its DevTools port ${CDP_PORT}`);
+  throw new Error(`The native host did not open its DevTools port ${CDP_PORT}`);
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -284,6 +416,7 @@ const S = {
   picked: null, // the last clicked element: { seq, mode, targetId, backendNodeId, tag, selector, text, rect, html, shot }
   hoverNode: null,
   toast: null, // { seq, text } a short confirmation for the panel to show
+  phase: "", // what the helper is busy with before the browser is up
 };
 let pickSeq = 0, toastSeq = 0;
 const PERF = { inputAt: 0, kind: "", chromeAt: 0, samples: [], written: 0, mod: null, hoverAt: 0, hover: [], writeMs: [] };
@@ -314,6 +447,7 @@ function publicState() {
     targets: [...targets.values()].filter((t) => !internal(t.url)).sort((a, b) => a.order - b.order)
       .map((t) => ({ id: t.id, url: t.url, title: t.title, current: t.id === S.targetId })),
     cdp: `http://127.0.0.1:${CDP_PORT}`, browser: S.browser, error: S.error, pid: process.pid,
+    native: NATIVE, host: NATIVE ? HOST : null, ready, phase: S.phase,
     inspect: S.inspect, picked: S.picked, toast: S.toast, hover: S.inspect !== "off" ? S.hover : null,
     dver: tabs.get(S.targetId)?.dver ?? 0, // the debug drawer's lists changed when this did
   };
@@ -342,16 +476,17 @@ async function attach(targetId) {
   if (tab?.attaching) return tab.attaching;
   if (!tab) { tab = { id: targetId, session: null, console: [], net: [], netById: new Map(), cseq: 0, dver: 1 }; tabs.set(targetId, tab); }
   tab.attaching = (async () => {
-    const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
+    const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true }, undefined, NATIVE ? 5000 : 20000);
     tab.session = sessionId;
     bySession.set(sessionId, targetId);
     await Promise.all([
-      cdp.send("Page.enable", {}, sessionId),
+      cdp.send("Page.enable", {}, sessionId, NATIVE ? 5000 : 20000),
       cdp.send("Page.setLifecycleEventsEnabled", { enabled: true }, sessionId).catch(() => {}),
       cdp.send("Runtime.enable", {}, sessionId).catch(() => {}),
       cdp.send("Log.enable", {}, sessionId).catch(() => {}),
       cdp.send("Network.enable", { maxTotalBufferSize: 0, maxResourceBufferSize: 0 }, sessionId).catch(() => {}),
-      cdp.send("Emulation.setFocusEmulationEnabled", { enabled: true }, sessionId).catch(() => {}),
+      NATIVE ? Promise.resolve() : cdp.send("Emulation.setFocusEmulationEnabled", { enabled: true }, sessionId).catch(() => {}),
+      NATIVE ? cdp.send("Runtime.addBinding", { name: "__herdrKey" }, sessionId).catch(() => {}) : Promise.resolve(),
     ]);
     return sessionId;
   })();
@@ -372,7 +507,8 @@ async function follow(targetId) {
   if (S.targetId !== targetId) return;
   S.session = sessionId;
   await applyMetrics();
-  cdp.send("Target.activateTarget", { targetId }).catch(() => {});
+  if (NATIVE) hostPost("/tabs/activate", { id: targetId }).catch(() => {});
+  else cdp.send("Target.activateTarget", { targetId }).catch(() => {});
   await refreshHistory();
   if (S.inspect !== "off") await inspectOn(sessionId, true);
   try { fs.writeFileSync(path.join(BASE, `last-target${SUFFIX}`), targetId); } catch {}
@@ -383,7 +519,7 @@ async function follow(targetId) {
 
 async function applyMetrics() {
   const s = S.session;
-  if (!s) return;
+  if (!s || NATIVE) return; // natively the page has its real size
   await cdp.send("Emulation.setDeviceMetricsOverride",
     { width: S.width, height: S.height, deviceScaleFactor: S.scale, mobile: false }, s).catch((e) => log(e.message));
 }
@@ -400,7 +536,7 @@ async function refreshHistory() {
 }
 
 async function startCast() {
-  if (!S.session || S.casting) return;
+  if (!S.session || S.casting || NATIVE) return;
   S.casting = true;
   const s = S.session;
   try {
@@ -433,7 +569,8 @@ function pickFallback() {
 async function ensurePage() {
   const id = pickFallback();
   if (id) return follow(id);
-  const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
+  const { targetId } = NATIVE ? { targetId: (await hostPost("/tabs/new", { url: "about:blank" })).id }
+    : await cdp.send("Target.createTarget", { url: "about:blank" });
   if (!targets.has(targetId)) targets.set(targetId, { id: targetId, url: "about:blank", title: "", order: ++order });
   return follow(targetId);
 }
@@ -640,9 +777,10 @@ function onEvent(method, p, session) {
       if (t.type !== "page") break;
       if (!targets.has(t.targetId)) targets.set(t.targetId, { id: t.targetId, url: t.url, title: t.title, order: ++order });
       // Follow the newest page (an agent's new tab, a popup), unless it's DevTools' own.
+      // Natively the host shows new tabs itself and hostWatch follows what it shows.
       if (ready && !internal(t.url)) {
         attach(t.targetId).catch(() => {});
-        serial(() => follow(t.targetId));
+        if (!NATIVE) serial(() => follow(t.targetId));
       }
       bump();
       break;
@@ -662,7 +800,7 @@ function onEvent(method, p, session) {
       if (gone) { bySession.delete(gone.session); tabs.delete(p.targetId); }
       if (p.targetId === S.targetId) {
         S.session = null; S.targetId = null; S.casting = false;
-        serial(() => ensurePage());
+        if (!NATIVE) serial(() => ensurePage()); // natively the host shows another tab; hostWatch follows it
       }
       bump();
       break;
@@ -676,7 +814,7 @@ function onEvent(method, p, session) {
       if (p.sessionId === S.session) {
         const id = S.targetId;
         S.session = null; S.targetId = null; S.casting = false;
-        serial(() => (targets.has(id) ? follow(id) : ensurePage()));
+        serial(() => (targets.has(id) ? follow(id) : NATIVE ? null : ensurePage()));
         bump();
       }
       break;
@@ -754,6 +892,13 @@ function onEvent(method, p, session) {
     // ---- pick / annotate (Chrome's inspect mode) ----
     case "Overlay.nodeHighlightRequested":
       if (session === S.session) { S.hoverNode = p.nodeId; measureHover(p.nodeId, session); }
+      break;
+    case "Runtime.bindingCalled":
+      // pick/annotate keys pressed in the page itself (native mode: the page has the keyboard)
+      if (p.name === "__herdrKey" && session === S.session && S.inspect !== "off") {
+        if (p.payload === "escape") setInspect("off").catch(() => {});
+        else if (S.inspect === "pick" && (p.payload === "c" || p.payload === "s")) pickAction(p.payload === "c" ? "copy" : "shot").catch((e) => log("pick", e.message));
+      }
       break;
     case "Overlay.inspectNodeRequested":
       if (session === S.session) inspected(p.backendNodeId).catch((e) => log("inspect", e.message));
@@ -884,11 +1029,27 @@ function powershell(script, input, env) {
   });
 }
 
-const readClipboard = () => powershell("[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); $t = Get-Clipboard -Raw; if ($t) { [Console]::Out.Write($t) }");
+// A program's stdout, with stdin from `input` (macOS and Linux clipboards).
+function pipe(cmd, args, input) {
+  return new Promise((resolve, reject) => {
+    const p = spawn(cmd, args, { stdio: ["pipe", "pipe", "ignore"] });
+    let out = "";
+    p.stdout.on("data", (d) => (out += d));
+    p.on("error", reject);
+    p.on("close", (code) => (code === 0 ? resolve(out) : reject(new Error(`${cmd} exited ${code}`))));
+    p.stdin.end(input === undefined ? undefined : Buffer.from(input, "utf8"));
+  });
+}
+const wayland = () => Boolean(process.env.WAYLAND_DISPLAY);
+const readClipboard = () => WIN ? powershell("[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); $t = Get-Clipboard -Raw; if ($t) { [Console]::Out.Write($t) }")
+  : MAC ? pipe("pbpaste", [])
+  : wayland() ? pipe("wl-paste", ["--no-newline"]) : pipe("xclip", ["-selection", "clipboard", "-o"]);
 // --no-clipboard (tests): what would be copied goes to clipboard-test.txt beside the log instead.
 const writeClipboard = (text) => opt["no-clipboard"] === "true"
   ? fsp.writeFile(path.join(BASE, `clipboard-test${SUFFIX}.txt`), text)
-  : powershell("[Console]::InputEncoding=[Text.UTF8Encoding]::new($false); $t = [Console]::In.ReadToEnd(); Set-Clipboard -Value $t", text);
+  : WIN ? powershell("[Console]::InputEncoding=[Text.UTF8Encoding]::new($false); $t = [Console]::In.ReadToEnd(); Set-Clipboard -Value $t", text)
+  : MAC ? pipe("pbcopy", [], text)
+  : wayland() ? pipe("wl-copy", [], text) : pipe("xclip", ["-selection", "clipboard"], text);
 
 const SELECTION = `(() => {
   let d = document, a = d.activeElement;
@@ -999,6 +1160,57 @@ const HOVER_INFO = `function () {
   const text = (el.innerText || el.textContent || el.getAttribute('aria-label') || el.getAttribute('alt') || '').replace(/\\s+/g, ' ').trim();
   return { rect: { x: r.x, y: r.y, w: r.width, h: r.height }, tag: el.localName + (el.id ? '#' + el.id : cls), text: text.slice(0, 40) };
 }`;
+// Natively the panel can't draw over the page (the page is a window above it), so the hovered
+// element's outline and label chip are drawn in the page itself, in a shadow root that follows
+// the element every animation frame: the same 2 px white outline with a dark halo and chip the
+// panel draws over frames in screencast mode.
+const OUTLINE = `function (label) {
+  const el = this.nodeType === 1 ? this : this.parentElement;
+  let o = window.__herdrOutline;
+  if (!o) {
+    const host = document.createElement('div');
+    host.setAttribute('data-herdr', 'outline');
+    host.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;z-index:2147483647;pointer-events:none';
+    const root = host.attachShadow({ mode: 'open' });
+    const box = document.createElement('div');
+    box.style.cssText = 'position:fixed;box-sizing:border-box;border:2px solid #fff;border-radius:4px;box-shadow:0 0 0 1px rgba(0,0,0,.7),inset 0 0 0 1px rgba(0,0,0,.7);display:none';
+    const chip = document.createElement('div');
+    chip.style.cssText = 'position:fixed;height:21px;padding:0 7px;box-sizing:border-box;border-radius:5px;background:rgba(17,20,24,.93);border:1px solid rgba(255,255,255,.25);color:#fff;font:11px/19px "JetBrains Mono",Consolas,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:none';
+    root.append(box, chip);
+    let cur = null, text = '', raf = 0;
+    const place = () => {
+      raf = 0;
+      if (!cur || !cur.isConnected) { box.style.display = 'none'; chip.style.display = 'none'; return; }
+      if (!host.isConnected) document.documentElement.appendChild(host);
+      const r = cur.getBoundingClientRect(), W = innerWidth, H = innerHeight;
+      box.style.display = ''; box.style.left = (r.left - 3) + 'px'; box.style.top = (r.top - 3) + 'px';
+      box.style.width = (Math.max(2, r.width) + 6) + 'px'; box.style.height = (Math.max(2, r.height) + 6) + 'px';
+      chip.textContent = text + '  ' + Math.round(r.width) + '\u00d7' + Math.round(r.height);
+      const top = r.top - 26 >= 2 ? r.top - 26 : r.bottom + 26 <= H ? r.bottom + 5 : Math.max(2, r.top + 4);
+      chip.style.display = ''; chip.style.top = top + 'px';
+      chip.style.left = Math.max(4, Math.min(r.left - 3, W - 120)) + 'px'; chip.style.maxWidth = Math.max(100, W - Math.max(4, Math.min(r.left - 3, W - 120)) - 6) + 'px';
+      raf = requestAnimationFrame(place);
+    };
+    o = window.__herdrOutline = {
+      show(el, label) { cur = el; text = label; if (!raf) raf = requestAnimationFrame(place); },
+      hide() { cur = null; box.style.display = 'none'; chip.style.display = 'none'; },
+    };
+  }
+  o.show(el, label);
+}`;
+// The page's own keys while picking (the page has the keyboard natively): Esc leaves the mode,
+// C and S copy or screenshot in pick mode.
+const KEYS_INSTALL = `(() => {
+  if (window.__herdrKeysOn !== undefined) { window.__herdrKeysOn = true; return; }
+  window.__herdrKeysOn = true;
+  addEventListener('keydown', (e) => {
+    if (!window.__herdrKeysOn || typeof __herdrKey !== 'function') return;
+    const k = (e.key || '').toLowerCase();
+    if (k === 'escape' || (!e.ctrlKey && !e.altKey && !e.metaKey && (k === 'c' || k === 's'))) {
+      e.preventDefault(); e.stopImmediatePropagation(); __herdrKey(k);
+    }
+  }, true);
+})()`;
 let hoverBusy = false, hoverNext = null, hoverSeq = 0;
 async function measureHover(nodeId, session) {
   if (hoverBusy) { hoverNext = { nodeId, session }; return; }
@@ -1010,6 +1222,14 @@ async function measureHover(nodeId, session) {
     if (session === S.session && S.inspect !== "off" && r.result?.value) {
       S.hover = { seq: ++hoverSeq, nodeId, ...r.result.value };
       bump();
+      if (NATIVE) {
+        const h = S.hover;
+        cdp.send("DOM.resolveNode", { nodeId }, session, 3000)
+          .then(({ object }) => cdp.send("Runtime.callFunctionOn", { objectId: object.objectId, functionDeclaration: OUTLINE,
+            arguments: [{ value: `${h.tag}${h.text ? ` "${h.text}"` : ""}` }] }, session, 3000)
+            .finally(() => cdp.send("Runtime.releaseObject", { objectId: object.objectId }, session).catch(() => {})))
+          .catch(() => {});
+      }
       if (PERF.hoverAt) { PERF.hover.push(Date.now() - PERF.hoverAt); PERF.hoverAt = 0; if (PERF.hover.length > 200) PERF.hover.shift(); }
     }
   } catch {} finally {
@@ -1025,9 +1245,11 @@ async function inspectOn(session, on) {
       await cdp.send("Overlay.enable", {}, session);
       await cdp.send("DOM.getDocument", { depth: 0 }, session);
       await cdp.send("Overlay.setInspectMode", { mode: "searchForNode", highlightConfig: HIGHLIGHT }, session);
+      if (NATIVE) await cdp.send("Runtime.evaluate", { expression: KEYS_INSTALL }, session).catch(() => {});
     } else {
       await cdp.send("Overlay.setInspectMode", { mode: "none", highlightConfig: HIGHLIGHT }, session);
       await cdp.send("Overlay.hideHighlight", {}, session);
+      if (NATIVE) await cdp.send("Runtime.evaluate", { expression: "window.__herdrOutline && window.__herdrOutline.hide(); window.__herdrKeysOn = false" }, session).catch(() => {});
     }
   } catch (e) { log("inspect mode", e.message); }
 }
@@ -1077,7 +1299,7 @@ async function elementShot(backendNodeId, info, session = S.session) {
   const x0 = Math.max(0, r.x), y0 = Math.max(0, r.y), x1 = Math.min(S.width, r.x + r.w), y1 = Math.min(S.height, r.y + r.h);
   if (x1 - x0 < 1 || y1 - y0 < 1) return null;
   await cdp.send("Overlay.hideHighlight", {}, session).catch(() => {});
-  await cdp.send("Runtime.evaluate", { expression: "window.__herdrMarks && window.__herdrMarks.hide(true)" }, session).catch(() => {});
+  await cdp.send("Runtime.evaluate", { expression: "window.__herdrMarks && window.__herdrMarks.hide(true); window.__herdrOutline && window.__herdrOutline.hide()" }, session).catch(() => {});
   try {
     const shot = await cdp.send("Page.captureScreenshot", { format: "png",
       clip: { x: x0 + info.scroll.x, y: y0 + info.scroll.y, width: x1 - x0, height: y1 - y0, scale: 1 } }, session, 10000);
@@ -1103,6 +1325,8 @@ async function outerHtml(backendNodeId, session = S.session, max = 1_000_000) {
 // (with a screenshot taken now, while it looks the way the person saw it).
 async function inspected(backendNodeId) {
   const mode = S.inspect, session = S.session;
+  // natively the panel freezes the page for the note popover: no hover outline in that still
+  if (NATIVE) cdp.send("Runtime.evaluate", { expression: "window.__herdrOutline && window.__herdrOutline.hide()" }, session).catch(() => {});
   const info = await elementInfo(backendNodeId, session);
   if (!info) return;
   const shot = mode === "annotate" ? await elementShot(backendNodeId, info, session).catch(() => null) : null;
@@ -1275,7 +1499,10 @@ async function route(method, pathname, q, b) {
     case "/copy": return copy(b);
     case "/paste": return paste();
     case "/target": if (!targets.has(b.id)) throw new Error("No such page"); await serial(() => follow(b.id)); return { ok: true };
-    case "/close-target": await cdp.send("Target.closeTarget", { targetId: b.id ?? S.targetId }); return { ok: true };
+    case "/close-target":
+      if (NATIVE) await hostPost("/tabs/close", { id: b.id ?? S.targetId });
+      else await cdp.send("Target.closeTarget", { targetId: b.id ?? S.targetId });
+      return { ok: true };
     case "/tune": { // debugging: a fixed frame gap (0 = adaptive), a screencast pixel scale (0 = device)
       if (b.minFrameMs !== undefined) MIN_FRAME_MS = Number(b.minFrameMs);
       if (b.castScale !== undefined) { PERF.castScale = Number(b.castScale); await restartCast(); }
@@ -1308,7 +1535,7 @@ async function route(method, pathname, q, b) {
     }
     case "/new": {
       const url = normalizeUrl(b.url) ?? DEFAULT_URL;
-      const { targetId } = await cdp.send("Target.createTarget", { url });
+      const { targetId } = NATIVE ? { targetId: (await hostPost("/tabs/new", { url })).id } : await cdp.send("Target.createTarget", { url });
       if (!targets.has(targetId)) targets.set(targetId, { id: targetId, url, title: "", order: ++order });
       await serial(() => follow(targetId));
       return { ok: true, targetId };
@@ -1354,7 +1581,8 @@ const readyPromise = new Promise((r) => (setReady = r));
 async function shutdown(code, closeBrowser) {
   if (exiting) return;
   exiting = true;
-  if (closeBrowser && cdp && !cdp.closed) {
+  if (closeBrowser && NATIVE) await hostPost("/shutdown", {}, 3000).catch(() => {});
+  else if (closeBrowser && cdp && !cdp.closed) {
     await cdp.send("Browser.close", {}, undefined, 3000).catch(() => {});
   }
   try { server.close(); } catch {}
@@ -1376,6 +1604,16 @@ async function main() {
   // A busy browser can be slow to answer: if the port is open, give it longer before
   // starting another (a second Chrome on the same profile would only hand off and quit).
   if (!v && (await portOpen())) v = (await cdpVersion(8000)) ?? (await cdpVersion(8000));
+  if (NATIVE) {
+    try { v = await nativeBrowser(v); }
+    catch (e) {
+      // no native view: the screencast it is
+      log("native view unavailable:", e.message, "- using the screencast");
+      NATIVE = false;
+      S.error = null;
+      v = await cdpVersion();
+    }
+  }
   if (v) log("reusing browser on port", CDP_PORT, v.Browser);
   else if (await portOpen()) throw new Error(`Port ${CDP_PORT} is taken but doesn't answer as a browser`);
   else v = await launchBrowser();
@@ -1398,6 +1636,55 @@ async function main() {
   if (opt.url && S.url === "about:blank") navigate(opt.url).catch(() => {});
 
   setInterval(() => { if (!watching() && S.casting) stopCast(); }, 1000);
+  if (NATIVE) hostWatch();
+}
+
+// Natively the host decides which tab shows (a page's popup opens as a tab there): follow it,
+// and pick up pages it made that no event announced (an adopted popup changes target).
+async function hostWatch() {
+  let ver = -1;
+  while (!exiting && NATIVE) {
+    let hs = null;
+    try {
+      const r = await fetch(`${HOST}/state?since=${ver}&wait=8000`, { signal: AbortSignal.timeout(12000) });
+      hs = r.ok ? await r.json() : null;
+    } catch {}
+    if (!hs?.ok) { await sleep(1000); continue; }
+    ver = hs.ver;
+    if ((hs.tabs ?? []).some((t) => t.id && !targets.has(t.id))) {
+      try {
+        const { targetInfos } = await cdp.send("Target.getTargets", {}, undefined, 5000);
+        for (const t of targetInfos) if (t.type === "page" && !targets.has(t.targetId)) {
+          targets.set(t.targetId, { id: t.targetId, url: t.url, title: t.title, order: ++order });
+          attach(t.targetId).catch(() => {});
+        }
+        bump();
+      } catch {}
+    }
+    if (hs.active && hs.active !== S.targetId && targets.has(hs.active)) serial(() => follow(hs.active));
+  }
+}
+
+// The host's browser on CDP_PORT: reuse a running host, else close whatever else holds the
+// port (the screencast's headless Chrome from before) and start the host.
+async function nativeBrowser(v) {
+  const hs = await hostState();
+  if (hs?.ok && v) return v;
+  if (hs?.ok) {
+    for (let i = 0; i < 100 && !v; i++) { await sleep(150); v = await cdpVersion(); }
+    if (v) return v;
+    throw new Error("the host runs but its DevTools port doesn't answer");
+  }
+  if (v) {
+    log("closing the browser on", CDP_PORT, v.Browser, "for the native view");
+    try {
+      const c = new Cdp(v.webSocketDebuggerUrl);
+      await c.connect();
+      await c.send("Browser.close", {}, undefined, 3000).catch(() => {});
+    } catch {}
+    for (let i = 0; i < 50 && (await portOpen()); i++) await sleep(150);
+  }
+  return launchHost();
 }
 
 process.on("SIGINT", () => shutdown(0, false));

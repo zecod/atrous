@@ -21,7 +21,7 @@ const stop = (_e, cx) => cx.stop_propagation();
 // The message an agent gets: the pages, then per note its number, intent, element and text.
 export function noteMessage(notes) {
   const out = [`Feedback from the browser panel: ${notes.length} note${notes.length === 1 ? "" : "s"} on page elements.`,
-    "(The panel is a headless Chrome you can drive yourself: Playwright connectOverCDP(\"http://127.0.0.1:9333\").)", ""];
+    "(The panel is a Chromium browser you can drive yourself: Playwright connectOverCDP(\"http://127.0.0.1:9333\").)", ""];
   let page = null;
   notes.forEach((n, i) => {
     if (n.url !== page) {

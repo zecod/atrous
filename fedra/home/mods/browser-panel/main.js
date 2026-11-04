@@ -1,6 +1,16 @@
 // Browser: a real web page in the side panel, shared with coding agents.
 //
-// GPUI has no web view, so a small Node helper (helper.mjs, started in the background with
+// On Windows the page is drawn natively: herdr-browser-host (native/, a WebView2) shows it in a
+// borderless window owned by herdr's and kept exactly over this panel's page area, at the
+// display's refresh rate, with the page's own mouse, keyboard, IME, clipboard and scrolling.
+// This panel says how big the area is and whether it shows (POST /place on the host, every
+// change and each second); the host finds where it is in herdr's own frame (two marker squares
+// this panel draws under the page). While something of this panel's (a menu, the note popover,
+// a dialog) or herdr's (an overlay) must draw over the page, the host hides it and this panel
+// shows a still of the page in its place. Everything else is the same in both modes.
+//
+// Elsewhere, or when the native view can't start (props { screencast: true } forces it), the
+// page is streamed: a small Node helper (helper.mjs, started in the background with
 // `hc run --bg --name herdr-browser`) runs a headless Chrome with the DevTools Protocol on
 // 127.0.0.1:9333 and streams the page it follows into JPEG frames in mods/browser-panel-frames/
 // (a sibling folder, not a mod: frames written in this folder would reload this mod; see
@@ -14,7 +24,8 @@
 // Starts lazily (the first time it is shown) and polls only while shown. Closing the panel
 // leaves Chrome running for agents; the footer's Stop closes it.
 //
-// Props: { url? } the first page when it starts Chrome; { scale? } overrides the display scale.
+// Props: { url? } the first page when it starts Chrome; { scale? } overrides the display scale;
+// { screencast? } never draws natively; { apiPort?, cdpPort?, hostPort? } other ports (9334, 9333, 9335).
 // Commands (keys.json "browser-panel.<name>"): focus, url, back, forward, reload, stop, start,
 // import (Import from Chrome, asks first), import-now, pick, annotate, debug[:console|network|elements],
 // note:<text> (saves the open note), send-to:<terminal> (sends the notes there), new-tab[:<url>],
@@ -27,11 +38,19 @@ import { Notes } from "./notes.js";
 import { Debug } from "./debug.js";
 
 const MOD = "browser-panel";
-const NAME = "herdr-browser"; // the helper's herdr-core terminal
-const API_PORT = 9334;
-const CDP_PORT = 9333;
-const API = `http://127.0.0.1:${API_PORT}`;
-const CDP = `http://127.0.0.1:${CDP_PORT}`;
+let NAME = "herdr-browser"; // the helper's herdr-core terminal
+let API_PORT = 9334, CDP_PORT = 9333, HOST_PORT = 9335;
+let API = `http://127.0.0.1:${API_PORT}`;
+let CDP = `http://127.0.0.1:${CDP_PORT}`;
+let HOST = `http://127.0.0.1:${HOST_PORT}`; // the native host (Windows)
+function usePorts(p) {
+  API_PORT = Number(p?.apiPort) || 9334; CDP_PORT = Number(p?.cdpPort) || 9333; HOST_PORT = Number(p?.hostPort) || 9335;
+  API = `http://127.0.0.1:${API_PORT}`; CDP = `http://127.0.0.1:${CDP_PORT}`; HOST = `http://127.0.0.1:${HOST_PORT}`;
+  NAME = API_PORT === 9334 ? "herdr-browser" : `herdr-browser-${API_PORT}`;
+}
+// Windows homes start with a drive letter; macOS and Linux are told apart once with uname.
+const isWindows = () => /^[a-z]:[\\/]/i.test(String(appHome() ?? ""));
+const MARK_A = "#ff00ff", MARK_B = "#00ffff", MARK = 4; // the native view's position markers (see top)
 const FRAMES = `mods/${MOD}-frames`;
 const I = (name) => `mods/${MOD}/icons/${name}.svg`;
 const WAIT_FOR_WATCHER = true; // show a new frame only once herdr's watcher has reported its file (see apply)
@@ -78,6 +97,10 @@ function shownInLayout() {
 
 // Windows' display scale (AppliedDPI / 96): frames are rendered at physical pixels.
 async function osScale() {
+  if (!isWindows()) {
+    try { if ((await exec("uname", ["-s"])).stdout.trim() === "Darwin") return 2; } catch {}
+    return 1;
+  }
   try {
     const r = await exec("reg", ["query", "HKCU\\Control Panel\\Desktop\\WindowMetrics", "/v", "AppliedDPI"]);
     const m = /AppliedDPI\s+REG_DWORD\s+0x([0-9a-f]+)/i.exec(r.stdout);
@@ -115,12 +138,28 @@ function norm(p) {
   return s.replace(/^\/+/, "");
 }
 
+// The browser's data folder (profile, import report), as the helper and importer use it.
+async function browserBase() {
+  if (isWindows()) return `${(await exec("cmd", ["/c", "echo", "%LOCALAPPDATA%"])).stdout.trim().replace(/\\/g, "/")}/herdr-browser`;
+  const sh = async (script) => (await exec("sh", ["-c", script])).stdout.trim();
+  if ((await sh("uname -s")) === "Darwin") return `${await sh('printf %s "$HOME"')}/Library/Application Support/herdr-browser`;
+  return `${await sh('printf %s "${XDG_DATA_HOME:-$HOME/.local/share}"')}/herdr-browser`;
+}
+
 const isWeb = (url) => /^https?:\/\//i.test(url ?? "");
 const hostOf = (url) => { try { return new URL(url).host; } catch { return url ?? ""; } };
 
 export default class Browser extends View {
   init(_props, cx) {
+    usePorts(props());
+    this.homeLayout = String(shared("layout") ?? ""); // the layout this view belongs to
     this.st = null; // the helper's last state
+    this.host = null; // the native host's last state (Windows)
+    this.hostVer = -1;
+    this.stillShown = null; // the still drawn in place of the native view: { path, w, h }
+    this.herdrPid = 0;
+    this.hostGen = 0;
+    this.hostLooping = false;
     this.ver = -1;
     this.frames = []; // frame paths, newest last
     this.area = null; // the page area, logical px
@@ -162,6 +201,118 @@ export default class Browser extends View {
     });
     // Layout changes (panel shown, another stack child picked) re-render us; this is a backstop.
     cx.timer.every(2000, (cx) => this.wake(cx));
+    // The native view follows this panel: shown or not (a stack switch doesn't render a hidden
+    // child, so it's checked here), its size, and a heartbeat (no heartbeat: the host hides it).
+    cx.timer.every(100, (cx) => {
+      if (!this.wantNative()) return;
+      const shown = this.isShown();
+      if (shown !== this.visible) { this.visible = shown; this.wake(cx); cx.notify(); }
+      this.sendPlace(cx);
+    });
+    if (this.wantNative()) cx.spawn(async (cx) => {
+      // herdr's own process, so the host owns its view to the right window: exec runs programs
+      // as herdr-app's children.
+      try { this.herdrPid = Number((await exec("node", ["-e", "process.stdout.write(String(process.ppid))"])).stdout.trim()) || 0; } catch {}
+    });
+  }
+
+  // ---- native view (Windows) ----
+
+  // Native unless told otherwise or the helper fell back to the screencast.
+  wantNative() {
+    return isWindows() && !props()?.screencast && !(this.st && this.st.native === false && this.st.ready);
+  }
+
+  isNative() {
+    return Boolean(this.st?.native) && this.wantNative();
+  }
+
+  // Something of this panel's draws over the page: the view steps aside for a still.
+  freezeNeeded() {
+    return Boolean(this.menu || this.imp || this.draft || this.sendMenu || (this.showNotes && this.notes.length));
+  }
+
+  layoutSig() {
+    try { return JSON.stringify((findPath(layout()) ?? []).map((n) => [n.id, n.size, n.hidden ? 1 : 0, n.active ?? null])); } catch { return ""; }
+  }
+
+  placeState() {
+    const a = this.area;
+    const keys = this.herdrKeyActions();
+    return {
+      visible: Boolean(this.visible && this.isNative() && !this.stopped && !this.importing && this.connected && a),
+      frozen: this.freezeNeeded(),
+      w: a ? Math.round(a.width * 100) / 100 : 0, h: a ? Math.round(a.height * 100) / 100 : 0,
+      sig: this.layoutSig(), keys, stillShown: this.stillShown?.path ?? null, pid: this.herdrPid || undefined,
+    };
+  }
+
+  sendPlace(cx, force) {
+    const st = this.placeState();
+    const key = JSON.stringify(st);
+    if (!force && key === this.lastPlaceKey && Date.now() - (this.lastPlaceAt ?? 0) < 1000) return;
+    this.lastPlaceKey = key;
+    this.lastPlaceAt = Date.now();
+    cx.spawn(async () => { try { await fetch(`${HOST}/place`, post(st)); } catch {} });
+    if (st.visible && !this.hostLooping) this.hostLoop(cx);
+  }
+
+  // The host's state: shown or not, its still, and the keys it passes back (Ctrl+L, Ctrl+T).
+  hostLoop(cx) {
+    this.hostLooping = true;
+    const gen = ++this.hostGen;
+    cx.spawn(async (cx) => {
+      try {
+        while (gen === this.hostGen && this.isNative()) {
+          let hs = null;
+          try {
+            const r = await fetch(`${HOST}/state?since=${this.hostVer}&wait=8000`);
+            if (r.ok) hs = await r.json();
+          } catch {}
+          if (gen !== this.hostGen) break;
+          if (!hs?.ok) { if (this.host) { this.host = null; this.hostVer = -1; cx.notify(); } await cx.sleep(500); continue; }
+          this.hostVer = hs.ver;
+          this.onHost(hs, cx);
+        }
+      } finally { if (gen === this.hostGen) this.hostLooping = false; }
+    });
+  }
+
+  onHost(hs, cx) {
+    const prev = this.host;
+    this.host = hs;
+    if (this.hostEventSeq === undefined || hs.pid !== prev?.pid) this.hostEventSeq = hs.eventSeq ?? 0; // a new host counts from 0
+    for (const e of hs.events ?? []) {
+      if (e.seq <= this.hostEventSeq) continue;
+      this.hostEventSeq = e.seq;
+      if (e.type === "url") this.focusUrl();
+      else if (e.type === "new-tab") this.call("/new", {}, cx);
+    }
+    const still = hs.still;
+    if (still?.path && still.path !== this.stillShown?.path && still.path !== this.stillWanted) {
+      // Drawn once herdr's watcher has seen the file (else herdr reloads it on screen); then
+      // the host is told, and hides the view over it.
+      this.stillWanted = still.path;
+      cx.spawn(async (cx) => {
+        await this.whenSeen(still.path, cx);
+        if (this.stillWanted !== still.path) return;
+        this.stillShown = { ...still };
+        cx.notify();
+        await cx.sleep(80); // decoded and on screen
+        this.sendPlace(cx, true);
+      });
+    }
+    cx.notify();
+  }
+
+  async whenSeen(path, cx, ms = 400) {
+    const n = norm(path), until = Date.now() + ms;
+    while (!this.seenFrames.has(n) && Date.now() < until) await cx.sleep(15);
+  }
+
+  async close(cx) {
+    if (!this.wantNative()) return;
+    try { await fetch(`${HOST}/place`, post({ visible: false })); } catch {}
   }
 
   scale() {
@@ -170,13 +321,17 @@ export default class Browser extends View {
   }
 
   isShown() {
-    return props()?.overlay ? true : shownInLayout();
+    if (props()?.overlay) return true;
+    // A layout switch keeps this view alive but off screen (no close()): it's ours only in its layout.
+    if (String(shared("layout") ?? "") !== this.homeLayout) return false;
+    return shownInLayout();
   }
 
   wake(cx) {
     this.visible = this.isShown();
     this.fitPanel();
     if (this.visible && this.area && this.os && !this.looping && !this.stopped) this.loop(cx);
+    if (this.wantNative()) this.watchFrames(cx); // stills arrive through the frames folder too
   }
 
   // A page needs room: while the browser shows, a side panel narrower than WIDE is widened,
@@ -330,6 +485,11 @@ export default class Browser extends View {
         "--port", String(API_PORT), "--cdp-port", String(CDP_PORT), "--home", home, "--frames", FRAMES,
         "--width", String(Math.round(a.width)), "--height", String(Math.round(a.height)), "--scale", String(this.scale())];
       if (props()?.url) args.push("--url", String(props().url));
+      if (this.wantNative()) {
+        args.push("--native", "true", "--host-port", String(HOST_PORT));
+        if (this.herdrPid) args.push("--herdr-pid", String(this.herdrPid));
+        if (props()?.hostArgs) args.push(`--host-args=${props().hostArgs}`);
+      }
       const r = await hc(args);
       if (r.code !== 0) this.status = `Couldn't start the browser helper: ${(r.stderr || r.stdout).trim()}`;
     } catch (e) {
@@ -393,6 +553,7 @@ export default class Browser extends View {
     this.handle.focus(); // leave the address bar, as a browser does
     if (!this.connected) { this.pendingUrl = url; this.wake(cx); return; }
     this.call("/navigate", { url }, cx);
+    if (this.isNative()) cx.spawn(async () => { try { await fetch(`${HOST}/focus`, post({ page: true })); } catch {} });
   }
 
   syncUrl() {
@@ -436,12 +597,16 @@ export default class Browser extends View {
   openOutside(cx) {
     const url = this.st?.url;
     if (!isWeb(url)) return;
-    cx.spawn(async () => { await exec("rundll32", ["url.dll,FileProtocolHandler", url]).catch(() => {}); });
+    cx.spawn(async () => {
+      if (isWindows()) await exec("rundll32", ["url.dll,FileProtocolHandler", url]).catch(() => {});
+      else await exec("open", [url]).catch(() => exec("xdg-open", [url])).catch(() => {});
+    });
   }
 
   copyEndpoint(cx) {
     cx.spawn(async (cx) => {
-      await exec("powershell", ["-NoProfile", "-NonInteractive", "-Command", `Set-Clipboard -Value '${CDP}'`]).catch(() => {});
+      if (isWindows()) await exec("powershell", ["-NoProfile", "-NonInteractive", "-Command", `Set-Clipboard -Value '${CDP}'`]).catch(() => {});
+      else await api("/clipboard", { text: CDP }).catch(() => {});
       this.copied = true;
       cx.notify();
       await cx.sleep(1400);
@@ -501,13 +666,15 @@ export default class Browser extends View {
   }
 
   async runImporter(cx) {
-    const local = (await exec("cmd", ["/c", "echo", "%LOCALAPPDATA%"])).stdout.trim().replace(/\\/g, "/");
-    const reportFile = `${local}/herdr-browser/import-report.json`;
+    const base = await browserBase();
+    const reportFile = `${base}/import-report.json`;
+    // Natively the browser is WebView2: its profile is the host's data folder's EBWebView.
+    const dest = this.isNative() ? ["--dest", `${base}/${HOST_PORT === 9335 ? "webview2" : `webview2-${HOST_PORT}`}/EBWebView`] : [];
     const home = appHome().replace(/\\/g, "/");
     await hc(["kill", IMPORT]).catch(() => {});
     await hc(["rm", IMPORT]).catch(() => {});
     const r = await hc(["run", "--bg", "--json", "--no-parent", "--no-notify", "--name", IMPORT, "--cwd", `${home}/mods/${MOD}`, "--",
-      "node", `${home}/mods/${MOD}/import-chrome.mjs`, "--report", reportFile, "--cdp-port", String(CDP_PORT)]);
+      "node", `${home}/mods/${MOD}/import-chrome.mjs`, "--report", reportFile, "--cdp-port", String(CDP_PORT), ...dest]);
     if (r.code !== 0) throw new Error(`Couldn't start the import: ${(r.stderr || r.stdout).trim()}`);
     const started = Date.now();
     for (;;) {
@@ -553,6 +720,7 @@ export default class Browser extends View {
 
   fit() {
     const st = this.st, a = this.area;
+    if (this.isNative()) return a ? { s: 1, w: a.width, h: a.height } : null; // page CSS px = panel px
     if (!st?.frameW || !st?.frameH || !a) return null;
     const s = Math.min(a.width / st.frameW, a.height / st.frameH);
     return { s, w: st.frameW * s, h: st.frameH * s };
@@ -572,6 +740,7 @@ export default class Browser extends View {
     this.handle.focus();
     if (this.menu || this.sendMenu) { this.menu = false; this.sendMenu = null; cx.notify(); }
     cx.stop_propagation();
+    if (this.isNative()) return; // a press here lands on the still: the page isn't there
     const p = this.toPage(e);
     if (!p) return;
     this.buttons |= BIT[button];
@@ -587,6 +756,7 @@ export default class Browser extends View {
   }
 
   move(e, cx) {
+    if (this.isNative()) return;
     const p = this.toPage(e, Boolean(this.buttons));
     if (!p) return;
     const button = this.buttons & 1 ? "left" : this.buttons & 2 ? "right" : this.buttons & 4 ? "middle" : "none";
@@ -595,6 +765,7 @@ export default class Browser extends View {
 
   wheel(e, cx) {
     cx.stop_propagation();
+    if (this.isNative()) return;
     const p = this.toPage(e, true) ?? { x: 10, y: 10 };
     // GPUI: positive y scrolls up; CDP: positive deltaY scrolls down. A wheel notch is
     // 3 lines on Windows, which Chrome turns into 100 px.
@@ -618,6 +789,28 @@ export default class Browser extends View {
       this.bound = new Set(list.filter((b) => sections.has(b.section)).map((b) => chord(b.keys)));
     }
     return this.bound;
+  }
+
+  // herdr's chords with their actions (this mod's section over the layout's over global), for the
+  // native view: pressed in the page, the host runs the action in herdr.
+  herdrKeyActions() {
+    const layoutName = String(shared("layout") ?? "");
+    let list = [];
+    try { list = keys(); } catch {}
+    const sig = `${layoutName}|${list.length}`;
+    if (this.keyActSig !== sig) {
+      this.keyActSig = sig;
+      const rank = { global: 1, [`layout:${layoutName}`]: 2, [`mod:${MOD}`]: 3 };
+      const best = new Map();
+      for (const b of list) {
+        const r = rank[b.section];
+        if (!r || !b.action) continue;
+        const c = chord(b.keys), cur = best.get(c);
+        if (!cur || cur.r < r) best.set(c, { r, a: String(b.action) });
+      }
+      this.keyActs = [...best].map(([k, v]) => ({ k, a: v.a }));
+    }
+    return this.keyActs;
   }
 
   key(e, cx) {
@@ -744,7 +937,15 @@ export default class Browser extends View {
       .on_mouse_up("middle", (e, cx) => this.release(e, "middle", cx))
       .on_mouse_move((e, cx) => this.move(e, cx))
       .on_scroll_wheel((e, cx) => this.wheel(e, cx));
-    if (this.connected && fit && this.frames.length) {
+    if (this.isNative()) {
+      // Under the native view: the markers it's found by, and its still while it's away.
+      view = view.child(div().absolute().top(0).left(0).size(MARK).bg(MARK_A))
+        .child(div().absolute().bottom(0).right(0).size(MARK).bg(MARK_B));
+      const away = !this.host?.shown;
+      if (away && this.stillShown && this.area) {
+        view = view.child(image(this.stillShown.path).id("bp-still").absolute().top(0).left(0).w(this.area.width).h(this.area.height));
+      }
+    } else if (this.connected && fit && this.frames.length) {
       // Oldest first, newest on top, each at its own size (a frame from before a resize isn't
       // stretched). The older ones only fill in while the newest loads: they are clipped to the
       // newest frame's box, so a bigger frame from before a resize never shows beside it.
@@ -764,14 +965,19 @@ export default class Browser extends View {
           .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
           .on_click((_e, cx) => this.startBrowser(cx)).child("Start browser"),
       ]));
-    } else if (!this.connected || !this.frames.length) {
+    } else if (this.isNative() ? !this.host?.shown && !this.stillShown && !this.freezeNeeded() : (!this.connected || !this.frames.length)) {
       view = view.child(this.center(t, [
         svg(I("spinner")).size(18).text_color(t.working).spin(900),
-        div().child(this.status || (this.connected ? "Loading…" : "Starting the browser…")),
+        div().child(this.st?.phase || this.status || (this.connected ? "Loading…" : "Starting the browser…")),
+      ]));
+    } else if (!this.connected) {
+      view = view.child(this.center(t, [
+        svg(I("spinner")).size(18).text_color(t.working).spin(900),
+        div().child(this.st?.phase || this.status || "Starting the browser…"),
       ]));
     }
     const error = this.flash || this.st?.error;
-    if (error && !this.stopped) {
+    if (error && !this.stopped && !this.isNative()) {
       view = view.child(h_flex().id("bp-error").absolute().top(8).left(8).right(8).px(10).py(7).gap(8).items_center()
         .rounded(8).border_1().border_color(t.border).bg(t.popover).text_size(12).text_color(t.blocked)
         .child(div().flex_1().min_w(0).child(error))
@@ -783,17 +989,31 @@ export default class Browser extends View {
     }
     if (this.connected && !this.stopped && fit && this.inspectMode() !== "off") {
       const sel = this.draft?.picked?.rect && !this.draft.editing ? this.draft.picked : null;
-      const hov = this.st.hover && (!sel || this.st.hover.nodeId !== sel.nodeId) ? this.st.hover : null;
+      // natively the page draws the hover outline itself; the selected one goes on the still
+      const hov = !this.isNative() && this.st.hover && (!sel || this.st.hover.nodeId !== sel.nodeId) ? this.st.hover : null;
       if (hov) view = view.child(this.outline(t, fit, hov.rect, `${hov.tag}${hov.text ? ` "${hov.text}"` : ""}`, false));
       if (sel) view = view.child(this.outline(t, fit, sel.rect, null, true));
     }
     if (this.connected && !this.stopped) {
       if (this.draft) view = view.child(this.notePopover(t, fit));
-      else if (this.notes.length && (this.showNotes || this.inspectMode() === "annotate") && !this.sendMenu) view = view.child(this.notesCard(t));
+      else if (this.notes.length && (this.showNotes || (this.inspectMode() === "annotate" && !this.isNative())) && !this.sendMenu) view = view.child(this.notesCard(t));
       if (this.sendMenu) view = view.child(this.sendMenuView(t));
     }
-    if (this.toastMsg) view = view.child(this.toastView(t));
+    if (this.toastMsg && !this.isNative()) view = view.child(this.toastView(t));
     return view;
+  }
+
+  // Natively nothing can float over the page, so the error sits above it.
+  errorBar(t) {
+    const error = this.flash || this.st?.error;
+    if (!error || this.stopped || !this.isNative()) return null;
+    return h_flex().id("bp-error-bar").flex_none().px(10).py(6).gap(8).items_center().border_b(1).border_color(t.border)
+      .bg(t.surface).text_size(12).text_color(t.blocked)
+      .child(div().flex_1().min_w(0).child(error))
+      .child(div().id("bp-error-bar-x").size(18).flex_none().flex().items_center().justify_center().rounded(5).text_color(t.dim)
+        .cursor_pointer().hover((s) => s.bg(t.hover))
+        .on_click((_e, cx) => { this.flash = null; if (this.st) this.st.error = null; cx.notify(); })
+        .child(svg(I("x")).size(11)));
   }
 
   footer(t) {
@@ -803,6 +1023,14 @@ export default class Browser extends View {
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .on_click(action).tooltip(tip)
       .child(svg(I(icon)).size(11)).child(label);
+    const m = this.isNative() ? this.toastMsg : null;
+    if (m) {
+      return h_flex().id("bp-footer-toast").h(26).flex_none().px(10).gap(10).items_center().border_t(1).border_color(t.border)
+        .bg(t.solid).text_color(t.solid_foreground).text_size(11.5)
+        .child(div().flex_1().min_w(0).truncate().child(m.text))
+        .when(Boolean(m.action), (el) => el.child(div().id("bp-footer-toast-act").flex_none().font_semibold().cursor_pointer().underline()
+          .on_click((_e, cx) => { const a = m.action; this.toastMsg = null; a.run(cx); }).child(m.action.label)));
+    }
     return h_flex().h(26).flex_none().px(5).gap(4).items_center().border_t(1).border_color(t.border).text_size(11).text_color(t.dim)
       .child(link("bp-cdp", "plug", this.copied ? "Copied" : `CDP ${CDP.slice(7)}`,
         `Agents drive this browser over the DevTools Protocol at ${CDP}. Playwright: chromium.connectOverCDP("${CDP}"). Playwright MCP: --cdp-endpoint ${CDP}. Click to copy.`,
@@ -844,6 +1072,7 @@ export default class Browser extends View {
       cx.spawn(async () => this.fitPanel()); // run() is ignored during render
     }
     if (this.visible && this.area && this.os && !this.looping && !this.stopped && !this.importing) this.loop(cx);
+    if (this.wantNative()) this.sendPlace(cx);
     const t = theme();
     return v_flex().id("browser-panel").relative().size_full().min_h(0).rounded(10).overflow_hidden()
       .bg(t.background).border_1().border_color(t.border).text_color(t.foreground).text_size(13)
@@ -853,6 +1082,7 @@ export default class Browser extends View {
       .when(this.connected && (this.st?.targets?.length ?? 0) > 0, (el) => el.child(this.tabStrip(t)))
       .child(this.header(t))
       .when(this.connected && this.inspectMode() !== "off", (el) => el.child(this.hintBar(t)))
+      .when(Boolean(this.errorBar(t)), (el) => el.child(this.errorBar(t)))
       .child(this.viewport(t))
       .when(this.connected && this.dbg.open, (el) => el.child(this.drawer(t)))
       .child(this.footer(t))
