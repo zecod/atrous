@@ -61,6 +61,7 @@ log(`Fedra -> ${home}${dry ? "  (dry run)" : ""}`);
 if (!dry) fs.mkdirSync(home, { recursive: true });
 
 // 1. Layout and mods: Fedra's own files, replaced whole.
+if (!dry) fs.mkdirSync(path.join(home, "layouts"), { recursive: true });
 for (const f of fs.readdirSync(path.join(src, "layouts"))) {
   saveBackup(path.join("layouts", f));
   if (!dry) fs.copyFileSync(path.join(src, "layouts", f), path.join(home, "layouts", f));
