@@ -86,7 +86,7 @@ exit 97''')
         (data / "atrous" if installed else data).mkdir(parents=True, exist_ok=True)
         log = Path(self.work.name) / "urls"
         log.unlink(missing_ok=True)
-        manifest = Path(self.work.name) / "latest.json"
+        manifest = Path(self.work.name) / "manifest.json"
         manifest.write_text('{"version":"1.0.0","targets":{"linux-x86_64":{"url":"%s","sha256":"x"}}}' % url)
         self.stub("curl", f'''out=; url=; prev=
 for a; do
@@ -94,7 +94,7 @@ for a; do
   prev=$a
 done
 echo "$url" >> "{log}"
-case $url in */latest.json) cp "{manifest}" "$out"; exit 0 ;; esac
+case $url in */manifest.json) cp "{manifest}" "$out"; exit 0 ;; esac
 exit 22''')
         env = dict(os.environ, PATH=f"{self.bin}:{os.environ['PATH']}", TEST_OS="Linux", TEST_ARCH="x86_64",
                    HOME=str(home), XDG_DATA_HOME=str(data), ATROUS_RELEASES_URL=releases)
@@ -132,7 +132,7 @@ for a; do
   if [ "$prev" = -o ]; then out=$a; else case $a in -*) ;; *) url=$a ;; esac; fi
   prev=$a
 done
-case $url in */latest.json) cp "{manifest}" "$out" ;; release) cp "{archive}" "$out" ;; *) exit 97 ;; esac''')
+case $url in */manifest.json) cp "{manifest}" "$out" ;; release) cp "{archive}" "$out" ;; *) exit 97 ;; esac''')
         installed = home / "Applications/Atrous.app/Contents/Info.plist"
         installed.parent.mkdir(parents=True)
         installed.write_bytes(b"previous installed app")

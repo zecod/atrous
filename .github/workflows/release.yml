@@ -234,7 +234,7 @@ jobs:
           retention-days: 7
 
   # The GitHub release v<version>: created as a draft, every file uploaded,
-  # then published, so `releases/latest/download/latest.json` (what installed
+  # then published, so `releases/latest/download/manifest.json` (what installed
   # apps and the installers read) never points at a version whose files
   # aren't there yet.
   publish:
@@ -274,7 +274,7 @@ jobs:
               targets[t] = {"url": f"{base}/{f.name}", "sha256": hashlib.sha256(f.read_bytes()).hexdigest()}
           # core_min: the oldest core this app works with.
           doc = {"version": version, "core_min": core, "notes": f"Atrous {version}", "targets": targets}
-          pathlib.Path("dist/latest.json").write_text(json.dumps(doc, indent=2) + "\n")
+          pathlib.Path("dist/manifest.json").write_text(json.dumps(doc, indent=2) + "\n")
           print(json.dumps(doc, indent=2))
           # This version's section of the changelog, as the release's notes.
           text = pathlib.Path("CHANGELOG.md").read_text()
@@ -289,7 +289,7 @@ jobs:
           gh release create "v$version" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
             --title "Atrous $version" --notes-file dist/notes.md
           gh release upload "v$version" --repo "$GITHUB_REPOSITORY" \
-            dist/atrous-*.tar.gz dist/latest.json dist/changelog.md dist/install.sh dist/install.ps1
+            dist/atrous-*.tar.gz dist/manifest.json dist/changelog.md dist/install.sh dist/install.ps1
           gh release edit "v$version" --repo "$GITHUB_REPOSITORY" --draft=false --latest
 
   # The drag-and-drop download, added to the published release; never holds

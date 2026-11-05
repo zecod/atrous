@@ -7,7 +7,8 @@
 # only if none is there yet; the app keeps it current after that. Running it
 # again updates the app (an open one keeps running until it quits). No admin
 # needed. Releases are GitHub releases of zecod/atrous and zecod/atrous-core;
-# ATROUS_RELEASES_URL points at a test server laid out as <url>/app, <url>/core.
+# ATROUS_RELEASES_URL points at a test server for the app (<url>/app),
+# ATC_RELEASES_URL at one for the core (laid out like GitHub's releases).
 
 # Its own scope: under `irm | iex` it would otherwise set the caller's variables.
 & {
@@ -19,7 +20,8 @@ function Fail($why) { throw "atrous: $why" }
 
 $releases = if ($env:ATROUS_RELEASES_URL) { $env:ATROUS_RELEASES_URL.TrimEnd("/") } else { $null }
 $appLatest = if ($releases) { "$releases/app" } else { "https://github.com/zecod/atrous/releases/latest/download" }
-$coreLatest = if ($releases) { "$releases/core" } else { "https://github.com/zecod/atrous-core/releases/latest/download" }
+# The core's own override (laid out like GitHub's releases), as its installer reads it.
+$coreLatest = if ($env:ATC_RELEASES_URL) { "$($env:ATC_RELEASES_URL.TrimEnd('/'))/latest/download" } else { "https://github.com/zecod/atrous-core/releases/latest/download" }
 $dir = Join-Path $env:LOCALAPPDATA "Programs\atrous"
 $arch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
 if ($arch -ne "AMD64") { Fail "no build for $arch Windows yet (x64 only)" }
@@ -33,9 +35,9 @@ if (-not (Get-Command curl.exe -ErrorAction SilentlyContinue) -or -not (Test-Pat
 $tmp = Join-Path ([IO.Path]::GetTempPath()) "atrous-install-$PID"
 New-Item -ItemType Directory -Force $tmp | Out-Null
 try {
-    curl.exe -fsSL "$appLatest/latest.json" -o "$tmp\latest.json"
+    curl.exe -fsSL "$appLatest/manifest.json" -o "$tmp\manifest.json"
     if ($LASTEXITCODE) { Fail "no release found at $appLatest (none published yet, or offline)" }
-    $m = Get-Content -Raw "$tmp\latest.json" | ConvertFrom-Json
+    $m = Get-Content -Raw "$tmp\manifest.json" | ConvertFrom-Json
     $t = $m.targets.$target
     if (-not $t.url -or -not $t.sha256) { Fail "no build for $target yet" }
 
@@ -86,7 +88,6 @@ try {
     $core = Join-Path $env:LOCALAPPDATA "Programs\atrous-core\atrous-core.exe"
     if (-not (Test-Path $core) -and -not (Get-Command atrous-core -ErrorAction SilentlyContinue)) {
         try {
-            if ($releases) { $env:ATROUS_RELEASES_URL = $releases }
             Invoke-RestMethod "$coreLatest/install.ps1" | Invoke-Expression
         } catch {
             Write-Host "atrous-core didn't install; Atrous will offer it when it opens."

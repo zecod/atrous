@@ -25,13 +25,24 @@ pub const MEDIA: &str = "https://github.com/zecod/atrous/releases/download/";
 /// Feedback opens a new issue here, prefilled; nothing is posted for the person.
 pub const ISSUES_NEW: &str = "https://github.com/zecod/atrous/issues/new";
 
-/// A test release server (`ATROUS_RELEASES_URL`), laid out like
-/// `<url>/app/latest.json`, `<url>/core/install.sh`.
-pub fn test_releases() -> Option<String> {
-    std::env::var("ATROUS_RELEASES_URL").ok().filter(|u| !u.is_empty()).map(|u| u.trim_end_matches('/').to_owned())
+fn env_url(key: &str) -> Option<String> {
+    std::env::var(key).ok().filter(|u| !u.is_empty()).map(|u| u.trim_end_matches('/').to_owned())
 }
 
-/// A file of the app's latest release (`latest.json`, `install.sh`).
+/// Another place for the app's releases (`ATROUS_RELEASES_URL`: tests,
+/// mirrors), laid out like `<url>/app/manifest.json`.
+pub fn test_releases() -> Option<String> {
+    env_url("ATROUS_RELEASES_URL")
+}
+
+/// Another place for the core's releases: atrous-core's own override,
+/// `ATC_RELEASES_URL`, laid out like GitHub's `<url>/latest/download/<file>`
+/// (the core's installer and `atc update` read the same variable).
+pub fn core_releases() -> Option<String> {
+    env_url("ATC_RELEASES_URL")
+}
+
+/// A file of the app's latest release (`manifest.json`, `install.sh`).
 pub fn app_latest(file: &str) -> String {
     match test_releases() {
         Some(url) => format!("{url}/app/{file}"),
@@ -47,12 +58,10 @@ pub fn app_release(version: &str, file: &str) -> String {
     }
 }
 
-/// A file of the core's latest release (`latest.json`, `install.ps1`).
+/// A file of the core's latest release (`manifest.json`, `install.ps1`).
 pub fn core_latest(file: &str) -> String {
-    match test_releases() {
-        Some(url) => format!("{url}/core/{file}"),
-        None => format!("{CORE_REPO}/releases/latest/download/{file}"),
-    }
+    let base = core_releases().unwrap_or_else(|| format!("{CORE_REPO}/releases"));
+    format!("{base}/latest/download/{file}")
 }
 
 /// The command that installs the app, for people to copy.
@@ -79,10 +88,10 @@ mod tests {
 
     #[test]
     fn releases_are_github_releases_of_zecod() {
-        if test_releases().is_some() {
+        if test_releases().is_some() || core_releases().is_some() {
             return;
         }
-        assert_eq!(app_latest("latest.json"), "https://github.com/zecod/atrous/releases/latest/download/latest.json");
+        assert_eq!(app_latest("manifest.json"), "https://github.com/zecod/atrous/releases/latest/download/manifest.json");
         assert_eq!(app_release("0.2.0", "changelog.md"), "https://github.com/zecod/atrous/releases/download/v0.2.0/changelog.md");
         assert_eq!(core_latest("install.sh"), "https://github.com/zecod/atrous-core/releases/latest/download/install.sh");
         for url in [app_latest("x"), core_latest("x"), app_install_command(), core_install_command()] {

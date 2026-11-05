@@ -121,7 +121,7 @@ export default class MachineAdd extends View {
         this.typed = "";
         await this.refresh();
         await this.checkMac(target);
-      } else if (["hc_missing", "incompatible", "login_needed", "auth_failed", "host_key"].includes(why.kind) || /password|passphrase|host key|permission denied|login/i.test(why.message ?? "")) {
+      } else if (["atc_missing", "incompatible", "login_needed", "auth_failed", "host_key"].includes(why.kind) || /password|passphrase|host key|permission denied|login/i.test(why.message ?? "")) {
         this.state[target] = "terminal";
         await this.inTerminal(target);
       } else this.state[target] = why.message || "it didn't work";

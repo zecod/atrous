@@ -29,7 +29,7 @@ Remote connections use SSH through the core.
 
 ## Updates and signing
 
-Installed releases check the latest GitHub release of zecod/atrous (its `latest.json`), download an update, and check its SHA-256 checksum against that manifest before unpacking it. Until zecod/atrous has published a release, a check finds nothing.
+Installed releases check the latest GitHub release of zecod/atrous (its `manifest.json`), download an update, and check its SHA-256 checksum against that manifest before unpacking it. Until zecod/atrous has published a release, a check finds nothing.
 The app switches to the downloaded version on quit. Source builds do not update themselves.
 Core updates are handled separately by the core's updater.
 

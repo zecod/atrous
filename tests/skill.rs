@@ -8,5 +8,5 @@ fn skill_prints_the_window_manual() {
     assert_eq!(skill, include_str!("../src/SKILL.md"));
     assert!(skill.lines().count() < 500, "skill must stay under 500 lines");
     assert!(skill.starts_with("# atrous:"));
-    assert!(skill.contains("hc --skill"));
+    assert!(skill.contains("atc --skill"));
 }

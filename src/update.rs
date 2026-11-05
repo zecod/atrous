@@ -1,6 +1,6 @@
 //! The app's own updates. An installed app (Linux: `~/.local/share/atrous`,
 //! macOS: `Atrous.app`, Windows: `%LOCALAPPDATA%\Programs\atrous`) checks the
-//! `latest.json` of zecod/atrous's latest GitHub release a little
+//! `manifest.json` of zecod/atrous's latest GitHub release a little
 //! after it opens and every hour, downloads a newer build for this
 //! machine, checks its sha256 and unpacks it next to itself (`<install>.new`).
 //! The frame then shows "Restart"; the swap happens on restart or the next
@@ -12,7 +12,7 @@
 //! builds) sets `ATROUS_RELEASE`. `scripts/install-macos` makes a
 //! Atrous.app too, so the install's shape alone can't tell.
 //!
-//! The core is checked on the same clock (zecod/atrous-core's `latest.json`): a newer core
+//! The core is checked on the same clock (zecod/atrous-core's `manifest.json`): a newer core
 //! of the same generation is offered (also applied after an app update), unless
 //! a package manager owns it. Within a generation a newer core only adds.
 
@@ -121,7 +121,7 @@ fn checks_app() -> Option<PathBuf> {
 
 /// A release build checks the core; a source build only when pointed at a test release server.
 fn checks_core() -> bool {
-    option_env!("ATROUS_RELEASE").is_some() || std::env::var_os("ATROUS_RELEASES_URL").is_some()
+    option_env!("ATROUS_RELEASE").is_some() || crate::brand::test_releases().is_some() || crate::brand::core_releases().is_some()
 }
 
 /// For the settings screen: both programs, what's waiting, when we last looked.
@@ -225,8 +225,8 @@ struct CoreRelease {
 
 /// The core's latest release; Ok(None) while zecod/atrous-core has none.
 fn latest_core() -> Result<Option<CoreRelease>, String> {
-    let Some(text) = curl_found(&crate::brand::core_latest("latest.json"))? else { return Ok(None) };
-    serde_json::from_str(&text).map(Some).map_err(|e| format!("core latest.json: {e}"))
+    let Some(text) = curl_found(&crate::brand::core_latest("manifest.json"))? else { return Ok(None) };
+    serde_json::from_str(&text).map(Some).map_err(|e| format!("core manifest.json: {e}"))
 }
 
 fn after_update_target<'a>(have: &str, latest: Option<&'a CoreRelease>, generation: u64, core_min: &'a str) -> Option<&'a str> {
@@ -269,12 +269,12 @@ pub fn update_core() {
 
 /// Downloads the latest release if it's newer. Ok(Some): a version is ready.
 fn check(root: &Path) -> Result<Option<String>, String> {
-    check_from(root, &crate::brand::app_latest("latest.json"), |version| crate::brand::app_release(version, "changelog.md"))
+    check_from(root, &crate::brand::app_latest("manifest.json"), |version| crate::brand::app_release(version, "changelog.md"))
 }
 
 /// `latest`: the manifest's URL; `notes`: a version's changelog URL.
 fn check_from(root: &Path, latest: &str, notes: impl Fn(&str) -> String) -> Result<Option<String>, String> {
-    let path = "latest.json";
+    let path = "manifest.json";
     // No release yet (zecod/atrous has published none): nothing to find.
     let Some(text) = curl_found(latest)? else { return Ok(None) };
     let manifest: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("{path}: {e}"))?;
@@ -642,7 +642,7 @@ mod tests {
                     stream.read_exact(&mut byte).unwrap();
                     request.push(byte[0]);
                 }
-                assert!(request.starts_with(b"GET /app/latest.json HTTP/1.1\r\n"));
+                assert!(request.starts_with(b"GET /app/manifest.json HTTP/1.1\r\n"));
                 if recover {
                     let body = format!(r#"{{"version":"{}"}}"#, env!("CARGO_PKG_VERSION"));
                     write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
@@ -652,7 +652,7 @@ mod tests {
         let home = std::env::temp_dir().join(format!("atrous-offline-check-{}", std::process::id()));
         let mut checked = checked_at(true, 100);
         assert_eq!(checked, Some(100));
-        let latest = format!("{url}/app/latest.json");
+        let latest = format!("{url}/app/manifest.json");
         let notes = |v: &str| format!("{url}/app/{v}/changelog.md");
         let failed = check_from(&home, &latest, notes);
         assert!(failed.is_err(), "a dropped connection must fail: {failed:?}");
@@ -840,7 +840,7 @@ mod missing_release_tests {
             write!(stream, "HTTP/1.1 404 Not Found\r\nContent-Length: 9\r\nConnection: close\r\n\r\nNot Found").unwrap();
         });
         let home = std::env::temp_dir().join(format!("atrous-no-release-{}", std::process::id()));
-        let latest = format!("{url}/app/latest.json");
+        let latest = format!("{url}/app/manifest.json");
         assert_eq!(check_from(&home, &latest, |v| format!("{url}/app/{v}/changelog.md")), Ok(None));
         server.join().unwrap();
     }

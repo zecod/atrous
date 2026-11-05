@@ -293,7 +293,7 @@ impl Core {
         }
 
         let (writer, frames) = mpsc::channel::<Vec<u8>>();
-        std::thread::Builder::new().name("hc-writer".into()).spawn(move || {
+        std::thread::Builder::new().name("core-writer".into()).spawn(move || {
             while let Ok(frame) = frames.recv() {
                 if stdin.write_all(&frame).is_err() {
                     break;
@@ -311,7 +311,7 @@ impl Core {
             child: Mutex::new(child),
             lost,
         });
-        std::thread::Builder::new().name("hc-reader".into()).spawn(move || {
+        std::thread::Builder::new().name("core-reader".into()).spawn(move || {
             let _lost_tx = lost_tx;
             while let Some((channel, kind, payload)) = read_frame(&mut reader) {
                 let mut r = routes.lock().unwrap();

@@ -12,14 +12,17 @@
 set -eu
 
 # GitHub releases of zecod/atrous and zecod/atrous-core; ATROUS_RELEASES_URL
-# points at a test server laid out as <url>/app, <url>/core.
+# points at a test server for the app (<url>/app), ATC_RELEASES_URL at one for
+# the core (laid out like GitHub's releases).
 releases=${ATROUS_RELEASES_URL:-}
 if [ -n "$releases" ]; then
-  app_latest="$releases/app" core_latest="$releases/core"
+  app_latest="$releases/app"
 else
   app_latest=https://github.com/zecod/atrous/releases/latest/download
-  core_latest=https://github.com/zecod/atrous-core/releases/latest/download
 fi
+# The core's own override (laid out like GitHub's releases), as its installer reads it.
+core_latest="${ATC_RELEASES_URL:-https://github.com/zecod/atrous-core/releases}"
+core_latest="${core_latest%/}/latest/download"
 bin="$HOME/.local/bin"
 
 say() { printf '%s\n' "$*"; }
@@ -58,12 +61,12 @@ sha256() {
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-curl -fsSL "$app_latest/latest.json" -o "$tmp/latest.json" || fail "no release found at $app_latest (none published yet, or offline)"
+curl -fsSL "$app_latest/manifest.json" -o "$tmp/manifest.json" || fail "no release found at $app_latest (none published yet, or offline)"
 # Read without jq: the manifest is flat enough for sed once spaces are gone.
-entry=$(tr -d '\n ' < "$tmp/latest.json" | sed -n "s/.*\"$target\":{\([^}]*\)}.*/\1/p")
+entry=$(tr -d '\n ' < "$tmp/manifest.json" | sed -n "s/.*\"$target\":{\([^}]*\)}.*/\1/p")
 url=$(printf '%s' "$entry" | sed -n 's/.*"url":"\([^"]*\)".*/\1/p')
 want=$(printf '%s' "$entry" | sed -n 's/.*"sha256":"\([^"]*\)".*/\1/p')
-version=$(tr -d '\n ' < "$tmp/latest.json" | sed -n 's/^{"version":"\([^"]*\)".*/\1/p')
+version=$(tr -d '\n ' < "$tmp/manifest.json" | sed -n 's/^{"version":"\([^"]*\)".*/\1/p')
 [ -n "$url" ] && [ -n "$want" ] || fail "no build for $target yet"
 
 download=$url
@@ -131,7 +134,7 @@ fi
 # The core: installed only if there's none yet. One that's already there
 # (yours, or from a package manager) is left alone; the app updates it.
 if [ ! -e "$bin/atrous-core" ] && ! command -v atrous-core >/dev/null 2>&1; then
-  curl -fsSL "$core_latest/install.sh" | ATC_INSTALL_DIR="$bin" ATROUS_RELEASES_URL="$releases" sh || say "atrous-core didn't install; Atrous will offer it when it opens."
+  curl -fsSL "$core_latest/install.sh" | ATC_INSTALL_DIR="$bin" sh || say "atrous-core didn't install; Atrous will offer it when it opens."
 fi
 
 say "Atrous is installed. Open it from your apps, or run: atrous"

@@ -136,7 +136,9 @@ fn usual_dirs(home: &Path) -> Vec<PathBuf> {
         home.join(".cargo/bin"),
     ];
     if cfg!(target_os = "macos") {
+        // atrous-core's bundle: `current` selects the newest; `active` is its fixed path.
         dirs.push(home.join(".local/share/atrous-core/current/Contents/MacOS"));
+        dirs.push(home.join(".local/share/atrous-core/active/Atrous Core.app/Contents/MacOS"));
     }
     dirs
 }
@@ -235,8 +237,9 @@ mod tests {
     fn the_independent_core_bundle_is_a_discovery_fallback() {
         let home = Path::new("/Users/test");
         let dir = home.join(".local/share/atrous-core/current/Contents/MacOS");
+        let active = home.join(".local/share/atrous-core/active/Atrous Core.app/Contents/MacOS");
         let dirs = usual_dirs(home);
-        assert_eq!(dirs.last(), Some(&dir));
+        assert_eq!(&dirs[dirs.len() - 2..], &[dir.clone(), active]);
         assert_eq!(names(&dir)[0], dir.join("atrous-core"));
     }
 

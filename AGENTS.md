@@ -121,7 +121,7 @@ of that version's GitHub release (`scripts/notes-media.ts`); the app fetches
 no other notes media.
 
 A release is a `v*` tag matching Cargo.toml; `.github/workflows/release.yml`
-builds every platform and publishes the GitHub release with `latest.json`,
+builds every platform and publishes the GitHub release with `manifest.json`,
 the tarballs, `changelog.md` and the installers.
 
 Never stop, signal, or restart someone else's app or core. Use an isolated
