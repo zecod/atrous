@@ -9,10 +9,15 @@
 //! inside the copied JSON becomes `.config/atrous`.
 //!
 //! What stays: herdr's shipped mods and layouts (Atrous ships its own),
-//! Fedra's mods and layout (Fedra becomes part of Atrous), `accounts/`
-//! (moved by Fedra's own, junction-safe code), and anything herdr-app
-//! generates (AGENTS.md, .d.ts, installed.json, window and view state, update
-//! notes, the socket). Links and junctions are never followed or copied.
+//! Fedra's mods and layouts (Atrous ships Fedra as its built-in UI),
+//! `accounts/` (moved by Fedra's own, junction-safe code, on first use), and
+//! anything herdr-app generates (AGENTS.md, .d.ts, installed.json, window and
+//! view state, update notes, the socket). Links and junctions are never
+//! followed or copied.
+//!
+//! Then the new home shows Fedra (the default layout), gets Fedra's two keys
+//! where the person hasn't bound those keys, and `data/migration.json` says
+//! what came, for the first-run flow (the `onboarding` mod).
 //!
 //! `ATROUS_MIGRATE_FROM` names another herdr-app home (tests). A home set
 //! with `ATROUS_HOME` (a scratch home) starts empty unless that is set too.
@@ -20,8 +25,14 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-/// herdr's shipped layouts (Atrous ships the same ones as Classic, Terminals and Atrous 98).
+/// herdr's shipped layouts (Atrous ships main as Classic and Terminals; Herdr 98 is gone).
 const HERDR_LAYOUTS: &[&str] = &["main", "terminals", "win98"];
+/// Fedra's keys, added to a person's keys.json where those keys are free
+/// (or still open herdr's Settings).
+const FEDRA_KEYS: &[(&str, &str)] = &[
+    ("ctrl-`", "my-status.toggle"),
+    (if cfg!(target_os = "macos") { "cmd-," } else { "ctrl-," }, "mod.open:my-settings"),
+];
 /// Fedra, the person's setup that becomes Atrous's built-in UI
 /// (fedra/sync-from-home.mjs `MODS`, and its layout).
 const FEDRA_MODS: &[&str] = &[
@@ -29,7 +40,7 @@ const FEDRA_MODS: &[&str] = &[
     "my-new-menu", "my-pane", "my-settings", "my-spaces", "my-status", "my-tabs", "my-worktree", "open-in",
     "snap-split", "usage-card", "usage-stats",
 ];
-const FEDRA_LAYOUTS: &[&str] = &["fedra"];
+const FEDRA_LAYOUTS: &[&str] = &["fedra", "flow"];
 const FILES: &[&str] = &["settings.json", "keys.json", "programs.json", "shared.json", "seen.json"];
 
 /// What came over, for the one toast that says so.
@@ -159,12 +170,15 @@ fn copy_all(from: &Path, stage: &Path, to: &Path) -> std::io::Result<Report> {
         }
     }
     drop_herdr_core(&stage.join("settings.json"));
+    add_fedra_keys(&stage.join("keys.json"));
+    show_fedra(&stage.join("shared.json"));
     report.themes = copy_tree(&from.join("themes"), &stage.join("themes"), &rewrite)?;
     report.data = copy_tree(&from.join("data"), &stage.join("data"), &rewrite)?;
 
     // Layouts: the person's own, every layout's clicks.
     let (shipped_mods, shipped_layouts) = herdr_shipped(from);
-    let skip_layout = |stem: &str| shipped_layouts.iter().any(|l| l == stem) || FEDRA_LAYOUTS.contains(&stem);
+    let ours = crate::window::shipped_layouts();
+    let skip_layout = |stem: &str| shipped_layouts.iter().any(|l| l == stem) || FEDRA_LAYOUTS.contains(&stem) || ours.contains(&stem);
     let layouts = from.join("layouts");
     for entry in read_dir(&layouts) {
         let name = entry.file_name().to_string_lossy().into_owned();
@@ -195,7 +209,65 @@ fn copy_all(from: &Path, stage: &Path, to: &Path) -> std::io::Result<Report> {
     }
     report.layouts.sort();
     report.mods.sort();
+    write_summary(from, stage, &report)?;
     Ok(report)
+}
+
+/// `data/migration.json`, for the first-run flow: what came over, from where.
+fn write_summary(from: &Path, stage: &Path, report: &Report) -> std::io::Result<()> {
+    let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let summary = serde_json::json!({
+        "version": 1,
+        "from": "herdr-app",
+        "home": from.to_string_lossy(),
+        "at": at,
+        "files": report.files,
+        "settings": report.files.iter().any(|f| f == "settings.json"),
+        "keys": report.files.iter().any(|f| f == "keys.json"),
+        "programs": report.files.iter().any(|f| f == "programs.json"),
+        "themes": report.themes,
+        "layouts": report.layouts,
+        "clicks": report.clicks,
+        "mods": report.mods,
+        "data": report.data,
+        "layout": crate::window::DEFAULT_LAYOUT,
+    });
+    let file = stage.join("data").join("migration.json");
+    std::fs::create_dir_all(file.parent().unwrap())?;
+    std::fs::write(file, serde_json::to_string_pretty(&summary).unwrap_or_default() + "\n")
+}
+
+/// Fedra is the window a migrated home opens on.
+fn show_fedra(shared: &Path) {
+    let mut map = std::fs::read_to_string(shared)
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&t).ok())
+        .unwrap_or_default();
+    map.insert("layout".into(), crate::window::DEFAULT_LAYOUT.into());
+    let _ = std::fs::write(shared, serde_json::to_string(&serde_json::Value::Object(map)).unwrap_or_default() + "\n");
+}
+
+/// Fedra's keys go where the person's keys.json leaves them free (or bound to
+/// herdr's Settings, which Fedra's replaces); their own bindings stay.
+fn add_fedra_keys(keys: &Path) {
+    let Ok(text) = std::fs::read_to_string(keys) else { return };
+    let Ok(serde_json::Value::Object(mut sections)) = serde_json::from_str::<serde_json::Value>(&text) else { return };
+    let global = sections.entry("global").or_insert_with(|| serde_json::json!({}));
+    let Some(global) = global.as_object_mut() else { return };
+    let mut changed = false;
+    for (key, action) in FEDRA_KEYS {
+        let free = match global.get(*key) {
+            None => true,
+            Some(v) => v.as_str() == Some("app.settings"),
+        };
+        if free && global.get(*key).and_then(|v| v.as_str()) != Some(*action) {
+            global.insert((*key).into(), (*action).into());
+            changed = true;
+        }
+    }
+    if changed && let Ok(text) = serde_json::to_string_pretty(&serde_json::Value::Object(sections)) {
+        let _ = std::fs::write(keys, text + "\n");
+    }
 }
 
 /// The mods and layouts herdr-app installed itself (its installed.json), and
@@ -351,7 +423,7 @@ mod tests {
         let to = root.join(".config/atrous");
         let home_json = from.to_string_lossy().replace('\\', "\\\\");
         write(&from.join("settings.json"), &format!("{{\"zoom\": 1.1, \"core\": \"{}\", \"font\": \"{home_json}\\\\fonts\\\\x.ttf\"}}\n", "/opt/herdr-core/hc"));
-        write(&from.join("keys.json"), "{}\n");
+        write(&from.join("keys.json"), "{\"global\": {\"ctrl-,\": \"app.settings\", \"ctrl-`\": \"terminal.search\"}}\n");
         write(&from.join("shared.json"), "{\"layout\": \"mine\", \"where\": \"~/.config/herdr-app/data\"}\n");
         write(&from.join("installed.json"), "{\"files\": {}, \"layout:main\": {}}\n");
         write(&from.join("AGENTS.md"), "herdr's guide");
@@ -381,6 +453,7 @@ mod tests {
         assert_eq!(report.clicks, 2);
         assert_eq!(report.mods, ["own"]);
         assert_eq!(report.data, 1);
+        assert!(to.join("data/migration.json").is_file());
 
         let settings: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(to.join("settings.json")).unwrap()).unwrap();
         assert!(settings.get("core").is_none(), "herdr's core is not Atrous's");
@@ -388,6 +461,17 @@ mod tests {
         assert!(font.contains("atrous") && !font.contains("herdr-app"), "{font}");
         let shared = std::fs::read_to_string(to.join("shared.json")).unwrap();
         assert!(shared.contains("~/.config/atrous/data"), "{shared}");
+        let shared: serde_json::Value = serde_json::from_str(&shared).unwrap();
+        assert_eq!(shared["layout"], "fedra", "a migrated home opens on Fedra");
+        let keys: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(to.join("keys.json")).unwrap()).unwrap();
+        if !cfg!(target_os = "macos") {
+            assert_eq!(keys["global"]["ctrl-,"], "mod.open:my-settings", "herdr's Settings key opens Fedra's");
+        }
+        assert_eq!(keys["global"]["ctrl-`"], "terminal.search", "a key the person bound stays theirs");
+        let summary: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(to.join("data/migration.json")).unwrap()).unwrap();
+        assert_eq!(summary["from"], "herdr-app");
+        assert_eq!(summary["layouts"], serde_json::json!(["mine"]));
+        assert_eq!(summary["mods"], serde_json::json!(["own"]));
         for gone in ["AGENTS.md", "window.json", "installed.json", "layouts/main.json", "layouts/fedra.json", "layouts/fedra.svg",
             "mods/files", "mods/my-spaces", "mods/own/gpui-kit.d.ts", "mods/own/node_modules", "accounts", "data/files/store.json.tmp.1"] {
             assert!(!to.join(gone).exists(), "{gone} came over");
@@ -410,7 +494,8 @@ mod tests {
         write(&outside.join("secret.txt"), "not ours");
         write(&from.join("settings.json"), "{}");
         std::fs::create_dir_all(from.join("data/mod")).unwrap();
-        let link = from.join("data/mod/linked");
+        // mklink takes "/x" in a path for a switch: native separators only.
+        let link = from.join("data").join("mod").join("linked");
         let made = std::process::Command::new("cmd").args(["/C", "mklink", "/J"]).arg(&link).arg(&outside).output().unwrap();
         assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stdout));
         let to = root.join("atrous");

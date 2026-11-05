@@ -17,6 +17,7 @@ use std::time::{Duration, SystemTime};
 
 include!(concat!(env!("OUT_DIR"), "/default_mods.rs"));
 include!(concat!(env!("OUT_DIR"), "/frame_mods.rs"));
+include!(concat!(env!("OUT_DIR"), "/home_files.rs"));
 
 #[cfg(test)]
 mod render_tests;
@@ -80,7 +81,29 @@ pub fn write_workspace() -> std::io::Result<()> {
         std::fs::create_dir_all(file.parent().unwrap())?;
         std::fs::write(&file, bytes)?;
     }
+    write_home_files(&dir)?;
     sync_defaults(&mods_dir(), &dir.join("installed.json"), DEFAULT_MODS)
+}
+
+/// Fedra's files outside mods/: the account launchers (accounts/*.ps1, *.sh,
+/// profile.mjs; never the person's accounts/state.json or account folders)
+/// and the agent skills (skills/<name>/, which my-chrome links into the
+/// agents' skill folders). Written when they differ from the shipped ones.
+fn write_home_files(dir: &Path) -> std::io::Result<()> {
+    for (path, bytes) in HOME_FILES {
+        let file = dir.join(path);
+        if std::fs::read(&file).ok().as_deref() == Some(*bytes) {
+            continue;
+        }
+        std::fs::create_dir_all(file.parent().unwrap())?;
+        std::fs::write(&file, bytes)?;
+        #[cfg(unix)]
+        if path.ends_with(".sh") {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755))?;
+        }
+    }
+    Ok(())
 }
 
 /// The mods Atrous ships (defaults/mods).

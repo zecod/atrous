@@ -13,13 +13,15 @@ Changes from herdr-app 0.1.13, made by the Atrous authors:
   it uses is atrous-core / `atc` (ATC_* variables), so it runs side by side
   with herdr-app without sharing anything.
 - The herdr logo (the ram) and sheep artwork are removed and replaced by the
-  Atrous mark, including the Atrous 98 (formerly Herdr 98) pixel art and the
-  macOS disk image background. Apache-2.0 grants no trademark rights; Atrous
+  Atrous mark, including the macOS disk image background; the Herdr 98
+  layout and its art are removed. Apache-2.0 grants no trademark rights; Atrous
   uses no herdr marks as its own.
 - First-start migration of the person's own files from ~/.config/herdr-app
   (read only) into ~/.config/atrous.
 - The mod module is "atrous", with "herdr" kept as an alias; core() is the new
   name for hc().
+- Fedra (fedra/) is the built-in UI and default layout; Settings, the
+  first-run flow and the stock panels are Atrous's own.
 - Usage telemetry removed; feedback opens a GitHub issue instead of posting to
   herdr's service; updates come from GitHub releases of zecod/atrous and
   zecod/atrous-core. No requests go to herdr's servers.

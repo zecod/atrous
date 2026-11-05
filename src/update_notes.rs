@@ -140,6 +140,10 @@ pub fn has(version: &str) -> bool {
     all().iter().any(|note| note.version == version)
 }
 
+/// Atrous's own releases start here; the changelog's older sections are
+/// herdr-app's history, which What's new never shows.
+const FIRST: &str = "0.2.0";
+
 fn all() -> Vec<Note> {
     let mut notes = parse(include_str!("../CHANGELOG.md"));
     let fetched = FETCHED.lock().unwrap().get_or_insert_with(|| {
@@ -149,6 +153,7 @@ fn all() -> Vec<Note> {
     for note in fetched {
         if !notes.iter().any(|n| n.version == note.version) { notes.push(note); }
     }
+    notes.retain(|n| !crate::update::newer(FIRST, &n.version));
     notes.sort_by(|a, b| if crate::update::newer(&a.version, &b.version) { std::cmp::Ordering::Less } else if crate::update::newer(&b.version, &a.version) { std::cmp::Ordering::Greater } else { std::cmp::Ordering::Equal });
     notes
 }

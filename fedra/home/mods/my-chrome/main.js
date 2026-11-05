@@ -17,6 +17,8 @@ async function linkBrowserSkill() {
   const skill = `${slash(appHome())}/skills/atrous-browser`;
   if (!(await readTextFile(`${skill}/install.mjs`).catch(() => null))) return; // not shipped here
   const h = slash(home());
+  // A scratch or test home (ATROUS_HOME elsewhere) never takes over the person's agent skills.
+  if (slash(appHome()).toLowerCase() !== `${h}/.config/atrous`.toLowerCase()) return;
   for (const dir of [".claude", ".codex"]) {
     const installed = await fs.readdir(`${h}/${dir}`).then(() => true, () => false);
     if (!installed) continue;

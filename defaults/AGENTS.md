@@ -78,13 +78,15 @@ first frame or during GPU recovery it reports an error instead of a PNG.
 
 | File | What it decides | Applied |
 |---|---|---|
-| `layouts/<name>.json` | the window and its whole look: blocks, theme, fonts, backgrounds, pane frames; one file per layout (`main`, `terminals`, `win98`, any you add) | live |
+| `layouts/<name>.json` | the window and its whole look: blocks, theme, fonts, backgrounds, pane frames; one file per layout (`fedra`, `flow`, `terminals`, `main`, any you add) | live |
 | `keys.json` | what every key does | live |
 | `settings.json` | the person: zoom, sounds, fonts for every layout | live |
 | `mods/<name>/` | panels: small JavaScript programs | live (hot reload) |
 | `programs.json` | how programs show (name, icon, tile), on top of the built-in table | live |
 | `icons/` | the shipped program icons | written by Atrous (put your own elsewhere) |
-| `frame/` | the app's own screens (welcome, ...) | rewritten by Atrous on every start: don't edit, it won't stick |
+| `frame/` | the app's own screens (What's new, the command palette, feedback) | rewritten by Atrous on every start: don't edit, it won't stick |
+| `accounts/` | Fedra's account launchers (`claude`, `codex` `.ps1`/`.sh`, `launch`, `login`, `profile.mjs`); `state.json` and the account folders are the person's | launchers rewritten by Atrous on start |
+| `skills/<name>/` | agent skills Atrous ships (`atrous-browser`), linked into `~/.claude/skills` and `~/.codex/skills` by Fedra | rewritten by Atrous on start |
 | `view.json` | this screen's selected space/tab/pane, zoom, settled tabs, recent spaces and seen attention | written by Atrous |
 | `shared.json`, `data/`, `seen.json`, `installed.json`, `window.json`, `windows.json` | mod state, bookkeeping, where the window was (size, maximized), mods' windows (spots, kept ones) | written by Atrous |
 
@@ -169,16 +171,18 @@ the highlighted line shows where it will land.
 
 Each file is one whole window. `layout.switch` (`ctrl-shift-l`) cycles
 through them, `layout.switch {name}` picks one; `shared("layout")` is the
-shown one's name. Atrous ships `main` ("Classic": spaces by machine and the
-agents list on the left, `workspace-chrome`; tabs as pills with a + menu
-that starts a terminal or any installed agent, `new-menu`; panes as cards
-with a header; Files and Changes panels on the right, `files` and
-`changes`, opened from the tab bar and remembered per space (which ones:
-shared `"workspace.panels"`, set by the welcome); a status bar,
-`workspace-status`), and as examples `terminals` ("Terminals": tabs in
-the title bar, panes as cards, a space picker) and `win98`
-("Atrous 98": a whole desktop in one mod, `win98`). Add a layout by
-writing a new file. The Files panel supports Windows folder paths with spaces,
+shown one's name. Atrous's built-in UI is **Fedra**: `fedra` is the
+default layout (projects and their agents in a tree, `my-spaces`; tabs
+named after each agent's session, `my-tabs`; the quick terminal,
+`my-status` (`ctrl-\``); Files, Changes and Browser panels, `my-files`,
+`changes`, `browser-panel`; the usage card; Settings with Accounts, Skills
+and Usage, `my-settings`). Atrous also ships `flow` ("Flow", when present: a
+node canvas, `flow-canvas`), `terminals` ("Terminals": tabs in the title
+bar, panes as cards, a space picker) and `main` ("Classic": the stock window
+with `workspace-chrome`, `new-menu`, `files`, `changes` and
+`workspace-status`), the safe fallback the escape hatch
+(`ctrl-alt-shift-escape`) returns to; Fedra's Settings hides Classic unless
+it's the current one. Add a layout by writing a new file. The Files panel supports Windows folder paths with spaces,
 parentheses and apostrophes, and preserves Unicode file and folder names
 (including Chinese). Directory links expand as folders; their contents load
 only when expanded.
@@ -186,7 +190,7 @@ only when expanded.
 **Atrous's own layouts and mods are read-only.** They are replaced whole
 on every start. Use settings.json for look (fonts, sizes, theme, colors,
 sounds), where the layout leaves them unset. Classic (main) has no look of
-its own, so your settings decide it; Atrous 98 and Terminals bring their own
+its own, so your settings decide it; Fedra and Terminals bring their own
 look. The theme picker overrides any layout. To change a shipped layout's
 look beyond that, or its structure/code, clone it and edit the clone:
 
@@ -316,21 +320,19 @@ layout's look and a block can differ:
 - `themes/<name>.json`: `{ "background", "foreground", "selection",
   "cursor"?, "ansi": [16 colors], "colors"?: {...} }`, all `#rrggbb`; panel
   colors are derived from these, `colors` overrides them. Atrous ships
-  `atom-one-dark`. The original unedited Atom One Dark and Win98 theme files
-  are upgraded to readable terminal colors; edited theme files are kept.
-  A theme named like a layout (`themes/win98.json`) is
+  `atom-one-dark`. The original unedited Atom One Dark theme file
+  is upgraded to readable terminal colors; edited theme files are kept.
+  A theme named like a layout (`themes/<layout>.json`) is
   that layout's own: Settings offers it only there.
 - `font` / `font_size`: the terminals' (px at zoom 1); `ui_font`: the mods'
   (their text sizes are their own, in px, and follow zoom). Optional: without
   them a layout uses settings.json's, else Atrous's (JetBrains Mono 14, Geist).
-  Classic (main) leaves these unset; Terminals sets text size 15, and Atrous 98
-  brings its own fonts.
+  Classic (main) and Fedra leave these unset; Terminals sets text size 15.
   JetBrains Mono, Geist Mono and Geist ship with Atrous; any installed font
   works (a terminal font the machine lacks falls back to JetBrains Mono).
   A layout brings its own fonts: `.ttf`/`.otf` files in a mod's `fonts/`
   folder (or the home's `fonts/`) load at start and on the next look change,
-  so a layout and its mod folder travel together (Atrous 98's do: its pixel
-  fonts are in `mods/win98/fonts/`).
+  so a layout and its mod folder travel together.
 - `pane_scrollbars` in settings.json (default `true`): show terminal scrollback
   with a slim thumb and track. Drag the thumb or click the track to jump there.
   With little or no terminal padding, the hit lane overlays the last 8px;
@@ -600,7 +602,7 @@ The main ones:
   (personal tree edits; on shipped layouts only click/look fields change),
   `layout.reset {name?}` (reset a shipped layout and its clicks),
   `layout.clone {name, as?}` (duplicate, then switch; default `<name>-copy`).
-- App: `mod.clone {name, as?}` (duplicate; default `<name>-copy`), `mod.open {name}` (again: closes it), `overlay.close {id?}`, `app.help` (again: closes it), `app.palette` (again: closes it), `app.settings {section?}`
+- App: `mod.clone {name, as?}` (duplicate; default `<name>-copy`), `mod.open {name}` (again: closes it), `overlay.close {id?}`, `app.help` (again: closes it), `app.palette` (again: closes it), `app.settings {section?}` (Fedra's Settings, `my-settings`; the same as `mod.open my-settings`)
   (sections: `look`, `machines`, `alerts`, `updates`, `privacy`; Machines lists, updates, renames and removes ssh machines; settings edit the same files you do).
   `app.check_updates` (only a successful check reports Up to date; a failed check clears the checked time and can be retried), `app.update_core` (a newer atrous-core of this generation, terminals kept;
   never one a package manager owns), `app.welcome`, `app.whats_new`, `app.feedback {message?, from?}` (from `"person"` or `"agent"`; opens a review window; Open on GitHub opens a new issue on zecod/atrous, prefilled, which the person posts there; the app sends nothing), `app.reset`,

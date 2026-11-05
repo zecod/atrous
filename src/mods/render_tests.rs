@@ -248,7 +248,14 @@ fn describe_with_values(
         Ok(second)
     })?;
     window.update(cx, |_, window, _| window.remove_window())?;
-    assert!(calls.borrow().unexpected.is_empty(), "{entry}: {:?}", calls.borrow().unexpected);
+    // Fedra's mods probe their machine (uname, node, git, the account files) and
+    // carry on without an answer; the stock mods may only make the calls fixed above.
+    let fedra = entry.strip_prefix("mods/").is_some_and(|m| Path::new(env!("CARGO_MANIFEST_DIR")).join("fedra/home/mods").join(m).is_dir());
+    let unexpected: Vec<String> = calls.borrow().unexpected.iter()
+        .filter(|u| !(fedra && ["unexpected exec", "unexpected core", "unexpected readTextFile"].iter().any(|p| u.starts_with(p))))
+        .cloned()
+        .collect();
+    assert!(unexpected.is_empty(), "{entry}: {unexpected:?}");
     result
 }
 
@@ -351,7 +358,7 @@ fn font_pickers_contain_scroll_on_the_wrapper(cx: &mut TestAppContext) {
         let mut p = props();
         p["section"] = json!("look");
         let tree = describe(
-            cx, &staged, "frame/settings", true, p, updates("current", "current"),
+            cx, &staged, "mods/my-settings", true, p, updates("current", "current"),
             Some(&format!("this.picking = '{which}';")),
         ).unwrap();
         let scroll = tree.lines().find(|line| line.contains(&format!("st-fl-{which}"))).unwrap();
@@ -454,7 +461,7 @@ fn option_key_settings_are_only_shown_on_macos(cx: &mut TestAppContext) {
         p["section"] = json!("keyboard");
         let mut values = fixture(true, p, updates("current", "current"));
         values.insert("window".into(), json!({"platform":platform}));
-        let tree = describe_with_values(cx, &staged, "frame/settings", values, None).unwrap();
+        let tree = describe_with_values(cx, &staged, "mods/my-settings", values, None).unwrap();
         for value in ["auto", "on", "off", "left", "right"] {
             assert_eq!(tree.contains(&format!("st-option-{value}")), platform == "macos", "{platform}: {tree}");
         }
@@ -470,13 +477,13 @@ fn settings_sections_and_updates(cx: &mut TestAppContext) {
     for section in ["look", "alerts", "privacy", "updates"] {
         let mut p = props();
         p["section"] = json!(section);
-        describe(cx, &staged, "frame/settings", true, p, updates("current", "current"), None).unwrap();
+        describe(cx, &staged, "mods/my-settings", true, p, updates("current", "current"), None).unwrap();
     }
     for app in ["source", "current", "ready"] {
         for core in ["current", "ready", "error", "managed", "updating"] {
             let mut p = props();
             p["section"] = json!("updates");
-            let tree = describe(cx, &staged, "frame/settings", true, p, updates(app, core), None)
+            let tree = describe(cx, &staged, "mods/my-settings", true, p, updates(app, core), None)
                 .unwrap_or_else(|e| panic!("updates/{app}/{core}: {e:#}"));
             if app == "current" && core == "current" {
                 assert!(
@@ -498,7 +505,7 @@ fn settings_sections_and_updates(cx: &mut TestAppContext) {
         u["checked"] = json!(checked);
         u["checking"] = json!(checking);
         let setup = asked.then_some("this.asked = Date.now();");
-        let tree = describe(cx, &staged, "frame/settings", true, p, u, setup).unwrap();
+        let tree = describe(cx, &staged, "mods/my-settings", true, p, u, setup).unwrap();
         let succeeded = !checking && checked.is_some();
         assert_eq!(tree.contains("Up to date"), succeeded, "success requires a completed, successful check: {tree}");
         if !checking && checked.is_none() {
@@ -571,7 +578,7 @@ fn settings_keep_notes_in_the_whats_new_window(cx: &mut TestAppContext) {
     update["notes"] = notes.clone();
     let mut p = props();
     p["section"] = json!("updates");
-    let tree = describe(cx, &staged, "frame/settings", true, p, update.clone(), None).unwrap();
+    let tree = describe(cx, &staged, "mods/my-settings", true, p, update.clone(), None).unwrap();
     assert!(tree.contains("st-whats-new") && tree.contains("st-app-update") && tree.contains("st-check-core"));
     assert!(!tree.contains("Newest details") && !tree.contains("Older headline"));
     let mut p = props();
@@ -587,20 +594,6 @@ fn local_state_and_overlay_initial_descriptions(cx: &mut TestAppContext) {
     cx.update(gpui_shell::init);
     let start = Instant::now();
     let staged = Staged::new();
-    for page in 1..=4 {
-        let tree = describe(
-            cx,
-            &staged,
-            "frame/welcome",
-            true,
-            props(),
-            updates("current", "current"),
-            Some(&format!("this.page = {page};")),
-        )
-        .unwrap();
-        let expected = ["Atrous runs your terminals in the background", "Add your other machines", "Choose your panels", "Make it yours"][page - 1];
-        assert!(tree.contains(expected), "welcome page {page}: {tree}");
-    }
     for setup in ["", "this.opened = true;", "this.error = 'Fixture error';"] {
         let tree = describe(
             cx,
@@ -688,7 +681,7 @@ fn shipped_layouts_and_keys() {
         .into_iter()
         .filter_map(|p| p.strip_prefix("mods/").map(str::to_owned))
         .collect();
-    let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join("defaults/layouts");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut layouts = BTreeSet::new();
     fn references(v: &Value, mods: &BTreeSet<String>) {
         match v {
@@ -708,7 +701,8 @@ fn shipped_layouts_and_keys() {
             _ => {}
         }
     }
-    for entry in std::fs::read_dir(folder).unwrap() {
+    let entries = ["defaults/layouts", "fedra/home/layouts"].into_iter().flat_map(|f| std::fs::read_dir(root.join(f)).unwrap());
+    for entry in entries {
         let path = entry.unwrap().path();
         if path.extension().and_then(|e| e.to_str()) != Some("json") {
             continue;
@@ -719,7 +713,7 @@ fn shipped_layouts_and_keys() {
         layouts.insert(path.file_stem().unwrap().to_str().unwrap().to_owned());
     }
     assert_eq!(layouts, crate::window::shipped_layouts().into_iter().map(str::to_owned).collect());
-    let mod_commands = ["ribbon.next"];
+    let mod_commands = ["ribbon.next", "my-status.toggle"];
     for text in [
         include_str!("../../defaults/keys.json"),
         include_str!("../../defaults/keys.macos.json"),

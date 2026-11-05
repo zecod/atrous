@@ -9,11 +9,11 @@ Atrous is a rebranded fork of [herdr-app](https://github.com/herdrdev/herdr-app)
 - **New names, side by side with herdr.** The app is `atrous` (`atrous.exe`), its core is [atrous-core](https://github.com/zecod/atrous-core) with the short CLI `atc`, its home is `~/.config/atrous` (`ATROUS_HOME`), and every `HERDR_*` / `HC_*` variable is `ATROUS_*` / `ATC_*`. Atrous never looks at herdr's core, home, sockets or install folder, so both apps can be installed and open at the same time.
 - **Your herdr-app setup comes along once.** The first time Atrous starts and `~/.config/atrous` doesn't exist, it copies your settings, keys, programs, themes, own layouts with their clicks, own mods, shared state and mod data from `~/.config/herdr-app`, rewrites `.config/herdr-app` paths in them, and says what came in a note. herdr-app's folder is only read.
 - **Mods import from `"atrous"`.** `"herdr"` stays as another name for the same module, and `core()` is the new name for `hc()`, so herdr-app's mods load unchanged. The types are in `atrous.d.ts`.
-- **Layouts:** Classic (herdr's main layout), Terminals and Atrous 98.
+- **Fedra is the built-in UI** and the default layout (see [fedra/README.md](fedra/README.md)): projects and agents in a tree, session-named tabs, the quick terminal, Files, Changes and Browser panels, the usage card, and one Settings with Accounts, Skills and Usage. The other layouts are Flow, Terminals and Classic (herdr's main layout, the safe fallback); Herdr 98 is gone.
 - **No telemetry.** Atrous collects and sends no usage data, and Settings → Privacy says so.
 - **Feedback** opens a new, prefilled [GitHub issue](https://github.com/zecod/atrous/issues/new) that you post yourself.
 - **Updates** come from GitHub releases of zecod/atrous and zecod/atrous-core. Until a release exists, a check simply finds nothing. Atrous sends no requests to herdr's servers.
-- **Brand:** the Atrous mark replaces the herdr ram everywhere: app icon, setup screen, welcome, Atrous 98, macOS bundle and disk image.
+- **Brand:** the Atrous mark replaces the herdr ram everywhere: app icon, setup screen, sidebar, macOS bundle and disk image.
 
 Everything else works as in herdr-app: spaces, tabs and panes, the agents list, peek, remote machines over SSH, layouts and mods.
 

@@ -14,7 +14,7 @@ const MAX_URL: usize = 7000;
 /// The issue as it will open: `title`, `body` (Markdown) and the `url` that opens it.
 pub fn draft(message: &str, _email: &str, _images: usize, from: &str, layout: &str) -> Value {
     let message = message.trim();
-    let title: String = message.lines().next().unwrap_or_default().chars().take(80).collect();
+    let title: String = message.lines().next().unwrap_or_default().trim().chars().take(80).collect();
     let core = crate::update::core().version.as_deref().map(crate::telemetry::version).unwrap_or_else(|| "unknown".into());
     let layout = if crate::window::shipped_layouts().contains(&layout) { layout } else { "other" };
     let about = format!(

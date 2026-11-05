@@ -21,8 +21,13 @@ Keep these exact, so the app, the core and the built-in UI connect:
 - Updates: GitHub releases of zecod/atrous and zecod/atrous-core. No request
   ever goes to herdr's servers, and there is no telemetry.
 - No herdr logo or ram/sheep art anywhere (`assets/brand/` has the Atrous mark).
-- Fedra (`fedra/`) becomes the built-in UI; it has its own owner while that
-  work is in progress.
+- Fedra (`fedra/home/`) is the built-in UI. `build.rs` embeds its mods with
+  `defaults/mods`, its layouts (`fedra`, the default; `flow` when there) beside
+  Classic (`main`, hidden, the escape hatch's) and Terminals, and its
+  `accounts/` launchers and `skills/`, which the app writes into the home on
+  start. Settings is Fedra's `my-settings`; the first-run flow is the
+  `onboarding` mod (it sets shared `atrous.onboarded`), which reads
+  `data/migration.json` after a herdr-app migration.
 
 Atrous must run side by side with an installed herdr-app: never read or
 write herdr's core, sockets or install folder. The only herdr path the app

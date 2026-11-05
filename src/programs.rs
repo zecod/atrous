@@ -137,7 +137,7 @@ fn installed_line(commands: &[String], fish: bool) -> String {
 }
 
 thread_local! {
-    static TABLE: RefCell<Table> = RefCell::new(serde_json::from_str(BUILT_IN).expect("defaults/programs.json"));
+    static TABLE: RefCell<Table> = RefCell::new(built_in());
 }
 
 pub fn path() -> std::path::PathBuf {
@@ -157,8 +157,27 @@ pub fn install_icons() {
 }
 
 /// Reads the person's table on top of the built-in one. Err: what's wrong with their file.
-pub fn load() -> Result<(), String> {
+/// The shipped table, its `run` commands made for this home: `{accounts}` is
+/// the home's accounts/ folder (Fedra's account launchers, which start Claude
+/// Code and Codex under the chosen account) and `{script}` their extension
+/// here (`.ps1` on Windows, `.sh` elsewhere). The person's programs.json goes
+/// on top, entry by entry, so their own `run` always wins.
+fn built_in() -> Table {
     let mut table: Table = serde_json::from_str(BUILT_IN).expect("defaults/programs.json");
+    let accounts = crate::mods::app_dir().join("accounts").to_string_lossy().into_owned();
+    let script = if cfg!(windows) { ".ps1" } else { ".sh" };
+    for entry in table.programs.values_mut() {
+        for arg in &mut entry.run {
+            if arg.contains('{') {
+                *arg = arg.replace("{accounts}", &accounts).replace("{script}", script);
+            }
+        }
+    }
+    table
+}
+
+pub fn load() -> Result<(), String> {
+    let mut table = built_in();
     let result = match std::fs::read_to_string(path()) {
         Err(_) => Ok(()),
         Ok(text) => match serde_json::from_str::<Table>(&text) {

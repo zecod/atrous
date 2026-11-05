@@ -132,23 +132,51 @@ fn launch_failure(record: &Value, output: &str) -> Option<String> {
     Some(if tail.is_empty() { format!("Exit code {code}") } else { format!("Exit code {code}\n{tail}") })
 }
 
-/// The shipped layouts (defaults/layouts): `main` is Atrous's window (spaces
-/// sidebar, tab bar).
-const LAYOUTS: &[(&str, &str)] = &[
-    ("main", include_str!("../defaults/layouts/main.json")),
-    ("terminals", include_str!("../defaults/layouts/terminals.json")),
-    ("win98", include_str!("../defaults/layouts/win98.json")),
-];
+include!(concat!(env!("OUT_DIR"), "/fedra_layouts.rs"));
+
+/// The one Settings (Fedra's, with Accounts, Skills and Usage) and the first-run flow.
+const SETTINGS: &str = "my-settings";
+pub const ONBOARDING: &str = "onboarding";
+/// The shared key the first-run flow sets when it's done (herdr's welcome set
+/// `frame.welcomed`, which a migrated home carries; Atrous's flow still runs).
+pub const ONBOARDED: &str = "atrous.onboarded";
+
+/// The layout a new home shows, and the one a migrated herdr-app home switches to.
+pub const DEFAULT_LAYOUT: &str = "fedra";
+/// The safe stock layout: the escape hatch's, and the fallback when a
+/// layout's mods are gone. Shown as "Classic", hidden in pickers unless current.
+pub const SAFE_LAYOUT: &str = "main";
+
+/// The shipped layouts: `main` (Classic, the stock window: spaces sidebar,
+/// tab bar) first, `terminals`, then Fedra's (fedra/home/layouts: Fedra, the
+/// default, and the others it ships, such as Flow).
+fn layouts() -> &'static [(&'static str, &'static str)] {
+    static LAYOUTS: std::sync::OnceLock<Vec<(&'static str, &'static str)>> = std::sync::OnceLock::new();
+    LAYOUTS.get_or_init(|| {
+        let mut all = vec![
+            ("main", include_str!("../defaults/layouts/main.json")),
+            ("terminals", include_str!("../defaults/layouts/terminals.json")),
+        ];
+        for (path, bytes) in FEDRA_LAYOUTS {
+            if let (Some(name), Ok(text)) = (path.strip_suffix(".json"), std::str::from_utf8(bytes)) {
+                all.push((name, text));
+            }
+        }
+        all
+    })
+}
 
 /// Pictures shipped layouts name as their `preview`, written beside them.
-const LAYOUT_PREVIEWS: &[(&str, &str)] = &[("win98.svg", include_str!("../defaults/layouts/win98.svg"))];
+fn layout_previews() -> impl Iterator<Item = (&'static str, &'static [u8])> {
+    FEDRA_LAYOUTS.iter().filter(|(path, _)| !path.ends_with(".json")).map(|(path, bytes)| (*path, *bytes))
+}
 
 pub fn shipped_layouts() -> Vec<&'static str> {
-    LAYOUTS.iter().map(|(n, _)| *n).collect()
+    layouts().iter().map(|(n, _)| *n).collect()
 }
 
 fn shipped_layout(name: &str) -> &'static str {
-    LAYOUTS.iter().find(|(n, _)| *n == name).unwrap_or(&LAYOUTS[0]).1
+    layouts().iter().find(|(n, _)| *n == name).unwrap_or(&layouts()[0]).1
 }
 
 /// A layout as shipped (main for names Atrous doesn't ship).
@@ -230,11 +258,13 @@ fn missing_mods(name: &str) -> Vec<String> {
 }
 
 fn install_layouts() {
-    if let Err(e) = mods::sync_layouts(&mods::app_dir(), LAYOUTS) {
+    if let Err(e) = mods::sync_layouts(&mods::app_dir(), layouts()) {
         tracing::warn!("cannot install layouts: {e}");
     }
-    for (name, text) in LAYOUT_PREVIEWS {
-        let _ = std::fs::write(file(&format!("layouts/{name}")), text);
+    for (name, bytes) in layout_previews() {
+        if std::fs::read(file(&format!("layouts/{name}"))).ok().as_deref() != Some(bytes) {
+            let _ = std::fs::write(file(&format!("layouts/{name}")), bytes);
+        }
     }
 }
 
@@ -568,7 +598,9 @@ impl AppWindow {
         // A layout whose mods are gone (Zen, T4, ADE after the update took
         // theirs) starts on Atrous's instead of a wall of "did not load".
         let gone = name.as_deref().map(missing_mods).unwrap_or_default();
-        w.load_layout(if gone.is_empty() { name.as_deref().unwrap_or("main") } else { "main" });
+        // A new home opens on Fedra; Classic is the safe fallback.
+        let first = if layout_path(DEFAULT_LAYOUT).exists() { DEFAULT_LAYOUT } else { SAFE_LAYOUT };
+        w.load_layout(if gone.is_empty() { name.as_deref().unwrap_or(first) } else { SAFE_LAYOUT });
         w.apply_look(window, cx);
         w.show_layout_notes(window, cx);
         if let (Some(n), false) = (&name, gone.is_empty()) {
@@ -719,8 +751,9 @@ impl AppWindow {
         Self::note_core(&w.core);
         w.sync(window, cx);
         w.restore_focus(window, cx);
-        // The first time the app opens: the frame's welcome (it sets
-        // "frame.welcomed" when you start or skip).
+        // The first time Atrous opens (a new home, or one just brought over
+        // from herdr-app): its first-run flow, the `onboarding` mod, which sets
+        // shared ONBOARDED when it's finished or skipped.
         cx.defer_in(window, |this, window, cx| this.open_kept_windows(window, cx));
         // 0.1.0 kept space colors under its own word.
         if mods::shared("space.colors").is_none()
@@ -728,7 +761,7 @@ impl AppWindow {
         {
             mods::set_shared("space.colors".into(), c);
         }
-        let first_install = mods::shared("frame.welcomed").is_none();
+        let first_install = mods::shared(ONBOARDED).is_none();
         crate::update_notes::started(first_install);
         if first_install {
             cx.defer_in(window, |this, window, cx| this.open_welcome(window, cx));
@@ -776,11 +809,22 @@ impl AppWindow {
         self.open_overlay(mods::new_overlay_id(), spec, window, cx);
     }
 
+    /// Atrous's first-run flow: the shipped `onboarding` mod (how it opens is
+    /// its mod.json's `overlay`; a window over the live app by default).
     fn open_welcome(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // A window over the live app (nothing dims), centered and movable:
-        // each step changes what's behind it, and a click beside it doesn't end it.
-        let spec = json!({ "mod": "frame-welcome", "kind": "window", "width": 660, "height": 600 });
-        self.open_overlay(mods::new_overlay_id(), spec, window, cx);
+        let Some(f) = self.folders.get(ONBOARDING) else {
+            tracing::info!("no {ONBOARDING} mod: no first-run flow to show");
+            return;
+        };
+        let mut spec = mod_overlay(&f.dir);
+        if spec.get("kind").is_none() {
+            spec = json!({ "kind": "window", "width": 720, "height": 620 });
+        }
+        spec["mod"] = json!(ONBOARDING);
+        if self.overlays.iter().any(|o| o.id == ONBOARDING) {
+            self.close_overlay(ONBOARDING, window, cx);
+        }
+        self.open_overlay(ONBOARDING.into(), spec, window, cx);
     }
 
     /// Tells the updater which core this is and who owns it (off the UI thread).
@@ -3228,7 +3272,7 @@ impl AppWindow {
             }
             "layout.reset" => {
                 let name = Self::owned(a, "name").unwrap_or_else(|| self.layout_name.clone());
-                let Some((_, text)) = LAYOUTS.iter().find(|(n, _)| *n == name) else {
+                let Some((_, text)) = layouts().iter().find(|(n, _)| *n == name) else {
                     return self.fail(format!("{name:?} isn't a layout Atrous ships"));
                 };
                 // Theirs is kept under a name nothing else has (never over an older one).
@@ -3303,15 +3347,21 @@ impl AppWindow {
                 return;
             }
             "app.settings" => {
+                // Fedra's Settings (my-settings) is the one Settings, under the
+                // same id as `mod.open my-settings` so the two never stack.
                 // Once: a second press doesn't stack another; asking for a section opens it there.
                 let section = Self::owned(a, "section");
-                let open = self.overlays.iter().any(|o| o.id == "settings");
+                let Some(f) = self.folders.get(SETTINGS) else { return self.fail(format!("no mod folder {SETTINGS:?}")) };
+                let mut spec = mod_overlay(&f.dir);
+                spec["mod"] = json!(SETTINGS);
+                spec["props"] = json!({ "section": section });
+                let id = format!("mod-{SETTINGS}");
+                let open = self.overlays.iter().any(|o| o.id == id);
                 if open && section.is_some() {
-                    self.close_overlay("settings", window, cx);
+                    self.close_overlay(&id, window, cx);
                 }
                 if !open || section.is_some() {
-                    let spec = json!({ "mod": "frame-settings", "kind": "dialog", "width": 880, "props": { "section": section } });
-                    self.open_overlay("settings".into(), spec, window, cx);
+                    self.open_overlay(id, spec, window, cx);
                 }
                 return;
             }
@@ -3654,7 +3704,7 @@ impl AppWindow {
         self.watched.keys = None;
         install_layouts();
         self.drop_layout_copies(window, cx);
-        self.load_layout("main");
+        self.load_layout(SAFE_LAYOUT);
         self.apply_look(window, cx);
         self.focused_pane = None;
         self.agent_focused = None;
@@ -5227,7 +5277,7 @@ mod tests {
         cx.update(crate::mods::init);
         let requests = crate::mods::install_policy();
         crate::mods::set_shared("layout".into(), json!("test"));
-        crate::mods::set_shared("frame.welcomed".into(), json!("test"));
+        crate::mods::set_shared(super::ONBOARDED.into(), json!("test"));
         let (view, cx) = cx.add_window_view(|window, cx| super::AppWindow::new(crate::hc::offline(), requests, window, cx));
         assert_eq!(view.update(cx, |this, _| this.layout_name.clone()), "test");
         (view, cx)
