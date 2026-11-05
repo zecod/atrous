@@ -62,6 +62,8 @@ import { settings, theme, props } from "herdr";
 import { ui, ICON, stop, wrap, mergeList } from "./devtools-ui.js";
 import { NetworkTab } from "./devtools-network.js";
 import { InterceptTab, releaseIntercept } from "./devtools-intercept.js";
+import { DomElementsTab } from "./devtools-elements.js"; // devtools-dom: the Elements tab (tree, inspect, edit)
+import { ApplicationTab } from "./devtools-app.js"; // devtools-dom: the Application tab (cookies, storage, IndexedDB, caches, workers)
 
 const TABS = [];
 export function registerTab(...list) {
@@ -245,6 +247,7 @@ const ElementsTab = {
 
 // ---- Registered tabs: add yours here (one import above, one line below) ----------------------
 registerTab(ConsoleTab, NetworkTab, ElementsTab, InterceptTab);
+registerTab(DomElementsTab, ApplicationTab); // devtools-dom: replaces Elements, adds Application after it
 
 // ---- the drawer, mixed into the Browser view ------------------------------------------------
 

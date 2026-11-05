@@ -61,6 +61,7 @@ import path from "node:path";
 import os from "node:os";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { registerDevtools } from "./devtools-dom.mjs"; // devtools-dom hook
 import { devtoolsNet } from "./devtools-net.mjs"; // devtools-net hook
 import zlib from "node:zlib";
 
@@ -1675,7 +1676,11 @@ async function pageHtml(what) {
 
 // ---- HTTP API ---------------------------------------------------------------------------
 
+// devtools-dom hook: the drawer's Elements and Application tabs, and the agents' page and storage API (devtools-dom.mjs)
+const devtools = registerDevtools({ cdp: () => cdp, S, log, writeClipboard: (text) => writeClipboard(text), setInspect: (mode) => setInspect(mode) });
+
 async function route(method, pathname, q, b) {
+  { const r = await devtools.route(method, pathname, q, b); if (r !== undefined) return r; } // devtools-dom hook
   { const r = await devnet.route(method, pathname, q, b); if (r !== undefined) return r; } // devtools-net hook: /devtools/*
   if (pathname === "/state" || pathname === "/health") {
     // ?peek=1 reads the state without counting as someone watching (no screencast for it).
