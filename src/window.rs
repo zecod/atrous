@@ -821,10 +821,13 @@ impl AppWindow {
             spec = json!({ "kind": "window", "width": 720, "height": 620 });
         }
         spec["mod"] = json!(ONBOARDING);
-        if self.overlays.iter().any(|o| o.id == ONBOARDING) {
-            self.close_overlay(ONBOARDING, window, cx);
+        // The same overlay as `mod.open onboarding`: open already, it goes back to its start.
+        let id = format!("mod-{ONBOARDING}");
+        if self.overlays.iter().any(|o| o.id == id) {
+            mods::send_command(ONBOARDING, "open");
+            return;
         }
-        self.open_overlay(ONBOARDING.into(), spec, window, cx);
+        self.open_overlay(id, spec, window, cx);
     }
 
     /// Tells the updater which core this is and who owns it (off the UI thread).
