@@ -5,7 +5,7 @@
 // Open: `mod.open my-settings` (Look), `mod.open accounts` (Accounts), or openOverlay({ mod:
 // "my-settings", kind: "dialog", width: 960, height: 660, props: { section: "usage" } }) for a
 // section. While it's open, `my-settings.section:<id>` (keys.json, `herdr-app do`) shows a
-// section: look, machines, alerts, updates, privacy, accounts, usage; `my-settings.refresh`
+// section: look, machines, alerts, updates, privacy, accounts, skills, usage; `my-settings.refresh`
 // refreshes the usage numbers; `my-settings.login:<tool>:<id>` opens the login window of an added
 // account. With props { section: "usage", only: true } it is the standalone usage dialog instead
 // (what `mod.open usage-stats` opens).
@@ -15,6 +15,7 @@ import { v_flex, h_flex, Scrollbar, InputState, Input } from "gpui-base";
 import { hc, run, theme, themes, fonts, updates, telemetry, settings, layouts, shared, appHome, readTextFile, writeTextFile, playSound, props, closeOverlay, window, nextCommand } from "herdr";
 import { UsagePage } from "./usage.js";
 import { AccountsPage } from "./accounts.js";
+import { SkillsPage } from "./skills.js";
 
 const I = (name) => `mods/my-settings/${name}.svg`;
 
@@ -26,6 +27,7 @@ const SECTIONS = [
   { id: "updates", title: "Updates", icon: "refresh" },
   { id: "privacy", title: "Privacy", icon: "shield" },
   { id: "accounts", title: "Accounts", icon: "users" },
+  { id: "skills", title: "Skills", icon: "sk-skills" },
   { id: "usage", title: "Usage & activity", icon: "us-activity" },
 ];
 // The usage page's content width in this dialog (960 wide, nav 190 + border, padding 2 × 28):
@@ -55,6 +57,8 @@ export default class Settings extends View {
     this.usageFocus = 0;
     this.accounts = null; // the accounts page, likewise
     this.loginAsk = 0;
+    this.skills = null; // the skills page (skills.js), likewise
+    this.skillsFocus = 0;
     this.picking = null; // "font" | "ui_font" while its list is open
     this.filter = "";
     this.fontInput = InputState.new({ placeholder: "Type to search fonts" });
@@ -83,6 +87,7 @@ export default class Settings extends View {
     this.handle.focus();
     if (this.section === "usage") this.showUsage(cx); // after: it takes the keyboard
     if (this.section === "accounts") this.showAccounts(cx);
+    if (this.section === "skills") this.showSkills(cx);
     cx.spawn(async (cx) => {
       await this.load();
       if (this.section === "machines") await this.loadMachines();
@@ -135,6 +140,7 @@ export default class Settings extends View {
     if (id === "usage") this.showUsage(cx);
     else this.handle.focus();
     if (id === "accounts") this.showAccounts(cx);
+    if (id === "skills") this.showSkills(cx);
     if (id === "machines") cx.spawn(async (cx) => { await this.loadMachines(); cx.notify(); });
     cx.notify();
   }
@@ -154,6 +160,13 @@ export default class Settings extends View {
     this.accountsLogin = p.login;
     if (!this.accounts) this.accounts = cx.new(AccountsPage, p);
     else this.accounts.set_props(p);
+  }
+
+  // The skills page (skills.js), retained too; a new focus token puts the keyboard in its search box.
+  showSkills(cx) {
+    const p = { focus: ++this.skillsFocus };
+    if (!this.skills) this.skills = cx.new(SkillsPage, p);
+    else this.skills.set_props(p);
   }
 
   file() {
@@ -959,6 +972,8 @@ export default class Settings extends View {
       })
       .child(nav.h_full().child(div().flex_1()).child(this.button(t, "st-feedback", "Send feedback", () => { closeOverlay(props()?.overlay); run("app.feedback"); })))
       .child(
+        // Skills lays out its own two scrolling panes in the whole area.
+        this.section === "skills" && this.skills ? div().flex_1().min_w(0).h_full().child(this.skills) :
         // A bar that always shows: the pages are taller than the dialog and
         // people should see that they scroll.
         div()
