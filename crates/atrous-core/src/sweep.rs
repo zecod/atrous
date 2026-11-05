@@ -10,6 +10,10 @@ pub const VAR: &str = "ATC_SCOPE";
 /// Marks atc's own cores and holders: never swept, nor anything beneath them
 /// (a terminal may start another session's core, which is not its own).
 pub const RUNTIME: &str = "ATC_RUNTIME";
+/// The marks the upstream core (`hc`) puts on its own terminals. Atrous runs
+/// beside it: a core or holder started from inside one of those terminals
+/// must not be swept with it, nor hand that terminal's identity to its own.
+pub const UPSTREAM: [&str; 3] = ["HC_SCOPE", "HC_TERMINAL_ID", "HC_TERMINAL_SOCKET"];
 
 /// A fresh token for one terminal, stamped with when it was made: no process
 /// started before it can carry it, so a sweep need not read those.

@@ -186,6 +186,9 @@ pub fn spawn_detached(paths: &Paths, args: &[&str], log: &str) -> std::io::Resul
     // A core or holder started from inside a terminal is not that terminal's:
     // ending the terminal must not end them.
     cmd.args(args).env_remove(crate::sweep::VAR).env(crate::sweep::RUNTIME, "1");
+    for var in crate::sweep::UPSTREAM {
+        cmd.env_remove(var);
+    }
     #[cfg(target_os = "linux")]
     if let Some(started) = platform::systemd::spawn(&cmd, &log) {
         return started;
