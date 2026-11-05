@@ -4,6 +4,16 @@
 # A running Atrous and its core keep running from the folder moved aside;
 # the next start restarts the core into the new one, terminals kept.
 # $Core: the folder holding the built atrous-core.exe and conpty\ (none: app only).
+# Whether a program still runs from $Dir: Windows won't open a running
+# program's file (or a DLL it loaded) for writing. Process paths can't tell:
+# after its folder is renamed a process still reports the old path.
+function Test-FolderBusy($Dir) {
+    foreach ($f in Get-ChildItem -LiteralPath $Dir -Recurse -File -Include *.exe, *.dll -ErrorAction SilentlyContinue) {
+        try { [IO.File]::Open($f.FullName, 'Open', 'ReadWrite', 'None').Close() } catch { return $true }
+    }
+    return $false
+}
+
 function Install-AtrousFiles($Binary, $Icon, $Destination, $Core = $null) {
     $ErrorActionPreference = "Stop"
     $Destination = [IO.Path]::GetFullPath($Destination)
@@ -46,9 +56,8 @@ function Install-AtrousFiles($Binary, $Icon, $Destination, $Core = $null) {
         if ($installed -and (Test-Path -LiteralPath $backup)) {
             # Never half of it: a core still running from there starts its
             # terminals with the conpty\ beside it.
-            $running = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith("$backup\", [StringComparison]::OrdinalIgnoreCase) }
-            if ($running) {
-                Write-Warning "Previous build remains at $backup while $(@($running | ForEach-Object { $_.ProcessName } | Sort-Object -Unique) -join ', ') runs from it. Remove it after quitting Atrous; the core moves to the new build on Atrous's next start."
+            if (Test-FolderBusy $backup) {
+                Write-Warning "Previous build remains at ${backup}: a program still runs from it. Remove it after quitting Atrous; its core moves to the new build on Atrous's next start."
             } else {
                 try { Remove-Item -LiteralPath $backup -Recurse -Force }
                 catch { Write-Warning "Previous build remains at $backup. Remove it after quitting Atrous." }

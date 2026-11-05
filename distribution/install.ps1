@@ -60,10 +60,17 @@ try {
     # goes now unless something still runs from it (a core starts its
     # terminals with the conpty\ beside it): then it moves aside whole.
     New-Item -ItemType Directory -Force (Split-Path $dir) | Out-Null
+    # Windows won't open a running program's file (or a loaded DLL) for
+    # writing; a process's reported path can't tell after a folder rename.
+    function Test-FolderBusy($dir) {
+        foreach ($f in Get-ChildItem -LiteralPath $dir -Recurse -File -Include *.exe, *.dll -ErrorAction SilentlyContinue) {
+            try { [IO.File]::Open($f.FullName, 'Open', 'ReadWrite', 'None').Close() } catch { return $true }
+        }
+        return $false
+    }
     function Remove-Previous($old) {
         if (-not (Test-Path $old)) { return }
-        $busy = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith("$old\", [StringComparison]::OrdinalIgnoreCase) }
-        if ($busy) { Rename-Item $old "$(Split-Path $old -Leaf)-$([guid]::NewGuid().ToString('N').Substring(0, 8))" }
+        if (Test-FolderBusy $old) { Rename-Item $old "$(Split-Path $old -Leaf)-$([guid]::NewGuid().ToString('N').Substring(0, 8))" }
         else { Remove-Item -Recurse -Force $old -ErrorAction SilentlyContinue }
     }
     Remove-Previous "$dir.old"

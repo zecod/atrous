@@ -531,13 +531,35 @@ fn marker() -> PathBuf {
 /// won't delete their files but will rename the folder, so what can't go
 /// moves aside and goes on a later start.
 fn retire(old: &Path) {
-    if std::fs::remove_dir_all(old).is_err() && old.exists() {
+    if in_use(old) || std::fs::remove_dir_all(old).is_err() && old.exists() {
         let mut name = old.file_name().unwrap_or_default().to_os_string();
         name.push(format!("-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0)));
         if let Err(e) = std::fs::rename(old, old.with_file_name(name)) {
             tracing::warn!("update: cannot move {} aside: {e}", old.display());
         }
     }
+}
+
+/// Windows: a program still runs from `dir` (its own file or a DLL it
+/// loaded won't open for writing). Deleting around it would take files it
+/// still starts (a core's conpty\OpenConsole.exe), so such a folder stays
+/// whole. A process's reported path can't tell: it keeps the old one after
+/// its folder is renamed. Elsewhere running files can go: never in use.
+fn in_use(dir: &Path) -> bool {
+    if !cfg!(windows) {
+        return false;
+    }
+    fn walk(dir: &Path) -> bool {
+        std::fs::read_dir(dir).into_iter().flatten().flatten().any(|e| {
+            let p = e.path();
+            if p.is_dir() {
+                return walk(&p);
+            }
+            let program = p.extension().is_some_and(|x| x.eq_ignore_ascii_case("exe") || x.eq_ignore_ascii_case("dll"));
+            program && std::fs::OpenOptions::new().write(true).open(&p).is_err()
+        })
+    }
+    walk(dir)
 }
 
 /// Previous versions beside the install (`atrous.old`, `atrous.old-…`).
@@ -568,7 +590,7 @@ pub fn after_update() {
         return;
     }
     std::thread::spawn(move || {
-        for old in previous(&root) {
+        for old in previous(&root).into_iter().filter(|old| !in_use(old)) {
             let _ = std::fs::remove_dir_all(&old);
         }
     });
