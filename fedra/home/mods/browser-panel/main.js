@@ -316,6 +316,7 @@ export default class Browser extends View {
   }
 
   async close(cx) {
+    await this.dbgUnload?.(); // devtools-net hook: Intercept lets every held request go
     if (!this.wantNative()) return;
     try { await fetch(`${HOST}/place`, post({ visible: false })); } catch {}
   }
@@ -897,6 +898,7 @@ export default class Browser extends View {
           .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => this.toggleDebug(cx)))
         .when(!on, (el) => el.opacity(0.4))
         .tooltip("Debug: console, network, HTML").child(svg(I("code")).size(15)))
+      .children(this.dbgToolbarBadge?.(t) ?? []) // devtools-net hook: the Intercept badge while the drawer is closed
       .when(this.rootW >= 420, (el) => el.child(this.iconButton("bp-open", "external-link", "Open in your browser", on && isWeb(st?.url), (_e, cx) => this.openOutside(cx), t)))
       .child(this.iconButton("bp-more", "more", "More", true, (_e, cx) => { this.menu = !this.menu; cx.notify(); }, t))
       .when(Boolean(st?.loading) && on, (el) => el.child(div().absolute().bottom(0).left(0).w_full().h(2).bg(t.accent)

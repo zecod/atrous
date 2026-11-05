@@ -61,6 +61,7 @@ import path from "node:path";
 import os from "node:os";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { devtoolsNet } from "./devtools-net.mjs"; // devtools-net hook
 import zlib from "node:zlib";
 
 // ---- options ----------------------------------------------------------------------------
@@ -488,6 +489,7 @@ const serial = (fn) => (chain = chain.then(fn, fn).catch((e) => { log("switch er
 const tabs = new Map(); // targetId -> { session, console: [], net: [], dver, ... }
 const bySession = new Map(); // sessionId -> targetId
 const MAX_CONSOLE = 500, MAX_NET = 300;
+const devnet = devtoolsNet({ current: () => S.targetId, log }); // devtools-net hook: the drawer's console, network, Repeater, Intercept
 
 function tabFor(session) {
   const id = bySession.get(session);
@@ -1674,6 +1676,7 @@ async function pageHtml(what) {
 // ---- HTTP API ---------------------------------------------------------------------------
 
 async function route(method, pathname, q, b) {
+  { const r = await devnet.route(method, pathname, q, b); if (r !== undefined) return r; } // devtools-net hook: /devtools/*
   if (pathname === "/state" || pathname === "/health") {
     // ?peek=1 reads the state without counting as someone watching (no screencast for it).
     if (q.get("peek")) return publicState();
@@ -1842,6 +1845,7 @@ const readyPromise = new Promise((r) => (setReady = r));
 async function shutdown(code, closeBrowser) {
   if (exiting) return;
   exiting = true;
+  await devnet.release().catch(() => {}); // devtools-net hook: Intercept lets every held request go
   if (closeBrowser && NATIVE) await hostPost("/shutdown", {}, 3000).catch(() => {});
   else if (closeBrowser && cdp && !cdp.closed) {
     await cdp.send("Browser.close", {}, undefined, 3000).catch(() => {});
@@ -1884,6 +1888,7 @@ async function main() {
   await cdp.connect();
   cdp.onclose = () => { log("browser went away"); shutdown(0, false); };
   cdp.listeners.push(onEvent);
+  devnet.connect(cdp); // devtools-net hook
 
   const { targetInfos } = await cdp.send("Target.getTargets");
   for (const t of targetInfos) if (t.type === "page") targets.set(t.targetId, { id: t.targetId, url: t.url, title: t.title, order: ++order });
