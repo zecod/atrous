@@ -3,14 +3,15 @@
 // new folder, or branch the current repo into a worktree. The project opens as
 // a new space; if a space already shows that folder, that space is selected.
 //
-// Props: { machine } — the host to add on (null: this computer).
+// Props: { machine } — the host to add on (null: this computer); { view: "clone" | "create" }.
+// A new project opens on the start screen (mods/start), not on a bare shell.
 // Clones run in a background atrous-core terminal (`atc run --bg`), so a big repo
 // isn't cut off by exec's 30 s limit; the dialog shows git's last line and
 // stops the clone if it is closed or "Stop" is pressed.
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { run, props, closeOverlay, openOverlay, theme, core, exec, home, pickFolder, spaces, panes, shared, setShared, window, nextCommand } from "atrous";
+import { run, props, closeOverlay, openOverlay, theme, core, exec, home, pickFolder, spaces, panes, shared, setShared, window, nextCommand, layout } from "atrous";
 
 const I = (name) => `mods/add-project/${name}.svg`;
 // Shared: host ("" = this computer) -> the folder the last project went in.
@@ -48,6 +49,26 @@ function errorText(r) {
 }
 
 const PLATFORM = { windows: "Windows", macos: "Mac", linux: "Linux" };
+
+// The side panel as it is now (Fedra's Files / Changes / Browser; null: closed; undefined: the
+// layout has none). The start screen closes it while it shows and puts this back after a pick.
+function panelNow() {
+  const find = (n, id) => (n?.id === id ? n : (n?.children ?? []).reduce((f, c) => f ?? find(c, id), null));
+  const panel = find(layout(), "panel");
+  if (!panel) return undefined;
+  return panel.hidden ? null : find(panel, "panel-body")?.active ?? null;
+}
+
+// A new project opens on its start screen (mods/start: a button per installed agent),
+// not on a bare shell: space.new always starts a terminal, and the start tab, queued right after
+// it into the space it made, closes that terminal's tab when it first shows.
+function openProject(folder, machine) {
+  const existing = spaces().map((s) => s.id);
+  const panel = panelNow();
+  run("space.new", { folder, machine: machine ?? "" });
+  const fresh = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  run("tab.new", { name: "Start", mod: "start", props: { folder, machine: machine ?? null, fresh, existing, panel } });
+}
 
 export default class AddProject extends View {
   init(_props, cx) {
@@ -186,7 +207,7 @@ export default class AddProject extends View {
     this.closed = true;
     closeOverlay(props().overlay);
     if (found) run("space.select", { id: found.id });
-    else run("space.new", { folder, machine: this.host ?? "" });
+    else openProject(folder, this.host);
   }
 
   browse(cx) {

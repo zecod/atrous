@@ -9,7 +9,8 @@
 //   4 Browser   the atrous-browser skill (linked into ~/.claude/skills and ~/.codex/skills by its
 //               install.mjs), Import from Chrome (the Browser panel's own import), Settings > Skills
 //   5 Look      appearance, themes (app.theme, live), and the sidebar wide or as a rail
-//   6 Project   Open a folder (pickFolder -> space.new), Clone from Git (the add-project dialog)
+//   6 Project   Open a folder (pickFolder -> a new space on the project start screen), Clone from
+//               Git (the add-project dialog, on its clone form)
 //   7 Ready     three keys worth knowing (read from keys.json), and Start
 // Finishing or skipping sets shared "onboarding.done" (and "atrous.onboarded", which the app
 // checks on start) to { version, at, outcome: "finished" | "skipped" }.
@@ -78,6 +79,19 @@ function pathTo(node, id, trail = []) {
     if (p.length) return p;
   }
   return [];
+}
+
+// A new project opens on the start screen (mods/start: a button per installed agent), not
+// on a bare shell. space.new always starts a terminal; the start tab, queued right after it into
+// the space it made, closes that terminal's tab when it first shows.
+function openProject(folder) {
+  const existing = spaces().map((s) => s.id);
+  // The side panel as it is now (null: closed): the start screen closes it while it shows, then puts this back.
+  const side = find(layout(), "panel");
+  const panel = side ? (side.hidden ? null : find(side, "panel-body")?.active ?? null) : undefined;
+  run("space.new", folder ? { folder, machine: "" } : { machine: "" });
+  const fresh = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  run("tab.new", { name: "Start", mod: "start", props: { ...(folder ? { folder } : {}), machine: null, fresh, existing, panel } });
 }
 
 const narrowSidebar = () => (find(layout(), "sidebar")?.size?.px ?? Infinity) < 160;
@@ -223,7 +237,7 @@ export default class Onboarding extends View {
     const o = props()?.overlay;
     if (o) closeOverlay(o);
     // Started with nothing open: one space at home, so the window isn't empty.
-    if (outcome === "finished" && spaces().length === 0) run("space.new");
+    if (outcome === "finished" && spaces().length === 0) openProject(null);
   }
 
   key(e, cx) {
@@ -368,7 +382,7 @@ export default class Onboarding extends View {
       if (!folder) return;
       const found = spaces().find((s) => !s.machine && samePath(s.folder, folder));
       if (found) run("space.select", { id: found.id });
-      else run("space.new", { folder, machine: "" });
+      else openProject(folder);
       this.notice = { step: "project", text: `Opened ${baseName(folder)}. It's in the sidebar.` };
       this.handle.focus();
       cx.notify();
@@ -376,9 +390,7 @@ export default class Onboarding extends View {
   }
 
   clone(cx) {
-    openOverlay({ mod: "add-project", kind: "dialog", width: 520, props: { machine: null } });
-    // Its copy listens for commands once it has started: then straight to its Clone form.
-    cx.timer.after(350, () => run("add-project.clone"));
+    openOverlay({ mod: "add-project", kind: "dialog", width: 520, props: { machine: null, view: "clone" } });
     cx.notify();
   }
 

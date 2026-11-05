@@ -7,8 +7,9 @@
 // Writes: programs.json (the YOLO switch: `run` overrides, compare-then-atomic-replace),
 // settings.json (`appearance`, when a theme of the other lightness is picked).
 
-import { readTextFile, writeTextFile, appHome, home, exec, window, shared, knownAgents } from "atrous";
+import { readTextFile, writeTextFile, appHome, home, exec, window, shared } from "atrous";
 import * as fs from "fs/promises";
+import { agentOrder, loadAgents } from "./agent-order.js";
 
 export const slash = (p) => String(p ?? "").replace(/\\/g, "/").replace(/\/+$/, "");
 const isWindows = () => window()?.platform === "windows";
@@ -60,8 +61,9 @@ export function joinAnd(parts) {
 
 // ---- coding agents ------------------------------------------------------------------------
 
-// The agents the Agents step lists first, installed or not, with how to install each.
-export const FEATURED = ["claude", "codex", "gemini", "opencode", "pi"];
+// The agents the Agents step lists first, installed or not, with how to install each: Claude
+// Code, Codex, Pi, OpenCode in that order (agent-order.js, the order of every agent list), then Gemini.
+export const FEATURED = ["claude", "codex", "pi", "opencode", "gemini"];
 const NAMES = { claude: "Claude Code", codex: "Codex", gemini: "Gemini", opencode: "OpenCode", pi: "Pi" };
 const ICONS = { claude: "icons/claude.svg", codex: "icons/codex.svg", gemini: "icons/gemini.svg", opencode: "icons/opencode.svg", pi: "icons/pi.svg" };
 
@@ -82,48 +84,16 @@ export function installCommand(key) {
   }
 }
 
-// The command an agent's launcher wraps (Fedra starts Claude Code and Codex through the account
-// launchers in accounts/, so their `run` is a script path, and checking that says nothing).
-const WRAPPED = { claude: "claude", codex: "codex" };
-const isPath = (cmd) => /[\\/]/.test(String(cmd ?? ""));
-
-// Which of these commands this computer has: where.exe on Windows (PATH and PATHEXT, quicker to
-// start than a PowerShell), the login shell's `command -v` elsewhere.
-async function have(commands) {
-  const safe = commands.filter((c) => /^[A-Za-z0-9._-]+$/.test(c));
-  if (!safe.length) return new Set();
-  try {
-    if (isWindows()) {
-      const r = await exec("where.exe", safe);
-      const found = new Set();
-      for (const line of r.stdout.split(/\r?\n/)) {
-        const name = line.trim().split(/[\\/]/).pop()?.replace(/\.[^.]*$/, "").toLowerCase();
-        const hit = safe.find((c) => c.toLowerCase() === name);
-        if (hit) found.add(hit);
-      }
-      return found;
-    }
-    const r = await exec("sh", ["-lc", safe.map((c) => `command -v '${c}' >/dev/null 2>&1 && echo '${c}'`).join("; ")]);
-    return new Set(r.stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean));
-  } catch {
-    return new Set();
-  }
-}
-
 // [{ key, name, icon, tint, tile, color, run, installed, featured }]: the featured ones in their
-// order, then any other agent this computer has.
+// order, then any other agent this computer has, in agent-order.js's order. Installed as
+// loadAgents() finds it (launcher-wrapped Claude Code and Codex by their own command).
 export async function findAgents() {
   let list = [];
-  try { list = await knownAgents(); } catch {}
-  const wrapped = list.filter((a) => WRAPPED[a.key] && isPath(a.run?.[0]));
-  if (wrapped.length) {
-    const found = await have(wrapped.map((a) => WRAPPED[a.key]));
-    for (const a of wrapped) a.installed = found.has(WRAPPED[a.key]);
-  }
+  try { list = await loadAgents(null); } catch {}
   const byKey = new Map(list.map((a) => [a.key, a]));
   const stock = (key) => ({ key, name: NAMES[key], icon: ICONS[key], tint: key !== "claude" && key !== "codex", tile: "#1c1d21", color: "#ffffff", installed: false });
   const featured = FEATURED.map((key) => ({ ...(byKey.get(key) ?? stock(key)), featured: true }));
-  const others = list.filter((a) => !FEATURED.includes(a.key) && a.installed);
+  const others = agentOrder(list.filter((a) => !FEATURED.includes(a.key))).installed;
   return [...featured, ...others];
 }
 
@@ -141,6 +111,8 @@ export const YOLO = {
 const STOCK_RUN = { claude: ["claude"], codex: ["codex"], gemini: ["gemini"], opencode: ["opencode"], antigravity: ["agy"] };
 
 const programsFile = () => `${slash(appHome())}/programs.json`;
+// The agents Fedra starts through an account launcher (accounts/<tool>.ps1 | .sh).
+const WRAPPED = { claude: "claude", codex: "codex" };
 
 export async function readPrograms() {
   const raw = await readTextFile(programsFile()).catch(() => null);

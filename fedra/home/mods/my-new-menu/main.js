@@ -1,9 +1,35 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
-import { theme, spaces, panes, knownAgents, run, openOverlay, closeOverlay, props, window, keys, shared, setShared } from "atrous";
+import { theme, spaces, panes, run, openOverlay, closeOverlay, props, window, keys, layout } from "atrous";
+import { agentOrder, noteAgentUse, cachedAgents, loadAgents } from "./agent-order.js";
 
-// The last agents each machine reported, shown at once while knownAgents() checks again.
-const KNOWN = "new-menu.agents";
+// The "+" menu: a terminal, the agents (agent-order.js: installed first, Claude Code, Codex, Pi,
+// OpenCode, then the others by how often they're started; then two that aren't installed), a new
+// space (it opens on the start screen, mods/start) and worktrees.
+
+// The side panel as it is now (Fedra's Files / Changes / Browser; null: closed; undefined: the
+// layout has none). The start screen closes it while it shows and puts this back after a pick.
+function panelNow() {
+  const find = (n, id) => (n?.id === id ? n : (n?.children ?? []).reduce((f, c) => f ?? find(c, id), null));
+  const panel = find(layout(), "panel");
+  if (!panel) return undefined;
+  return panel.hidden ? null : find(panel, "panel-body")?.active ?? null;
+}
+
+// A new space opens on the start screen, not on a bare shell (see mods/start/main.js).
+function openProject() {
+  const existing = spaces().map((s) => s.id);
+  const machine = spaces().find((s) => s.active)?.machine ?? null;
+  const panel = panelNow();
+  run("space.new", machine ? { machine } : {});
+  const fresh = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  run("tab.new", { name: "Start", mod: "start", props: { machine, fresh, existing, panel } });
+}
+
+function startAgent(space, a) {
+  noteAgentUse(a.key);
+  run("tab.new", { name: a.name, space: space?.id, argv: a.run });
+}
 
 function shortcut(name) {
   const k = keys().find(b => b.section === "global" && b.action === name);
@@ -24,16 +50,12 @@ function shortcut(name) {
 
 export default class NewMenu extends View {
   init(_props, cx) {
-    const machine = spaces().find(s => s.active)?.machine;
-    const where = machine ?? "";
-    this.agents = shared(KNOWN)?.[where] ?? [];
+    const machine = spaces().find(s => s.active)?.machine ?? null;
+    this.agents = cachedAgents(machine);
     this.handle = cx.focus_handle();
     this.handle.focus();
     cx.spawn(async cx => {
-      try {
-        this.agents = await knownAgents({ on: machine });
-        setShared(KNOWN, { ...shared(KNOWN), [where]: this.agents });
-      }
+      try { this.agents = await loadAgents(machine); }
       catch { this.failed = true; }
       cx.notify();
     });
@@ -48,8 +70,8 @@ export default class NewMenu extends View {
   render() {
     const t = theme();
     const space = spaces().find(s => s.active);
-    const installed = this.agents.filter(a => a.installed);
-    const choices = [...installed, ...this.agents.filter(a => !a.installed).slice(0, 2)];
+    const { installed, missing } = agentOrder(this.agents);
+    const choices = [...installed, ...missing.slice(0, 2)];
     return v_flex().min_h(0).w_full().h(Math.min(491, 167 + Math.max(1, choices.length) * 31)).bg(t.popover).p(5).text_size(12.8)
       .id("new-menu").track_focus(this.handle)
       .on_key_down((e) => {
@@ -57,16 +79,16 @@ export default class NewMenu extends View {
         const agent = /^[1-9]$/.test(e.key) ? installed[Number(e.key) - 1] : null;
         if (!agent) return;
         closeOverlay(props().overlay);
-        run("tab.new", { name: agent.name, space: space?.id, argv: agent.run });
+        startAgent(space, agent);
       })
       .child(this.row("terminal", svg("icons/shell.svg").size(14), "Terminal", () => run("tab.new", { space: space?.id }), shortcut("tab.new")))
       .child(div().px(9).pt(8).pb(4).text_size(11).text_color(t.dim).child("Start an agent"))
       .child(v_flex().flex_1().min_h(0).overflow_y_scrollbar()
         .children(choices.map((a, i) => this.row(a.key, a.tint ? svg(a.icon).size(14).text_color(t.foreground) : image(a.icon).size(14), a.name,
-          () => run("tab.new", { name: a.name, space: space?.id, argv: a.run }), a.installed ? (i < 9 ? String(i + 1) : "") : "not installed", a.installed)))
+          () => startAgent(space, a), a.installed ? (i < 9 ? String(i + 1) : "") : "not installed", a.installed)))
         .when(this.agents.length === 0, el => el.child(div().px(9).py(6).text_color(t.dim).child(this.failed ? "Could not load agents" : "Checking installed agents…"))))
       .child(div().h(1).mx(4).my(5).bg(t.border))
-      .child(this.row("space", div().w(14).child("+"), "New space", () => run("space.new"), shortcut("space.new")))
+      .child(this.row("space", div().w(14).child("+"), "New space", () => openProject(), shortcut("space.new")))
       .child(this.row("worktree", svg("mods/workspace-chrome/branch.svg").size(14), "New worktree…", () => openOverlay({ mod: "my-worktree", kind: "dialog", width: 460, props: { space: space?.id, folder: panes().find(p => p.focused)?.cwd, action: "new" } }), "", Boolean(space)))
       .child(this.row("worktree-open", svg("mods/workspace-chrome/branch.svg").size(14), "Open worktree\u2026", () => openOverlay({ mod: "my-worktree", kind: "dialog", width: 560, height: 480, props: { space: space?.id, folder: panes().find(p => p.focused)?.cwd, action: "open" } }), "", Boolean(space)));
   }
