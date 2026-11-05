@@ -3357,12 +3357,14 @@ impl AppWindow {
                 spec["props"] = json!({ "section": section });
                 let id = format!("mod-{SETTINGS}");
                 let open = self.overlays.iter().any(|o| o.id == id);
-                if open && section.is_some() {
-                    self.close_overlay(&id, window, cx);
+                // Already open: it shows that section (its `section:<id>` command).
+                if open {
+                    if let Some(section) = section {
+                        mods::send_command(SETTINGS, &format!("section:{section}"));
+                    }
+                    return;
                 }
-                if !open || section.is_some() {
-                    self.open_overlay(id, spec, window, cx);
-                }
+                self.open_overlay(id, spec, window, cx);
                 return;
             }
             "app.check_updates" => crate::update::check_now(),

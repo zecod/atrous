@@ -27,6 +27,8 @@ use std::sync::Mutex;
 
 /// herdr's shipped layouts (Atrous ships main as Classic and Terminals; Herdr 98 is gone).
 const HERDR_LAYOUTS: &[&str] = &["main", "terminals", "win98"];
+/// herdr's shipped themes Atrous doesn't ship (Herdr 98's).
+const HERDR_THEMES: &[&str] = &["win98"];
 /// Fedra's keys, added to a person's keys.json where those keys are free
 /// (or still open herdr's Settings).
 const FEDRA_KEYS: &[(&str, &str)] = &[
@@ -173,6 +175,12 @@ fn copy_all(from: &Path, stage: &Path, to: &Path) -> std::io::Result<Report> {
     add_fedra_keys(&stage.join("keys.json"));
     show_fedra(&stage.join("shared.json"));
     report.themes = copy_tree(&from.join("themes"), &stage.join("themes"), &rewrite)?;
+    // herdr's own Herdr 98 theme belonged to a layout Atrous doesn't ship.
+    for theme in HERDR_THEMES {
+        if std::fs::remove_file(stage.join("themes").join(format!("{theme}.json"))).is_ok() {
+            report.themes -= 1;
+        }
+    }
     report.data = copy_tree(&from.join("data"), &stage.join("data"), &rewrite)?;
 
     // Layouts: the person's own, every layout's clicks.
@@ -429,6 +437,7 @@ mod tests {
         write(&from.join("AGENTS.md"), "herdr's guide");
         write(&from.join("window.json"), "{}");
         write(&from.join("themes/mine.json"), "{}");
+        write(&from.join("themes/win98.json"), "{}");
         write(&from.join("layouts/main.json"), "{}");
         write(&from.join("layouts/fedra.json"), "{}");
         write(&from.join("layouts/fedra.svg"), "<svg/>");
@@ -473,7 +482,7 @@ mod tests {
         assert_eq!(summary["layouts"], serde_json::json!(["mine"]));
         assert_eq!(summary["mods"], serde_json::json!(["own"]));
         for gone in ["AGENTS.md", "window.json", "installed.json", "layouts/main.json", "layouts/fedra.json", "layouts/fedra.svg",
-            "mods/files", "mods/my-spaces", "mods/own/gpui-kit.d.ts", "mods/own/node_modules", "accounts", "data/files/store.json.tmp.1"] {
+            "mods/files", "mods/my-spaces", "mods/own/gpui-kit.d.ts", "themes/win98.json", "mods/own/node_modules", "accounts", "data/files/store.json.tmp.1"] {
             assert!(!to.join(gone).exists(), "{gone} came over");
         }
         for kept in ["layouts/mine.svg", "layouts/.state/main.json", "mods/own/main.js", "themes/mine.json", "data/files/store.json"] {
