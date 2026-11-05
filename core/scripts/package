@@ -1,0 +1,26 @@
+#!/bin/sh
+# Package a built Unix binary with its redistribution notices.
+set -eu
+export COPYFILE_DISABLE=1
+if [ "$#" -ne 2 ]; then
+    echo "usage: scripts/package <atrous-core binary> <output.tar.gz>" >&2
+    exit 2
+fi
+root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+work=$(mktemp -d "${TMPDIR:-/var/tmp}/atc-package.XXXXXX")
+trap 'rm -rf "$work"' EXIT HUP INT TERM
+if [ -d "$1/Contents/MacOS" ]; then
+    cp -R "$1" "$work/Atrous Core.app"
+    # Old updaters install only this standalone signature. The bundle executable
+    # is resource-sealed and cannot be copied out without invalidating it.
+    cp "$(dirname "$1")/atrous-core" "$work/atrous-core"
+else
+    cp "$1" "$work/atrous-core"
+fi
+cp "$root/LICENSE" "$work/LICENSE"
+cp "$root/crates/atrous-core/THIRD-PARTY-NOTICES" "$work/THIRD-PARTY-NOTICES"
+if [ -d "$work/Atrous Core.app" ]; then
+    tar -czf "$2" -C "$work" atrous-core 'Atrous Core.app' LICENSE THIRD-PARTY-NOTICES
+else
+    tar -czf "$2" -C "$work" atrous-core LICENSE THIRD-PARTY-NOTICES
+fi

@@ -1,0 +1,27 @@
+Atrous core (atrous-core, atc)
+
+Atrous is a modified fork of herdr-app / herdr-core by herdrdev
+(https://github.com/herdrdev/herdr-app, https://github.com/herdrdev/herdr-core),
+licensed under the Apache License 2.0. This repository is the fork of
+herdr-core, taken at commit c6b316f (v0.1.18 plus one fix).
+
+Changes: rebranded as Atrous core.
+- The binaries are atrous-core and atc (the same program) instead of
+  herdr-core and hc; --version prints "atc <version>".
+- Environment variables are ATC_* instead of HC_* (no fallback), and
+  ATC_RELEASES_URL replaces HERDR_RELEASES_URL.
+- State, config and runtime folders, socket and named-pipe names, systemd
+  units, launchd jobs and the macOS bundle (Atrous Core.app,
+  io.github.zecod.atrous.core) use atrous-core / atc names, so Atrous core
+  runs beside an installed herdr-core without sharing anything with it.
+- Updates and installers use the GitHub releases of zecod/atrous-core; the
+  download counter and every request to herdr's servers are removed. macOS
+  releases are ad-hoc signed until Atrous has a Developer ID.
+- A core started from inside an upstream core's terminal drops that
+  terminal's HC_SCOPE / HC_TERMINAL_ID / HC_TERMINAL_SOCKET marks.
+- The agent manual (atc --skill), the installable skill (atrous-core),
+  the README and docs describe Atrous core.
+
+LICENSE (Apache-2.0) and the third-party notices are kept unchanged:
+crates/atrous-core/THIRD-PARTY-NOTICES (printed by atc --licenses) and
+distribution/notices/. No herdr logo or trademark is used.
