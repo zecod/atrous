@@ -1,14 +1,14 @@
-# Every master push and PR: native Linux x86_64, macOS and Windows
+# Every main push and PR: native Linux x86_64, macOS and Windows
 # clippy/tests, plus upgrade from the last release. Updates must keep terminals.
 #
-# Rust caches use one pinned toolchain and only master runs save, so PR
+# Rust caches use one pinned toolchain and only main runs save, so PR
 # caches can't evict the ones everybody restores. Zig and old-release binary
 # caches save separately; libghostty-vt stays with the workspace crates.
 name: ci
 
 on:
   push:
-    branches: [master]
+    branches: [main]
   # No paths-ignore here: CI is required to merge, so every PR needs it.
   pull_request:
   workflow_dispatch:
@@ -26,13 +26,13 @@ env:
   # File/line backtraces without full debug info: smaller target, faster cache.
   CARGO_PROFILE_DEV_DEBUG: "1"
   CARGO_PROFILE_TEST_DEBUG: "1"
-  SAVE_CACHES: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/master' }}
+  SAVE_CACHES: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
   # Each test binary aborts if it runs this long (a hang, not a slow test):
   # 30 s on our machines; GitHub's runners are slower.
-  HC_TEST_WATCHDOG_S: "120"
-  # A test that checks hc keeps a fixed timing (50 ms to finish a key
+  ATC_TEST_WATCHDOG_S: "120"
+  # A test that checks atc keeps a fixed timing (50 ms to finish a key
   # sequence) skips that check here: a loaded runner can't keep it.
-  HC_TEST_SLOW_RUNNER: "1"
+  ATC_TEST_SLOW_RUNNER: "1"
 
 jobs:
   # Fast formatting/advisory checks and Windows clippy from Linux
@@ -98,7 +98,7 @@ jobs:
           cache-bin: false
           save-if: ${{ env.SAVE_CACHES }}
       - run: cargo clippy --locked --target ${{ matrix.target }} --all-targets -- -D warnings
-      # Windows' own ConPTY swallows answers to programs: hc ships Microsoft's.
+      # Windows' own ConPTY swallows answers to programs: atc ships Microsoft's.
       - if: matrix.os == 'windows'
         shell: pwsh
         run: scripts/fetch-conpty.ps1 -Dest target/${{ matrix.target }}/debug
@@ -110,7 +110,7 @@ jobs:
           # Full-screen scrolling tests are disabled on macOS CI because runner timing is unreliable.
           only=()
           if [ "${{ matrix.os }}" = macos ]; then
-            for t in crates/herdr-core/tests/*.rs; do
+            for t in crates/atrous-core/tests/*.rs; do
               name=$(basename "$t" .rs)
               [ "$name" = stitch ] || only+=(--test "$name")
             done
@@ -144,6 +144,8 @@ jobs:
         id: last
         run: |
           tag=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)
+          # Tags from before the fork build the upstream program, not atrous-core.
+          if [ -n "$tag" ] && ! git cat-file -e "$tag:crates/atrous-core/Cargo.toml" 2>/dev/null; then tag=; fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           [ -n "$tag" ] && echo "sha=$(git rev-parse --short "$tag")" >> "$GITHUB_OUTPUT" || true
           # Releases before 0.2 built Ghostty for the building CPU: a copy
@@ -153,7 +155,7 @@ jobs:
       - if: steps.last.outputs.tag != ''
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: /var/tmp/hc-upgrade/${{ steps.last.outputs.sha }}
+          path: /var/tmp/atc-upgrade/${{ steps.last.outputs.sha }}
           key: upgrade-from-${{ steps.last.outputs.tag }}-${{ steps.last.outputs.sha }}-${{ steps.last.outputs.cpu }}
       - name: Upgrade from the last release
         run: |

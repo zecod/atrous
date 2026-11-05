@@ -4,17 +4,17 @@
 set -eu
 cd "$(dirname "$0")/.."
 nice -n 10 cargo build --release
-bin="${HC_INSTALL_DIR:-$HOME/.local/bin}"
+bin="${ATC_INSTALL_DIR:-$HOME/.local/bin}"
 mkdir -p "$bin"
 if [ "$(uname -s)" = Darwin ]; then
-  app="target/release/Herdr Core.app"
+  app="target/release/Atrous Core.app"
   rm -rf "$app"
-  sh scripts/mac-bundle target/release/herdr-core "$app"
+  sh scripts/mac-bundle target/release/atrous-core "$app"
   bash scripts/mac-sign "$app"
-  "$app/Contents/MacOS/herdr-core" --hc-install-bundle "$app/Contents/MacOS/herdr-core" "$bin/herdr-core"
+  "$app/Contents/MacOS/atrous-core" --atc-install-bundle "$app/Contents/MacOS/atrous-core" "$bin/atrous-core"
 else
-  install -m 755 target/release/herdr-core "$bin/herdr-core.new"
-  mv -f "$bin/herdr-core.new" "$bin/herdr-core"
+  install -m 755 target/release/atrous-core "$bin/atrous-core.new"
+  mv -f "$bin/atrous-core.new" "$bin/atrous-core"
 fi
-[ -e "$bin/hc" ] || [ -L "$bin/hc" ] || ln -s herdr-core "$bin/hc"
-"$bin/herdr-core" server restart
+[ -e "$bin/atc" ] || [ -L "$bin/atc" ] || ln -s atrous-core "$bin/atc"
+"$bin/atrous-core" server restart

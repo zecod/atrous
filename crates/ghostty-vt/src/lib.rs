@@ -1,4 +1,4 @@
-//! The few libghostty-vt calls herdr-core needs, behind a safe `Terminal`.
+//! The few libghostty-vt calls atrous-core needs, behind a safe `Terminal`.
 
 use std::ffi::c_void;
 use std::ptr;

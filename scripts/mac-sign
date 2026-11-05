@@ -2,12 +2,12 @@
 # APPLE_CERTIFICATE_P12 is a base64-encoded Developer ID Application .p12.
 set -euo pipefail
 
-bin=${1:?usage: mac-sign herdr-core}
+bin=${1:?usage: mac-sign atrous-core}
 root=$(cd "$(dirname "$0")/.." && pwd)
-options=(--options runtime --entitlements "$root/distribution/macos-entitlements.plist" --identifier dev.herdr.core)
+options=(--options runtime --entitlements "$root/distribution/macos-entitlements.plist" --identifier io.github.zecod.atrous.core)
 sign_target() {
   if [[ -d $bin/Contents/MacOS ]]; then
-    codesign --force "${options[@]}" "$@" "$bin/Contents/MacOS/herdr-core"
+    codesign --force "${options[@]}" "$@" "$bin/Contents/MacOS/atrous-core"
   fi
   codesign --force "${options[@]}" "$@" "$bin"
   codesign --verify --strict "$bin"

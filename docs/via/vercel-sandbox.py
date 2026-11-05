@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Reach a Vercel Sandbox with hc: hc machine add --name box --via '/path/vercel-sandbox.py <sandbox>'
+"""Reach a Vercel Sandbox with atc: atc machine add --name box --via '/path/vercel-sandbox.py <sandbox>'
 
-hc needs a connection that carries bytes both ways untouched, like ssh. `sandbox exec`
+atc needs a connection that carries bytes both ways untouched, like ssh. `sandbox exec`
 alone drops stdin, and `sandbox exec -i` wants a terminal and runs the command in a remote
 pty. This makes `-i` a clean pipe:
 - the CLI insists stdout is a terminal, so it gets a raw local pty that is copied out;
@@ -10,8 +10,8 @@ pty. This makes `-i` a clean pipe:
 """
 import os, pty, subprocess, sys, threading, tty
 
-MARK = b"\x1d__hc_ready__\x1d"
-REMOTE = 'stty raw -echo; printf "\\035__hc_ready__\\035"; exec sh -c "$0"'
+MARK = b"\x1d__atc_ready__\x1d"
+REMOTE = 'stty raw -echo; printf "\\035__atc_ready__\\035"; exec sh -c "$0"'
 
 name, line = sys.argv[1], sys.argv[-1]
 master, slave = pty.openpty()

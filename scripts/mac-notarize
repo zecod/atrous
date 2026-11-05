@@ -2,12 +2,12 @@
 # Submit the signed bundle and staple its ticket before packaging.
 set -euo pipefail
 
-bin=${1:?usage: mac-notarize signed-herdr-core}
+bin=${1:?usage: mac-notarize signed-atrous-core}
 : "${APPLE_API_KEY:?missing notary API private key}"
 : "${APPLE_API_KEY_ID:?missing notary API key ID}"
 : "${APPLE_API_ISSUER:?missing notary API issuer}"
 umask 077
-work=$(mktemp -d "${TMPDIR:-/var/tmp}/hc-notary.XXXXXX")
+work=$(mktemp -d "${TMPDIR:-/var/tmp}/atc-notary.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
@@ -17,9 +17,9 @@ signature=$(codesign -dvv "$bin" 2>&1)
 [[ $signature == *"Authority=Developer ID Application:"* ]] || { echo 'notarization requires Developer ID Application signing' >&2; exit 1; }
 printf '%s' "$APPLE_API_KEY" > "$work/key.p8"
 auth=(--key "$work/key.p8" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER")
-ditto -c -k --keepParent "$bin" "$work/herdr-core.zip"
+ditto -c -k --keepParent "$bin" "$work/atrous-core.zip"
 status=0
-xcrun notarytool submit "$work/herdr-core.zip" "${auth[@]}" --wait --timeout 30m \
+xcrun notarytool submit "$work/atrous-core.zip" "${auth[@]}" --wait --timeout 30m \
   --output-format json | tee "$work/submission.json" || status=$?
 if [[ $status != 0 ]] || ! jq -e '.status == "Accepted"' "$work/submission.json" >/dev/null; then
   id=$(jq -r '.id // empty' "$work/submission.json")
