@@ -5216,6 +5216,9 @@ mod tests {
     }
 
     #[gpui::test]
+    // gpui records debug selectors only in builds with debug_assertions (div.rs `debug_selector`),
+    // so in `cargo test --release` debug_bounds is None and this can't see the element.
+    #[cfg_attr(not(debug_assertions), ignore = "debug selectors (debug_bounds) are recorded only with debug_assertions: run it in a debug build")]
     fn fitted_popups_use_their_rendered_size_at_the_window_edge(cx: &mut TestAppContext) {
         struct Popup {
             height: f32,

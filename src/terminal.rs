@@ -2184,6 +2184,9 @@ mod tests {
     }
 
     #[gpui::test]
+    // gpui records debug selectors only in builds with debug_assertions (div.rs `debug_selector`),
+    // so in `cargo test --release` debug_bounds is None and this can't see the element.
+    #[cfg_attr(not(debug_assertions), ignore = "debug selectors (debug_bounds) are recorded only with debug_assertions: run it in a debug build")]
     fn each_terminal_keeps_its_find_bar_inside_its_own_pane(cx: &mut gpui::TestAppContext) {
         use gpui::*;
 
@@ -2424,6 +2427,9 @@ mod tests {
     }
 
     #[gpui::test]
+    // gpui records debug selectors only in builds with debug_assertions (div.rs `debug_selector`),
+    // so in `cargo test --release` debug_bounds is None and this can't see the element.
+    #[cfg_attr(not(debug_assertions), ignore = "debug selectors (debug_bounds) are recorded only with debug_assertions: run it in a debug build")]
     fn find_bar_chevrons_step_older_up_and_newer_down(cx: &mut gpui::TestAppContext) {
         use gpui::*;
 
@@ -2584,6 +2590,9 @@ mod tests {
     }
 
     #[gpui::test]
+    // gpui records debug selectors only in builds with debug_assertions (div.rs `debug_selector`),
+    // so in `cargo test --release` debug_bounds is None and this can't see the element.
+    #[cfg_attr(not(debug_assertions), ignore = "debug selectors (debug_bounds) are recorded only with debug_assertions: run it in a debug build")]
     fn shipped_find_binding_opens_search_but_ctrl_f_reaches_the_program(cx: &mut gpui::TestAppContext) {
         use gpui::*;
 
