@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Atrous</title>
+  <path d="M322 724 L512 292 L702 724" fill="none" stroke="currentColor" stroke-width="112" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="512" cy="624" r="54" fill="#3ddc97"/>
+</svg>
