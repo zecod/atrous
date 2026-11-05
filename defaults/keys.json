@@ -46,7 +46,7 @@
     "ctrl-shift-/": "app.help",
     "ctrl-shift-?": "app.help",
     "ctrl-shift-b": "layout.toggle:sidebar",
-    "ctrl-shift-n": "space.new",
+    "ctrl-shift-n": "mod.open:add-project",
     "ctrl-shift-t": "tab.new",
     "ctrl-shift-k": "mod.open:picker",
     "ctrl-shift-p": "app.palette",

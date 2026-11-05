@@ -14,7 +14,7 @@
     "cmd-]": "agent.next",
     "cmd-[": "agent.prev",
     "cmd-shift-l": "layout.switch",
-    "cmd-n": "space.new",
+    "cmd-n": "mod.open:add-project",
     "cmd-p": "mod.open:picker",
     "cmd-shift-p": "app.palette",
     "cmd-,": "mod.open:my-settings",

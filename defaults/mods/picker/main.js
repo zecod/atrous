@@ -7,9 +7,25 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { agents, spaces, terminals, run, core, theme, settings, props, closeOverlay } from "atrous";
+import { agents, spaces, terminals, run, core, theme, settings, props, closeOverlay, layout } from "atrous";
 
 const I = (name) => `mods/workspace-chrome/${name}.svg`;
+
+// A new project opens on the start screen (the `start` mod), not a bare shell:
+// the side panel as it is now goes with it, so the start screen can put it back.
+function panelNow() {
+  const find = (n, id) => (n?.id === id ? n : (n?.children ?? []).reduce((f, c) => f ?? find(c, id), null));
+  const panel = find(layout(), "panel");
+  if (!panel) return undefined;
+  return panel.hidden ? null : find(panel, "panel-body")?.active ?? null;
+}
+function openProject(machine) {
+  const existing = spaces().map((s) => s.id);
+  const panel = panelNow();
+  run("space.new", { machine: machine ?? "" });
+  const fresh = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  run("tab.new", { name: "Start", mod: "start", props: { machine: machine || null, fresh, existing, panel } });
+}
 
 // A tab's name as Fedra's tab bar shows it: its own name, else its agent's session title,
 // else the program it runs.
@@ -93,7 +109,7 @@ export default class Picker extends View {
     this.close();
     if (r.kind === "ctx") run("tab.select", { id: r.ctx.id });
     else if (r.kind === "new") run("tab.new");
-    else if (r.kind === "space") run("space.new", { machine: r.machine ?? "" });
+    else if (r.kind === "space") openProject(r.machine);
   }
 
   // Fedra's status marks: a spinner while working, a dot when it needs you or is done.

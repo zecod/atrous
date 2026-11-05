@@ -41,12 +41,14 @@ const SHIPPED_KEYS: &[&str] = &[
     include_str!("keys/shipped/v0.1.5-keys.json"),
     include_str!("keys/shipped/v0.1.12-keys.json"),
     include_str!("keys/shipped/v0.1.13-keys.json"),
+    include_str!("keys/shipped/v0.2.0-pre-keys.json"),
 ];
 #[cfg(any(target_os = "macos", test))]
 const SHIPPED_MACOS_KEYS: &[&str] = &[
     include_str!("keys/shipped/v0.1.4-keys.macos.json"),
     include_str!("keys/shipped/v0.1.5-keys.macos.json"),
     include_str!("keys/shipped/v0.1.13-keys.macos.json"),
+    include_str!("keys/shipped/v0.2.0-pre-keys.macos.json"),
 ];
 
 #[derive(serde::Deserialize)]
@@ -165,13 +167,59 @@ fn valid_action(action: &str) -> bool {
         || name.split_once('.').is_some_and(|(m, c)| !m.is_empty() && !c.is_empty())
 }
 
+/// Default bindings that changed, for keys.json files that aren't untouched
+/// copies (a migrated or edited file): `(name, section, key, old, new)`. A
+/// key still bound to the old default moves to the new one, once per home;
+/// one the person bound to something else stays theirs.
+const MOVED: &[(&str, &str, &str, &str, &str)] = &[
+    // A new project opens Add project (clone or create, then the start screen), as the sidebar's +.
+    ("new-project", "global", "ctrl-shift-n", "space.new", "mod.open:add-project"),
+    ("new-project-macos", "global", "cmd-n", "space.new", "mod.open:add-project"),
+];
+
 /// Reads keys.json, installing or updating untouched defaults, or says what's wrong.
 pub fn load() -> Result<Vec<KeyBinding>, String> {
     #[cfg(not(target_os = "macos"))]
     let originals = SHIPPED_KEYS;
     #[cfg(target_os = "macos")]
     let originals = SHIPPED_MACOS_KEYS;
-    parse(&load_text(&path(), DEFAULTS, originals)?)
+    let path = path();
+    let text = load_text(&path, DEFAULTS, originals)?;
+    let text = move_defaults(&path, &crate::mods::app_dir().join("data").join("keys-moved.json"), text);
+    parse(&text)
+}
+
+/// Applies `MOVED` once per home (`done` lists what was applied).
+fn move_defaults(path: &std::path::Path, done: &std::path::Path, text: String) -> String {
+    let mut applied: Vec<String> = std::fs::read_to_string(done).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+    let todo: Vec<_> = MOVED.iter().filter(|m| !applied.iter().any(|a| a == m.0)).collect();
+    if todo.is_empty() {
+        return text;
+    }
+    let Ok(serde_json::Value::Object(mut sections)) = serde_json::from_str::<serde_json::Value>(&text) else { return text };
+    let mut changed = false;
+    for (name, section, key, old, new) in &todo {
+        if let Some(binding) = sections.get_mut(*section).and_then(|s| s.get_mut(*key))
+            && binding.as_str() == Some(*old)
+        {
+            *binding = (*new).into();
+            changed = true;
+        }
+        applied.push((*name).to_owned());
+    }
+    let text = if changed {
+        match serde_json::to_string_pretty(&serde_json::Value::Object(sections)) {
+            Ok(moved) if std::fs::write(path, moved.clone() + "\n").is_ok() => moved + "\n",
+            _ => return text,
+        }
+    } else {
+        text
+    };
+    if let Some(dir) = done.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(done, serde_json::to_string(&applied).unwrap_or_default());
+    text
 }
 
 fn load_text(path: &std::path::Path, defaults: &str, originals: &[&str]) -> Result<String, String> {
@@ -276,6 +324,23 @@ pub fn install(bindings: Vec<KeyBinding>, cx: &mut App) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_moved_default_moves_once_and_a_rebound_key_stays() {
+        let dir = std::env::temp_dir().join(format!("atrous-keys-moved-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (path, done) = (dir.join("keys.json"), dir.join("data").join("keys-moved.json"));
+        let old = "{\n  \"global\": {\n    \"ctrl-shift-n\": \"space.new\",\n    \"cmd-n\": \"tab.new\"\n  }\n}\n";
+        std::fs::write(&path, old).unwrap();
+        let text = super::move_defaults(&path, &done, old.to_owned());
+        assert!(text.contains("\"ctrl-shift-n\": \"mod.open:add-project\""), "{text}");
+        assert!(text.contains("\"cmd-n\": \"tab.new\""), "rebound: theirs: {text}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+        // Once: going back to space.new afterwards sticks.
+        std::fs::write(&path, old).unwrap();
+        assert_eq!(super::move_defaults(&path, &done, old.to_owned()), old);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn only_byte_identical_shipped_keys_are_upgraded() {
         let dir = std::env::temp_dir().join(format!("atrous-keys-migration-{}", std::process::id()));
