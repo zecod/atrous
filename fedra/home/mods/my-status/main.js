@@ -9,12 +9,13 @@
 // How it changes the window (learned the hard way):
 // - Only the status-bar copy changes anything, one operation at a time (a queue). The
 //   panel header (another copy of this mod) only sends commands: my-status.select:<t>, …
-// - Showing, hiding and switching the shown shell are atomic edits of the layout FILE,
-//   limited to the "quick-terminal" node (hidden, size kept as dragged) and its
-//   "quick-terminal-term" block (content). Never layout.set with a tree from layout():
-//   that round trip flattens single-child columns and once lost the side panel. And not
-//   layout.show/hide either: Atrous drops clicks on a node whose file entry changed, so a
-//   show followed by a content edit snapped back to hidden.
+// - Showing, hiding and switching the shown shell are layout CLICKS, never edits of the
+//   layout file: layout.terminal puts the shell in the "quick-terminal-term" block and
+//   layout.show/hide open and close the "quick-terminal" node (its size is a click too).
+//   Fedra's and Flow's layouts ship with Atrous, and a shipped layout whose file changed is
+//   moved aside to <name>-edited on the next start; clicks live in layouts/.state instead.
+//   Never layout.set with a tree from layout(): that round trip flattens single-child
+//   columns and once lost the side panel.
 // - Keyboard focus waits until the terminal block is really on screen.
 // - Following the active space is event-driven: the status bar looks after each redraw
 //   (spaces, terminals, layout changed); a 1 s timer covers time-only cases and does nothing
@@ -24,7 +25,7 @@
 
 import { View, div, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { spaces, agents, panes, terminals, focused, theme, run, window, keys, layout, core, shared, setShared, props, nextCommand, appHome, readTextFile, writeTextFile } from "atrous";
+import { spaces, agents, panes, terminals, focused, theme, run, window, keys, layout, core, shared, setShared, props, nextCommand } from "atrous";
 
 // shared: space id -> { list: [address…], active: address, at: { address: started ms } }
 // (an older version stored a bare address string).
@@ -124,37 +125,18 @@ export default class WorkspaceStatus extends View {
     });
   }
 
-  // ---- the layout file: only the quick-terminal node and its terminal block ----
+  // ---- the window: clicks only (see the header) ----
 
-  async editLayout(mutate) {
-    const name = shared("layout") ?? "fedra";
-    const path = `${appHome()}/layouts/${name}.json`;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const text = await readTextFile(path);
-      if (!text) return false;
-      const tree = JSON.parse(text);
-      const qt = find(tree, "quick-terminal");
-      const term = find(tree, "quick-terminal-term");
-      if (!qt || !term) return false;
-      const before = JSON.stringify([qt.hidden ?? false, term.content, qt.size]);
-      const dragged = find(layout(), "quick-terminal")?.size;
-      if (dragged) qt.size = dragged; // a height the person dragged stays
-      mutate(qt, term);
-      if (JSON.stringify([qt.hidden ?? false, term.content, qt.size]) === before) return true;
-      try {
-        await writeTextFile(path, `${JSON.stringify(tree, null, 2)}\n`, text); // atomic; refuses if the file changed meanwhile
-        return true;
-      } catch { /* changed under us: read it again */ }
-    }
-    return false;
+  // A layout command; false where the shown layout has no quick terminal.
+  click(command, args) {
+    try { run(command, args); return true; } catch { return false; }
   }
 
   async showTerminal(addr) {
     this.said = { on: true, at: Date.now(), addr };
-    await this.editLayout((qt, term) => {
-      qt.hidden = false;
-      term.content = { terminal: addr };
-    });
+    if (this.click("layout.terminal", { id: "quick-terminal-term", terminal: addr })) {
+      this.click("layout.show", { id: "quick-terminal" });
+    }
   }
 
   // Visible as far as this copy knows: its own last change wins for a moment, since
@@ -208,7 +190,7 @@ export default class WorkspaceStatus extends View {
 
   async opHide(_cx) {
     this.said = { on: false, at: Date.now() };
-    await this.editLayout((qt) => { qt.hidden = true; });
+    this.click("layout.hide", { id: "quick-terminal" });
   }
 
   // "+": another shell for this space, shown (and focused, unless a script asked).

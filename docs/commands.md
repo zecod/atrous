@@ -393,6 +393,15 @@ Hide a layout node.
 |---|---|
 | `id` | yes |
 
+## `layout.terminal`
+
+Show a terminal in a layout block (terminal: its address; empty: what the layout file has there). A click, like show/hide: kept with the layout's clicks, the file never changes, so it works on shipped layouts (Fedra's quick terminal).
+
+| Argument | Required |
+|---|---|
+| `id` | yes |
+| `terminal` | no |
+
 ## `layout.resize`
 
 Size a layout node.

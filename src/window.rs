@@ -3264,6 +3264,22 @@ impl AppWindow {
                     _ => true,
                 };
             }
+            "layout.terminal" => {
+                // A click like show/hide: the layout file (a shipped one too) never changes for it.
+                let id = Self::arg(a, "id").unwrap_or_default();
+                let terminal = Self::owned(a, "terminal").unwrap_or_default();
+                let file = self.file_chrome.find(id).and_then(|n| n.content().cloned());
+                let Some(n) = self.chrome.find_mut(id) else { return self.fail(format!("no node {id:?} in the shown layout")) };
+                let Kind::Block { content } = &mut n.kind else { return self.fail(format!("{id:?} isn't a block")) };
+                *content = if terminal.is_empty() {
+                    match file {
+                        Some(c) => c,
+                        None => return self.fail(format!("{id:?} isn't in the layout file")),
+                    }
+                } else {
+                    Content::Terminal { terminal }
+                };
+            }
             "layout.resize" => {
                 let id = Self::arg(a, "id").unwrap_or_default();
                 let Some(n) = self.find_node_mut(id) else { return self.fail(format!("no node {id:?}")) };

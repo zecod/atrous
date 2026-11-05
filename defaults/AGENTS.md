@@ -215,8 +215,13 @@ No-longer-shipped things go if
 untouched, otherwise they stay.
 
 Clicks (sizes, shown/hidden, stack child, floating spots, theme picks,
-background, text size, pane header height and border/focus look) live
-in `layouts/.state/` and survive restarts. Don't edit those files.
+background, text size, pane header height and border/focus look, and a
+terminal shown in a block with `layout.terminal`) live in
+`layouts/.state/` and survive restarts. Don't edit those files.
+A mod that changes the window as it runs (Fedra's quick terminal) uses
+clicks (`layout.show`/`hide`/`resize`/`terminal`), never writes to the
+layout file: a shipped layout's file that changed is moved aside to
+`<name>-edited` on the next start.
 A deliberate layout-file edit beats a click on that field.
 `layout.reset {name}` resets a shipped layout and its clicks, keeping its
 previous file aside as `<name>.json.old-<time>`.
@@ -598,6 +603,7 @@ The main ones:
   programs such as yazi; partial images and scrolling follow the placeholder cells.
 - Agents: `agent.next`, `agent.prev`, `agent.focus {terminal}`.
 - Layout: `layout.switch {name?}`, `layout.toggle {id}`, `layout.show {id}`, `layout.hide {id}`,
+  `layout.terminal {id, terminal?}` (a terminal in that block, as a click; no terminal: back to the file's content),
   `layout.resize {id, px | weight}`, `layout.select {stack, child}`, `layout.set {layout}`
   (personal tree edits; on shipped layouts only click/look fields change),
   `layout.reset {name?}` (reset a shipped layout and its clicks),

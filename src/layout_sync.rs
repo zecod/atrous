@@ -37,6 +37,25 @@ pub struct NodeState {
     pub font_size: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pane: Option<PaneClick>,
+    /// A block showing a terminal its file doesn't name (`layout.terminal`,
+    /// the quick terminal): session state, kept here so the file (a shipped
+    /// layout's too) never changes for it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal: Option<String>,
+}
+
+/// The terminal a block shows when that differs from its file's content.
+fn shown_terminal<'a>(n: &'a Node, f: &Node) -> Option<&'a str> {
+    match n.content() {
+        Some(Content::Terminal { terminal }) if n.content() != f.content() => Some(terminal),
+        _ => None,
+    }
+}
+
+fn set_content(n: &mut Node, to: Content) {
+    if let Kind::Block { content } = &mut n.kind {
+        *content = to;
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -89,7 +108,7 @@ pub struct FloatState {
 
 impl NodeState {
     fn is_empty(&self) -> bool {
-        self.size.is_none() && self.hidden.is_none() && self.active.is_none() && self.background.is_none() && self.font_size.is_none() && self.pane.is_none()
+        self.size.is_none() && self.hidden.is_none() && self.active.is_none() && self.background.is_none() && self.font_size.is_none() && self.pane.is_none() && self.terminal.is_none()
     }
 }
 
@@ -148,6 +167,7 @@ impl State {
             if PaneClick::of(n) != PaneClick::of(f) {
                 ns.pane = PaneClick::of(n);
             }
+            ns.terminal = shown_terminal(n, f).map(str::to_owned);
             if !ns.is_empty() {
                 s.nodes.insert(n.id.clone(), ns);
             }
@@ -187,6 +207,11 @@ impl State {
             }
             if let Some(pane) = &ns.pane {
                 pane.apply(n);
+            }
+            if let Some(t) = &ns.terminal
+                && n.content().is_some()
+            {
+                set_content(n, Content::Terminal { terminal: t.clone() });
             }
             if let Some(a) = &ns.active
                 && n.children().iter().any(|c| &c.id == a)
@@ -234,6 +259,9 @@ impl State {
             if PaneClick::of(o) != PaneClick::of(n) {
                 ns.pane = None;
             }
+            if o.content() != n.content() {
+                ns.terminal = None;
+            }
         }
         self.nodes.retain(|_, ns| !ns.is_empty());
         let floats = |root: &Node| root.walk().into_iter().flat_map(|n| n.floating.clone()).collect::<Vec<_>>();
@@ -273,6 +301,11 @@ pub fn without_clicks(file: &Node, now: &Node) -> Node {
         }
         let a = active(f).cloned();
         set_active(n, a);
+        if shown_terminal(n, f).is_some()
+            && let Some(c) = f.content()
+        {
+            set_content(n, c.clone());
+        }
         let ff = f.floating.clone();
         for fl in n.floating.iter_mut() {
             if let Some(o) = ff.iter().find(|x| x.id == fl.id) {
@@ -319,6 +352,33 @@ mod tests {
 
     fn node(j: Value) -> Node {
         serde_json::from_value(j).unwrap()
+    }
+
+    #[test]
+    fn a_terminal_shown_in_a_block_is_a_click_not_a_file_edit() {
+        // Fedra's quick terminal: a placeholder in the file, a terminal while open.
+        let file = node(json!({
+            "id":"root", "type":"column", "children":[
+                {"id":"main", "type":"block", "content":{"tab":"active"}},
+                {"id":"quick-terminal-term", "type":"block", "hidden":true, "content":{"mod":"my-status","props":{"part":"terminal-empty"}}}
+            ]
+        }));
+        let mut now = file.clone();
+        let n = now.find_mut("quick-terminal-term").unwrap();
+        n.hidden = false;
+        set_content(n, Content::Terminal { terminal: "t7".into() });
+        let clicks = State::between(&file, &now);
+        assert_eq!(clicks.nodes["quick-terminal-term"].terminal.as_deref(), Some("t7"));
+        assert_eq!(without_clicks(&file, &now), file, "the file never changes for it");
+        let mut again = file.clone();
+        clicks.apply(&mut again);
+        assert_eq!(again, now);
+        // The file now names something else there on purpose: that wins.
+        let mut edited = file.clone();
+        set_content(edited.find_mut("quick-terminal-term").unwrap(), Content::Terminal { terminal: "t9".into() });
+        let mut kept = clicks.clone();
+        kept.forget_edited(&file, &edited);
+        assert!(kept.nodes.get("quick-terminal-term").is_none_or(|ns| ns.terminal.is_none()));
     }
 
     #[test]

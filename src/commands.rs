@@ -77,6 +77,7 @@ pub const COMMANDS: &[Command] = &[
     cmd("layout.toggle", &[req("id")], "Hide or show a layout node."),
     cmd("layout.show", &[req("id")], "Show a layout node."),
     cmd("layout.hide", &[req("id")], "Hide a layout node."),
+    cmd("layout.terminal", &[req("id"), opt("terminal")], "Show a terminal in a layout block (terminal: its address; empty: what the layout file has there). A click, like show/hide: kept with the layout's clicks, the file never changes, so it works on shipped layouts (Fedra's quick terminal)."),
     cmd("layout.resize", &[req("id"), opt("px"), opt("weight")], "Size a layout node."),
     cmd("layout.select", &[req("stack"), req("child")], "Show one child of a stack."),
     cmd("layout.reset", &[opt("name")], "Reset a shipped layout and its clicks (the old file is kept aside)."),
