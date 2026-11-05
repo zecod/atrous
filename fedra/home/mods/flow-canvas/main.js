@@ -20,20 +20,21 @@
 //   (saved per node in localStorage), right-click for the agent menu (mods/agent-menu) or the space
 //   menu (mods/my-menu). A node never dragged sits where the left-to-right tree puts it, relative to
 //   its parent, so it follows its parent. "Tidy up" forgets every dragged spot.
-// - Status: working = spinner + a beam running round the card + dots flowing along the edge into it;
+// - Status: working = spinner + a beam running round the card + dashes flowing along the edge into it;
 //   needs you = pulsing dot; done = check; idle = grey dot.
 //
 // How it draws (gpui-kit has no transforms, so zoom is done here: every size is multiplied by z)
 // - Grid: one stroked path, one dashed line per row ([dot, gap] dashes = a row of dots); edges: one
 //   path per style (window.paint_path, cubic beziers). Rebuilt each render; nothing per frame.
-// - Motion is all `spin`, which the app paints on its own layer: turning it never lays the canvas out
-//   again (frames and loop wake the whole view they're in, ~12 and ~30 times a second, and here
-//   that meant re-laying out every node: 7 ms a frame instead of 1.5). An edge dot is a few-px
-//   window (overflow_hidden) at the rim of a spinning wedge (flow-wedge.svg); successive dots sit
-//   at successive angles, so they light in turn: a flow along any curve. The needs-you pulse is a
-//   window on a spinning disc whose brightness rises and falls round it (flow-pulse.svg). Spins
-//   paint above the rest of the view, so dots skip the corner controls. Spinners and beams are spins
-//   too. No timers drive any animation.
+// - Motion is native and never runs this script or lays the canvas out again (frames and loop wake
+//   the whole view they're in, and here that meant re-laying out every node: 7 ms a frame).
+//   A running edge is a dashed path with `flow(speed)` (PathBuilder): the app moves its dashes
+//   about 60 times a second while the window is in front, on a layer of its own. That layer paints
+//   above the canvas's content, so a running edge is drawn in pieces that skip the cards it would
+//   cross and the corner controls. Spinners, beams and the needs-you pulse (a window on a spinning
+//   disc whose brightness rises and falls round it, flow-pulse.svg) are `spin`s, on the same kind
+//   of layer (they step with the flows while any runs). No timers drive any animation. A view
+//   whose opacity changes on hover draws them inline (still), so nothing here fades on hover.
 //
 // Cost
 // - Renders only on live data, a drag/pan/zoom step or a subagent change. Nodes off screen are skipped.
@@ -44,7 +45,7 @@
 // Test commands (keys.json or `atrous do flow-canvas.<cmd>`): fit, zoom-in, zoom-out, zoom-reset,
 // tidy, zoom:<z>, pan:<dx>,<dy>, wheel:<dx>,<dy>,<ctrl 0|1>,<x>,<y>, drag:<node id>,<dx>,<dy>,
 // click:<node id>, menu:<node id> (its right-click menu), stress:<n> (n synthetic agents, not
-// saved), stats (render times -> shared "flow.stats"), active:1|0|auto (treat the window as in
+// saved), stats (render times, running-edge pieces, nodes covering each other -> shared "flow.stats"), active:1|0|auto (treat the window as in
 // front or not, for screenshots of a window kept in the back), off:<grid,edges,anim,nodes> (leave
 // parts out, to measure them), subagents-test:<session dir> | subagents-test-off (my-spaces' switch:
 // every Claude agent shows that session's subagents), add:<space id>,<agent key | shell> (a row of
@@ -109,9 +110,9 @@ const RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
 const GRID = 24; // world px between grid dots
 const ZMIN = 0.2, ZMAX = 1.8;
 const WORD = { working: "Working", blocked: "Needs you", done: "Done", idle: "Idle", starting: "Starting" };
-const FLOW_K = 7; // edge dots per turn of the wedge: the gap between two lit runs
-const FLOW_MS = 1100; // one turn
-const DOTS = 120; // edge dots on screen, at most
+// A running edge's dashes, world px a second. The app draws a frame each time they've moved a device
+// pixel (30 px a second: 30 frames a second, each a whole-window redraw), so this is also the cost.
+const FLOW_SPEED = 30;
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -139,13 +140,23 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const stop = (_e, cx) => cx.stop_propagation();
 const panelShown = () => { const n = find(layout(), "flow-terminal"); return Boolean(n) && !n.hidden; };
 
-// One lit dot of a running edge, centred on (x, y): a w-px window at angle th on the rim of a
-// spinning wedge. The wedge's bright edge passes th at th / 2pi of a turn.
-function flowDot(x, y, th, w, color) {
-  const r = w * 2.2, d = Math.ceil(2 * (r + w)) + 2;
-  const cx = x - r * Math.cos(th), cy = y - r * Math.sin(th);
-  return div().absolute().left(x - w / 2).top(y - w / 2).size(w).overflow_hidden()
-    .child(svg(I("flow-wedge")).absolute().size(d).left(cx - d / 2 - (x - w / 2)).top(cy - d / 2 - (y - w / 2)).text_color(color).spin(FLOW_MS));
+// A running edge (a cubic [p0, c1, c2, p1] on screen) as the pieces its flowing dashes are drawn
+// in: the whole curve when nothing's in the way, else polylines that stop where `hidden` (a card,
+// a corner control: the flow layer paints above them) and start again after.
+function flowRuns(c, hidden) {
+  const [p0, c1, c2, p1] = c;
+  const N = 48;
+  const runs = [];
+  let run = null, all = true;
+  for (let i = 0; i <= N; i++) {
+    const t = i / N, u = 1 - t;
+    const x = u * u * u * p0[0] + 3 * u * u * t * c1[0] + 3 * u * t * t * c2[0] + t * t * t * p1[0];
+    const y = u * u * u * p0[1] + 3 * u * u * t * c1[1] + 3 * u * t * t * c2[1] + t * t * t * p1[1];
+    if (hidden(x, y)) { run = null; all = false; continue; }
+    if (!run) runs.push((run = []));
+    run.push([x, y]);
+  }
+  return all ? [{ curve: c }] : runs.filter((r) => r.length > 1);
 }
 
 // The needs-you pulse: a w-px dot whose brightness rises and falls (windows far out on a spinning
@@ -196,7 +207,7 @@ export default class Flow extends View {
     });
     this.active = appWindow()?.active !== false;
     // Folders only (no process) every 4 s, and only while the window is in front.
-    cx.timer.every(4000, (cx) => { if (appWindow()?.active !== false) this.subScan(cx); });
+    cx.timer.every(4000, (cx) => { if (this.forceActive ?? (appWindow()?.active !== false)) this.subScan(cx); });
     this.subScan(cx);
     cx.spawn(async (cx) => {
       for (;;) {
@@ -516,7 +527,11 @@ export default class Flow extends View {
     if (!p) return;
     if (p.kind === "node") {
       if (p.moved && this.drag) {
-        this.pos[p.id] = { x: Math.round(this.drag.x), y: Math.round(this.drag.y), at: Date.now() };
+        // On top of another node the person placed: the nearest free spot (the others flow round it).
+        const n = this.graph?.nodes.get(p.id);
+        const others = n ? [...this.graph.nodes.values()].filter((o) => o.id !== p.id && this.pos[o.id]) : [];
+        const spot = n ? G.freeSpot(n, this.drag.x, this.drag.y, others) : this.drag;
+        this.pos[p.id] = { x: Math.round(spot.x), y: Math.round(spot.y), at: Date.now() };
         const ids = Object.keys(this.pos);
         if (ids.length > 400) for (const id of ids.sort((a, b) => this.pos[a].at - this.pos[b].at).slice(0, ids.length - 400)) delete this.pos[id];
         this.save("pos", this.pos);
@@ -616,7 +631,8 @@ export default class Flow extends View {
       const a = [...this.times].sort((x, y) => x - y);
       const avg = a.reduce((s, x) => s + x, 0) / Math.max(1, a.length);
       const stats = { renders: a.length, avg: Math.round(avg * 10) / 10, p50: a[Math.floor(a.length / 2)] ?? 0, p95: a[Math.floor(a.length * 0.95)] ?? 0, max: a[a.length - 1] ?? 0,
-        nodes: this.graph?.nodes.size ?? 0, drawn: this.drawn ?? 0, dots: this.dotCount ?? 0, view: this.view, at: Date.now() };
+        nodes: this.graph?.nodes.size ?? 0, drawn: this.drawn ?? 0, flows: this.dotCount ?? 0, view: this.view, at: Date.now(),
+        overlaps: this.graph ? G.overlaps(this.graph.nodes.values()) : [] };
       setShared("flow.stats", stats);
       console.log(`flow-canvas stats ${JSON.stringify(stats)}`);
       this.times = [];
@@ -693,11 +709,7 @@ export default class Flow extends View {
 
     // Edges, grouped by look: one path per group.
     const groups = { idle: [], done: [], work: [], block: [], link: [], add: [] };
-    const dots = [], work = [];
-    const STEP = clamp(14 * z, 9, 17);
-    const dotW = clamp(7.5 * z, 4, 9);
-    // Spins paint above the whole view: keep dots off the corner controls.
-    const clear = (q) => !((q[0] < 250 && q[1] > H - 58) || (q[0] > W - 210 && q[1] < 56));
+    const work = [];
     const inView = (x0, y0, x1, y1) => Math.max(x0, x1) > -40 && Math.min(x0, x1) < W + 40 && Math.max(y0, y1) > -40 && Math.min(y0, y1) < H + 40;
     for (const n of graph.nodes.values()) {
       const p = n.parentId && graph.nodes.get(n.parentId);
@@ -708,17 +720,19 @@ export default class Flow extends View {
       const st = G.statusOf(n);
       const g = n.kind === "add" || st === "starting" ? "add" : n.kind === "space" ? "link" : st === "working" ? "work" : st === "blocked" ? "block" : st === "done" ? "done" : "idle";
       groups[g].push(c);
-      if (g === "work" && z >= 0.3) work.push([c, x0, x1]);
+      if (g === "work" && z >= 0.3) work.push(c);
     }
-    // Dots between the ports, lit in turn from parent to child; at most DOTS on screen (each is two
-    // elements and a spin): with many running edges they space out.
-    const place = (step) => work.map(([c, x0, x1]) => G.along(c[0], c[1], c[2], c[3], step)
-      .filter((q) => (q[0] > x0 + 3 && q[0] < x1 - 3) || Math.abs(x1 - x0) < 12));
-    let runs = place(STEP);
-    const count = runs.reduce((k, r) => k + r.length, 0);
-    if (count > DOTS) runs = place(STEP * (count / DOTS));
-    for (const pts of runs) pts.forEach((q, i) => { if (clear(q)) dots.push(flowDot(q[0], q[1], ((i % FLOW_K) / FLOW_K) * 2 * Math.PI, dotW, t.working)); });
-    this.dotCount = dots.length;
+    // Running edges flow (native dashes, see the top): in pieces that skip the cards and controls.
+    const cards = [];
+    if (work.length) {
+      for (const n of graph.nodes.values()) {
+        const x = sx(n.x), y = sy(n.y), w = n.w * z, h = n.h * z;
+        if (x < W + 40 && y < H + 40 && x + w > -40 && y + h > -40) cards.push([x + 1, y + 1, x + w - 1, y + h - 1]);
+      }
+    }
+    const hidden = (x, y) => (x < 250 && y > H - 58) || (x > W - 210 && y < 56) || cards.some((r) => x > r[0] && x < r[2] && y > r[1] && y < r[3]);
+    const flows = this.off?.has("anim") ? [] : work.flatMap((c) => flowRuns(c, hidden));
+    this.dotCount = flows.length;
 
     // Nodes on screen.
     const nodes = [];
@@ -741,8 +755,7 @@ export default class Flow extends View {
       .on_hover((over, cx) => { if (!over && this.press) this.release(cx); })
       .on_scroll_wheel((e, cx) => this.wheel(e, cx))
       .when(W > 0 && !this.off?.has("grid"), (el) => el.child(this.grid(t, W, H, v)))
-      .when(!this.off?.has("edges"), (el) => el.children(this.edges(t, groups, z)))
-      .when(!this.off?.has("anim"), (el) => el.children(dots))
+      .when(!this.off?.has("edges"), (el) => el.children(this.edges(t, groups, z, flows)))
       .when(!this.off?.has("nodes"), (el) => el.children(nodes))
       .when(empty, (el) => el.child(this.emptyState(t)))
       .child(this.controls(t, z))
@@ -762,11 +775,11 @@ export default class Flow extends View {
     return window.paint_path(b.build(), alpha(t.foreground, 0.17)).absolute().top(0).left(0).size_full();
   }
 
-  edges(t, groups, z) {
+  edges(t, groups, z, flows) {
     const look = {
       idle: [alpha(t.foreground, 0.28), null],
       done: [alpha(t.done, 0.75), null],
-      work: [alpha(t.working, 0.55), null],
+      work: [alpha(t.working, 0.32), null],
       block: [t.blocked, [7 * z, 5 * z]],
       link: [alpha(t.foreground, 0.35), [6 * z, 5 * z]],
       add: [alpha(t.foreground, 0.22), [4 * z, 4 * z]],
@@ -780,6 +793,17 @@ export default class Flow extends View {
       if (dash) b = b.dash_array(dash);
       for (const [p0, c1, c2, p1] of list) b = b.move_to(p0[0], p0[1]).cubic_bezier_to(p1[0], p1[1], c1[0], c1[1], c2[0], c2[1]);
       out.push(window.paint_path(b.build(), color).absolute().top(0).left(0).size_full());
+    }
+    // The running edges' dashes, flowing from parent to child (moved natively, see the top).
+    if (flows.length) {
+      let b = PathBuilder.stroke(clamp(2.6 * z, 1.8, 3.6)).dash_array([clamp(7 * z, 4, 10), clamp(9 * z, 6, 13)]).flow(clamp(FLOW_SPEED * z, 16, 40));
+      for (const r of flows) {
+        if (r.curve) {
+          const [p0, c1, c2, p1] = r.curve;
+          b = b.move_to(p0[0], p0[1]).cubic_bezier_to(p1[0], p1[1], c1[0], c1[1], c2[0], c2[1]);
+        } else r.forEach((q, i) => { b = i ? b.line_to(q[0], q[1]) : b.move_to(q[0], q[1]); });
+      }
+      out.push(window.paint_path(b.build(), t.working).absolute().top(0).left(0).size_full());
     }
     return out;
   }
@@ -869,7 +893,7 @@ export default class Flow extends View {
     if (n.kind === "agent" && n.prompt && z >= 0.45 && Date.now() - (n.prompt.answered ?? 0) >= 10000) {
       const pill = (id, label, primary, action) => div().id(`${id}-${n.a.address}`).h(S(22)).px(S(10)).flex().items_center().rounded(S(6))
         .text_size(S(11.5)).font_semibold().cursor_pointer()
-        .when(primary, (el) => el.bg(t.blocked).text_color(t.background).hover((s) => s.opacity(0.85)))
+        .when(primary, (el) => el.bg(t.blocked).text_color(t.background).hover((s) => s.bg(alpha(t.blocked, 0.85))))
         .when(!primary, (el) => el.border_1().border_color(t.border).text_color(t.foreground).hover((s) => s.bg(t.hover)))
         .on_mouse_down("left", stop)
         .on_click((_e, cx) => { action(cx); cx.notify(); })
@@ -1065,7 +1089,7 @@ export default class Flow extends View {
       .when(Boolean(msg) && st !== "idle", (el) => el.child(div().min_w(0).flex_1().truncate().text_size(11.5).text_color(t.muted).child(msg)))
       .when(!(msg && st !== "idle"), (el) => el.child(div().flex_1()))
       .when(Boolean(ask?.keys) && !trusting, (el) => el.child(div().id("flow-header-trust").flex_none().h(22).px(9).flex().items_center().rounded(6)
-        .bg(t.blocked).text_color(t.background).text_size(11.5).font_semibold().cursor_pointer().hover((s) => s.opacity(0.85))
+        .bg(t.blocked).text_color(t.background).text_size(11.5).font_semibold().cursor_pointer().hover((s) => s.bg(alpha(t.blocked, 0.85)))
         .on_click((_e, cx) => {
           this.trusted = addr;
           this.trustedAt = Date.now();

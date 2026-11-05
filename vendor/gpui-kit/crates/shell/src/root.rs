@@ -870,6 +870,9 @@ impl Render for ShellRoot {
                     .cached(StyleRefinement::default().size_full())
                     .into_any_element()
             })
+            // HERDR: its view's flowing paths (`PathBuilder.flow`), moved on each frame
+            // without building the view again; under its spinners.
+            .child(crate::path::flow_layer(self.content.entity_id()))
             // HERDR: its view's spinners, so a step doesn't rebuild the view.
             .child({
                 crate::materialize::show_spins_of(self.content.entity_id());

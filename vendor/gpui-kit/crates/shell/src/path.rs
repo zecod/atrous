@@ -2,7 +2,7 @@
 
 use gpui::{
     App, Bounds, Element, ElementId, GlobalElementId, InspectorElementId, IntoElement, LayoutId,
-    Pixels, Point, Refineable as _, Style, StyleRefinement, Window, point, px,
+    Pixels, Point, Refineable as _, Style, StyleRefinement, Styled as _, Window, point, px,
 };
 
 use crate::{
@@ -46,13 +46,26 @@ fn command_point(args: &[Bridged], offset: usize, bounds: Bounds<Pixels>) -> Opt
     ))
 }
 
-pub(crate) struct NativePath {
+/// What a path draws, kept apart from its element so a flowing one can be drawn
+/// again on every frame by its root's [`flow_layer`] (HERDR).
+#[derive(Clone)]
+pub(crate) struct PathSpec {
     fill: bool,
     background: BackgroundSpec,
     stroke_width: Pixels,
     dash_array: Vec<Pixels>,
+    /// HERDR: `PathBuilder.flow(speed)`: the dashes move along the path, px a second.
+    flow: Option<f32>,
     commands: Vec<SpecOp>,
+}
+
+pub(crate) struct NativePath {
+    spec: PathSpec,
     style: StyleRefinement,
+    /// HERDR: set when the root draws this flowing path on its own layer.
+    hosted_by: Option<gpui::EntityId>,
+    /// HERDR: the opacity it's painted with (its ancestors'), for the flow layer.
+    fade: f32,
 }
 
 impl NativePath {
@@ -63,7 +76,7 @@ impl NativePath {
         commands: Vec<SpecOp>,
         style: StyleRefinement,
     ) -> Self {
-        let dash_array = commands
+        let dash_array: Vec<Pixels> = commands
             .iter()
             .find_map(|op| match op {
                 SpecOp::Method("dash_array", args) => Some(
@@ -74,16 +87,44 @@ impl NativePath {
                 _ => None,
             })
             .unwrap_or_default();
+        let flow = commands.iter().find_map(|op| match op {
+            SpecOp::Method("flow", args) => args.first().and_then(|v| v.as_f32().ok()).filter(|v| v.is_finite()),
+            _ => None,
+        });
+        let flow = if fill { None } else { flow };
         Self {
-            fill,
-            background,
-            stroke_width: scaled_px(stroke_width),
-            dash_array,
-            commands,
+            spec: PathSpec {
+                fill,
+                background,
+                stroke_width: scaled_px(stroke_width),
+                // A flow without dashes would move nothing: it gets a default pattern.
+                dash_array: if flow.is_some() && dash_array.is_empty() { vec![px(6.), px(6.)] } else { dash_array },
+                flow,
+                commands,
+            },
             style,
+            hosted_by: None,
+            fade: 1.0,
         }
     }
 
+    /// HERDR: a flowing path whose view's root draws it on its flow layer (so a frame of
+    /// its motion never builds, lays out or paints the view again). `fade`: the opacity
+    /// it's painted with.
+    pub(crate) fn hosted(mut self, view: gpui::EntityId, fade: f32) -> Self {
+        if self.spec.flow.is_some() {
+            self.hosted_by = Some(view);
+            self.fade = fade;
+        }
+        self
+    }
+
+    pub(crate) fn flows(&self) -> bool {
+        self.spec.flow.is_some()
+    }
+}
+
+impl PathSpec {
     fn background(&self) -> Option<gpui::Background> {
         let color = |value: &str| Bridged::Str(value.to_owned()).as_color().ok();
         let background = match &self.background.kind {
@@ -114,7 +155,20 @@ impl NativePath {
         Some(background.opacity(self.background.opacity))
     }
 
+    /// The dashes' shift at `clock_ms` (materialize's loop clock), for a flowing path.
+    fn offset_at(&self, clock_ms: f64) -> Pixels {
+        match self.flow {
+            Some(speed) => px((clock_ms / 1000.0 * speed as f64) as f32),
+            None => Pixels::ZERO,
+        }
+    }
+
     fn build(&self, bounds: Bounds<Pixels>, window: &Window) -> Option<gpui::Path<Pixels>> {
+        self.build_at(bounds, window, crate::materialize::loop_clock_ms())
+    }
+
+    /// The path with a flow's dashes where they are at `clock_ms`.
+    fn build_at(&self, bounds: Bounds<Pixels>, window: &Window, clock_ms: f64) -> Option<gpui::Path<Pixels>> {
         let command_point = |args: &[Bridged], offset, bounds| {
             command_point(args, offset, bounds).map(|p| p.map(|c| window.pixel_snap(c)))
         };
@@ -124,7 +178,7 @@ impl NativePath {
             gpui::PathBuilder::stroke(self.stroke_width)
         };
         if !self.dash_array.is_empty() {
-            builder = builder.dash_array(&self.dash_array);
+            builder = builder.dash_array(&self.dash_array).dash_offset(self.offset_at(clock_ms));
         }
 
         for command in &self.commands {
@@ -151,7 +205,7 @@ impl NativePath {
                     command_point(args, 5, bounds)?,
                 ),
                 "close" => builder.close(),
-                "dash_array" => {}
+                "dash_array" | "flow" => {}
                 _ => {}
             }
         }
@@ -200,7 +254,13 @@ impl Element for NativePath {
         window: &mut Window,
         _: &mut App,
     ) -> Self::PrepaintState {
-        self.build(bounds, window)
+        if let Some(view) = self.hosted_by {
+            // HERDR: drawn by the root's flow layer, at its place and under its clip.
+            let flow = Flow { bounds, mask: window.content_mask(), spec: self.spec.clone(), fade: self.fade };
+            FLOWS.with(|f| f.borrow_mut().entry(view).or_default().push(flow));
+            return None;
+        }
+        self.spec.build(bounds, window)
     }
 
     fn paint(
@@ -214,9 +274,97 @@ impl Element for NativePath {
         _: &mut App,
     ) {
         if let Some(path) = path.take() {
-            if let Some(background) = self.background() {
+            if let Some(background) = self.spec.background() {
                 window.paint_path(path, background);
             }
         }
     }
+}
+
+// HERDR: flowing paths (`PathBuilder.flow(speed)`), drawn by their root on a layer of
+// their own, like spinners (materialize.rs, `spin_layer`): a frame of motion rebuilds only
+// the dashes, never the view (no script render, no materialize, no layout of the view).
+// They move while the window is in front; in the back the dashes stand still where they are and
+// nothing is scheduled. Frames come as often as the fastest flow moves one device pixel (where
+// motion looks continuous; more frames draw the same picture), at most about 60 a second: 30 px a
+// second on a 1x screen is 30 frames, each a whole-window redraw.
+
+/// The most often a flow moves on (about 60 a second) and the least often (a very slow one).
+const FLOW_FRAME_MIN: std::time::Duration = std::time::Duration::from_millis(16);
+const FLOW_FRAME_MAX: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// `ATROUS_ANIMATE_BEHIND=1`: flows move in a window that isn't in front too (tests measuring
+/// them in a window opened behind, ATROUS_BACKGROUND, which never comes to the front).
+fn animate_behind() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("ATROUS_ANIMATE_BEHIND").is_some_and(|v| v == "1"))
+}
+
+#[derive(Clone)]
+struct Flow {
+    bounds: Bounds<Pixels>,
+    mask: gpui::ContentMask<Pixels>,
+    spec: PathSpec,
+    fade: f32,
+}
+
+thread_local! {
+    static FLOWS: std::cell::RefCell<std::collections::HashMap<gpui::EntityId, Vec<Flow>>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+    /// Views whose window went to the back: the clock their dashes stopped at.
+    static STOPPED: std::cell::RefCell<std::collections::HashMap<gpui::EntityId, f64>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// A view is built again: its flows register again as its paths prepaint.
+pub(crate) fn clear_flows(view: gpui::EntityId) {
+    FLOWS.with(|f| f.borrow_mut().remove(&view));
+}
+
+/// A view goes.
+pub(crate) fn forget_flows(view: gpui::EntityId) {
+    clear_flows(view);
+    STOPPED.with(|s| s.borrow_mut().remove(&view));
+}
+
+/// `view`'s flowing paths, moved on to now; while any is drawn and the window is in
+/// front, the root is drawn again once the fastest has moved a device pixel.
+pub(crate) fn flow_layer(view: gpui::EntityId) -> gpui::AnyElement {
+    gpui::canvas(
+        |_, _, _| {},
+        move |_, _, window, cx| {
+            let flows = FLOWS.with(|f| f.borrow().get(&view).cloned()).unwrap_or_default();
+            if flows.is_empty() {
+                return;
+            }
+            // In the back the dashes stay where they were when the window lost the front, even
+            // when something else (a spinner) draws the window again.
+            let moving = window.is_window_active() || animate_behind();
+            let now = crate::materialize::loop_clock_ms();
+            let clock = STOPPED.with(|s| {
+                let mut s = s.borrow_mut();
+                if moving {
+                    s.remove(&view);
+                    now
+                } else {
+                    *s.entry(view).or_insert(now)
+                }
+            });
+            for flow in &flows {
+                let Some(path) = flow.spec.build_at(flow.bounds, window, clock) else { continue };
+                let Some(background) = flow.spec.background() else { continue };
+                window.with_content_mask(Some(flow.mask.clone()), |window| {
+                    window.paint_path(path, background.opacity(flow.fade));
+                });
+            }
+            if moving {
+                let fastest = flows.iter().filter_map(|f| f.spec.flow).map(f32::abs).fold(0., f32::max) * window.scale_factor();
+                let step = if fastest > 0. { std::time::Duration::from_secs_f32(1. / fastest) } else { FLOW_FRAME_MAX };
+                crate::materialize::wake_view_soon(step.clamp(FLOW_FRAME_MIN, FLOW_FRAME_MAX), window, cx);
+            }
+        },
+    )
+    .absolute()
+    .size_full()
+    .into_any_element()
 }

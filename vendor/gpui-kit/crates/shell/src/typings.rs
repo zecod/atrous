@@ -2172,6 +2172,16 @@ const ELEMENTS: &str = r#"
     add_polygon(points: ReadonlyArray<readonly [import("gpui-shell").PathCoordinate, import("gpui-shell").PathCoordinate]>, closed?: boolean): PathBuilder;
     close(): PathBuilder;
     dash_array(values: readonly number[]): PathBuilder;
+    /**
+     * Moves the dashes along the path, `speed` px a second (negative: backwards), for a
+     * stroke: a running edge, a marching outline. Without `dash_array` the dashes are 6/6.
+     * Runs natively while the window is in front (still in the back), a frame each time the
+     * dashes have moved a device pixel (at most ~60 a second: 30 px a second is 30 frames),
+     * and costs no render, materialize or layout of the view: its root redraws only the
+     * dashes. Each frame still redraws the window, so keep it slow. Each subpath flows from
+     * its `move_to` toward its end.
+     */
+    flow(speed: number): PathBuilder;
     build(): Path;
   }
   export const PathBuilder: {

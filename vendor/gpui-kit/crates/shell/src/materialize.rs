@@ -1500,14 +1500,20 @@ fn materialize_component(
             stroke_width,
         } => {
             warn_unhonoured_a11y(&behavior, "path", &[]);
-            crate::path::NativePath::new(
+            let path = crate::path::NativePath::new(
                 fill,
                 background,
                 stroke_width,
                 node.ops().to_vec(),
                 refinement,
-            )
-            .into_any_element()
+            );
+            // HERDR: a flowing path (`flow`) is drawn by its root's flow layer, so its
+            // motion never builds this view again; inline (see `spin_layer`) it stands still.
+            if path.flows() && HOSTED.with(|h| h.get()) && !checking() {
+                path.hosted(window.current_view(), FADE.with(|f| f.get())).into_any_element()
+            } else {
+                path.into_any_element()
+            }
         }
         Component::Scrollbar(id) => {
             components::scrollbar::scrollbar(id, refinement, behavior, states, children, window, cx)
@@ -2669,6 +2675,7 @@ pub(in crate::materialize) fn resolve_ops(
                         | "arc_to"
                         | "close"
                         | "dash_array"
+                        | "flow"
                 ) {
                     apply_behavior(&mut behavior, name, args)
                 }
@@ -2762,7 +2769,7 @@ struct Loop {
 }
 
 /// One clock for every view, so spinners in different mods turn together.
-fn loop_clock_ms() -> f64 {
+pub(crate) fn loop_clock_ms() -> f64 {
     static EPOCH: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
     EPOCH.get_or_init(std::time::Instant::now).elapsed().as_secs_f64() * 1000.0
 }
@@ -2813,6 +2820,7 @@ pub(crate) fn show_spins_of(view: gpui::EntityId) {
 }
 
 pub(crate) fn forget_spins(view: gpui::EntityId) {
+    crate::path::forget_flows(view);
     SPINS.with(|s| s.borrow_mut().remove(&view));
     SHOWN.with(|s| s.borrow_mut().remove(&view));
     INLINE.with(|s| s.borrow_mut().remove(&view));
@@ -2826,6 +2834,7 @@ pub(crate) fn build_view<T>(view: gpui::EntityId, may_host: bool, build: impl Fn
         && SHOWN.with(|s| s.borrow().contains(&view))
         && !INLINE.with(|s| s.borrow().contains(&view));
     SPINS.with(|s| s.borrow_mut().remove(&view));
+    crate::path::clear_flows(view);
     HOSTED.with(|h| h.set(hosted));
     KEEP_INLINE.with(|o| o.set(false));
     let built = build();
@@ -2908,6 +2917,11 @@ pub(crate) fn spin_layer(view: gpui::EntityId) -> AnyElement {
     .absolute()
     .size_full()
     .into_any_element()
+}
+
+/// HERDR: the flow layer's next step (path.rs), as `wake_view_after`.
+pub(crate) fn wake_view_soon(delay: Duration, window: &Window, cx: &mut App) {
+    wake_view_after(delay, window, cx);
 }
 
 /// Draws the view being rendered again after `delay`, once, however many of

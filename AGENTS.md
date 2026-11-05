@@ -144,4 +144,6 @@ the tarballs, `changelog.md` and the installers.
 Never stop, signal, or restart someone else's app or core. Use an isolated
 app home and core session for testing (`ATROUS_HOME`, `ATC_SESSION`), and
 `ATROUS_BACKGROUND=1` so the window opens behind the others and never takes
-the foreground from the person at the keyboard.
+the foreground from the person at the keyboard. Such a window is never in
+front, so its flowing paths (`PathBuilder.flow`) stand still; add
+`ATROUS_ANIMATE_BEHIND=1` to measure them moving.

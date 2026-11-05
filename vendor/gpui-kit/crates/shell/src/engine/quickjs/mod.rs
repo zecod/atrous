@@ -6091,6 +6091,13 @@ globalThis.__gpui = (() => {
       commands.push(Object.freeze(["dash_array", ...values]));
       return builder;
     };
+    // HERDR: the dashes move along the path, `speed` px a second (negative: backwards).
+    builder.flow = (speed) => {
+      if (fill) throw new TypeError("flow is only available on stroke paths");
+      if (typeof speed !== "number" || !Number.isFinite(speed)) throw new TypeError("flow(speed) expects a finite number of px a second");
+      commands.push(Object.freeze(["flow", speed]));
+      return builder;
+    };
     builder.add_polygon = (points, closed = true) => {
       if (!Array.isArray(points) || points.length === 0) throw new TypeError("add_polygon(points) expects a non-empty array");
       points.forEach((point, index) => {
@@ -8514,7 +8521,7 @@ impl ShellRuntime {
                 self.push_op_checked(ctx, self.push_op(id, SpecOp::Method(name, bridged)))
             }
             "move_to" | "line_to" | "curve_to" | "cubic_bezier_to" | "arc_to" | "close"
-            | "dash_array" => {
+            | "dash_array" | "flow" => {
                 let bridged = args.values(method)?;
                 let name = match method {
                     "move_to" => "move_to",
@@ -8523,6 +8530,7 @@ impl ShellRuntime {
                     "cubic_bezier_to" => "cubic_bezier_to",
                     "arc_to" => "arc_to",
                     "close" => "close",
+                    "flow" => "flow",
                     _ => "dash_array",
                 };
                 self.push_op_checked(ctx, self.push_op(id, SpecOp::Method(name, bridged)))

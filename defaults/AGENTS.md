@@ -917,6 +917,18 @@ Rules:
   `.transition(...)` for changes: they run without your script and stop
   when not shown. Timers are for data (a clock, a fetch), and only as often
   as what they show changes.
+  Cost: `spin` and `flow` are drawn by the mod's root on a layer of their
+  own, so a step never builds, lays out or paints the mod again; `frames`
+  and `loop` rebuild the whole view they're in on every step (keep them out
+  of big views). For moving lines, `PathBuilder.stroke(2).dash_array([8, 6])
+  .flow(30)` with `window.paint_path(...)` makes the dashes travel along the
+  path at 30 px a second (a running connection, a marching outline): smooth,
+  a frame each time they've moved a pixel (30 a second here, 60 at most)
+  while the window is in front, still behind it. Every frame redraws the
+  window: slower is cheaper.
+  Spins and flows paint above the rest of the view; a view with a popover,
+  a select or opacity that changes on hover draws them inline (spins
+  stepped, flows still).
 
 ### UI
 

@@ -28,6 +28,8 @@ pub struct PathBuilder {
     /// PathStyle of the PathBuilder
     pub style: PathStyle,
     dash_array: Option<Vec<Pixels>>,
+    // HERDR: how far the dash pattern is shifted along the path (an animated, "flowing" stroke).
+    dash_offset: Pixels,
 }
 
 impl From<lyon::path::Builder> for PathBuilder {
@@ -79,6 +81,7 @@ impl Default for PathBuilder {
             style: PathStyle::Fill(FillOptions::default()),
             transform: None,
             dash_array: None,
+            dash_offset: Pixels::ZERO,
         }
     }
 }
@@ -117,6 +120,13 @@ impl PathBuilder {
         };
 
         self.dash_array = Some(array);
+        self
+    }
+
+    /// HERDR: shifts the dash pattern `offset` along the path, toward its end (SVG's
+    /// stroke-dashoffset, negated): growing it over time makes the dashes flow forward.
+    pub fn dash_offset(mut self, offset: Pixels) -> Self {
+        self.dash_offset = offset;
         self
     }
 
@@ -249,7 +259,9 @@ impl PathBuilder {
         };
 
         match self.style {
-            PathStyle::Stroke(options) => Self::tessellate_stroke(self.dash_array, &path, &options),
+            PathStyle::Stroke(options) => {
+                Self::tessellate_stroke(self.dash_array, self.dash_offset, &path, &options)
+            }
             PathStyle::Fill(options) => Self::tessellate_fill(&path, &options),
         }
     }
@@ -274,6 +286,7 @@ impl PathBuilder {
 
     fn tessellate_stroke(
         dash_array: Option<Vec<Pixels>>,
+        dash_offset: Pixels,
         path: &lyon::path::Path,
         options: &StrokeOptions,
     ) -> Result<Path<Pixels>, Error> {
@@ -285,13 +298,17 @@ impl PathBuilder {
 
             let total_length = sampler.length();
             let dash_array_len = dash_array.len();
-            let mut pos = 0.;
+            // HERDR: the pattern starts `dash_offset` (modulo its length) along: a dash cut by the
+            // start shows its remainder.
+            let period: f32 = dash_array.iter().map(|d| d.0).sum();
+            let shift = if period > 0. { dash_offset.0.rem_euclid(period) } else { 0. };
+            let mut pos = if shift > 0. { shift - period } else { 0. };
             let mut dash_index = 0;
-            while pos < total_length {
+            while pos < total_length && period > 0. {
                 let dash_length = dash_array[dash_index % dash_array_len].0;
                 let next_pos = (pos + dash_length).min(total_length);
-                if dash_index % 2 == 0 {
-                    let start = pos / total_length;
+                if dash_index % 2 == 0 && next_pos > 0. {
+                    let start = pos.max(0.) / total_length;
                     let end = next_pos / total_length;
                     sampler.split_range(start..end, &mut builder);
                 }
@@ -343,5 +360,27 @@ impl PathBuilder {
         }
 
         path
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{point, px};
+
+    // HERDR: dash_offset shifts the pattern toward the path's end, modulo its length.
+    #[test]
+    fn dash_offset_moves_the_dashes_along() {
+        let start = |offset: f32| {
+            let mut b = PathBuilder::stroke(px(1.)).dash_array(&[px(4.), px(4.)]).dash_offset(px(offset));
+            b.move_to(point(px(0.), px(0.)));
+            b.line_to(point(px(20.), px(0.)));
+            b.build().unwrap().bounds.origin.x.0
+        };
+        assert!(start(0.).abs() < 0.01, "dash at the start: {}", start(0.));
+        assert!((start(2.) - 2.).abs() < 0.01, "moved 2 px along: {}", start(2.));
+        assert!(start(6.).abs() < 0.01, "a dash cut by the start shows its remainder: {}", start(6.));
+        assert!((start(10.) - 2.).abs() < 0.01, "a period later, the same: {}", start(10.));
+        assert!((start(-6.) - 2.).abs() < 0.01, "backwards: {}", start(-6.));
     }
 }

@@ -25,7 +25,7 @@
 
 import { View, div, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { spaces, agents, panes, terminals, focused, theme, run, window, keys, layout, core, shared, setShared, props, nextCommand, knownAgents } from "atrous";
+import { spaces, agents, panes, terminals, focused, theme, run, window, keys, layout, core, shared, setShared, props, nextCommand, knownAgents, exec, home, appHome, readTextFile } from "atrous";
 import * as T from "./trust.js"; // which terminals are agents that haven't reported (yet): counted like Flow and the sidebar show them
 
 // shared: space id -> { list: [address…], active: address, at: { address: started ms } }
@@ -74,6 +74,23 @@ function tabNames() {
 }
 const activeSpace = () => spaces().find((s) => s.active);
 
+// OpenCode's status plugin (Settings > Privacy > Agents, my-settings/opencode): on start, while
+// that switch is on (the default), put in when it's missing or older than this Atrous's. Reads
+// two small files; runs node only when they differ. A scratch or test home (ATROUS_HOME
+// elsewhere) never touches the person's OpenCode, like the browser skill (my-chrome).
+const slash = (p) => String(p ?? "").replace(/\\/g, "/").replace(/\/+$/, "");
+async function ensureOpencodeStatus() {
+  if (shared("agents.opencodeStatus") === false) return;
+  const h = slash(home());
+  const app = slash(appHome());
+  if (app.toLowerCase() !== `${h}/.config/atrous`.toLowerCase()) return;
+  const dir = `${app}/mods/my-settings/opencode`;
+  const want = await readTextFile(`${dir}/atrous-status.js`).catch(() => null);
+  if (!want) return; // not shipped here
+  if ((await readTextFile(`${h}/.config/opencode/plugins/atrous-status.js`).catch(() => null)) === want) return;
+  await exec("node", [`${dir}/install.mjs`, "install", "--home", h]).catch(() => null);
+}
+
 export default class WorkspaceStatus extends View {
   init(_props, cx) {
     this.pending = 0;
@@ -82,6 +99,7 @@ export default class WorkspaceStatus extends View {
     // then knownAgents() (the app asks the shell at most once a minute).
     this.known = shared("new-menu.agents")?.[""] ?? [];
     cx.spawn(async (cx) => { try { this.known = await knownAgents(); cx.notify(); } catch {} });
+    cx.spawn(async () => { await ensureOpencodeStatus().catch(() => null); });
     // The panel follows the active space and its shells: the status bar redraws when
     // spaces, terminals or the layout change, and looks after each redraw (render). The
     // timer only covers what time alone changes (a fresh shell's grace, our own edits

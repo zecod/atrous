@@ -8,8 +8,13 @@
 // Edges go from a node to each of its children (parent's right side to child's left side).
 //
 // Layout: a left-to-right tree. A node's column is its depth; leaves take rows in order and a
-// parent sits centred on its children. A node the person dragged keeps its spot; one that was
-// never dragged sits where the tree puts it *relative to its parent*, so it follows its parent.
+// parent sits centred on its children (a subtree takes the height it needs, so trees never
+// overlap). It's laid out again on every redraw: nodes that come, go or grow (a prompt) move the
+// rest. A node the person dragged keeps its spot; one that was never dragged sits where the tree
+// puts it *relative to its parent* (so it follows its parent), then moves down past anything
+// already there: auto nodes flow around dragged ones and never cover each other. A drop on top of
+// another dragged node lands on the nearest free spot instead (freeSpot). While a node is being
+// dragged, it and what follows it float over the rest, which doesn't move until the drop.
 
 export const SIZE = { space: [248, 64], agent: [248, 62], cc: [232, 46], more: [128, 30] };
 export const COL = 330; // world px from one column to the next
@@ -175,16 +180,85 @@ export function autoLayout(roots) {
  * Final positions: a dragged node keeps its saved spot; any other sits at its tree offset from
  * its parent's final spot (a root: at its tree spot). Mutates nodes (x, y).
  */
+// The closest two cards may come (siblings sit ROW_GAP apart, columns COL - width apart).
+const GAP_X = 14, GAP_Y = ROW_GAP / 2;
+const hit = (a, b) => a.x < b.x + b.w + GAP_X && b.x < a.x + a.w + GAP_X && a.y < b.y + b.h + GAP_Y && b.y < a.y + a.h + GAP_Y;
+
+// Moves n down until it covers none of `placed` (y only grows, so at most one step per node).
+function settle(n, placed) {
+  for (let i = 0; i <= placed.length; i++) {
+    const b = placed.find((p) => hit(n, p));
+    if (!b) return;
+    n.y = b.y + b.h + ROW_GAP;
+  }
+}
+
+/**
+ * Where every node goes: x, y on each node. auto: autoLayout's; saved: node id -> { x, y } the
+ * person dragged it to; drag: { id, x, y } of the node being dragged now, if any.
+ */
 export function resolve(roots, auto, saved, drag) {
-  const go = (n, parent) => {
-    const a = auto.get(n.id);
-    const own = drag?.id === n.id ? drag : saved[n.id];
-    if (own) { n.x = own.x; n.y = own.y; }
-    else if (parent) { const pa = auto.get(parent.id); n.x = parent.x + (a.x - pa.x); n.y = parent.y + (a.y - pa.y); }
-    else { n.x = a.x; n.y = a.y; }
-    n.children.forEach((c) => go(c, n));
+  const order = []; // parents before children, trees in order
+  const walk = (n, parent, floating) => {
+    const f = floating || drag?.id === n.id;
+    order.push({ n, parent, floating: f });
+    n.children.forEach((c) => walk(c, n, f));
   };
-  roots.forEach((r) => go(r, null));
+  roots.forEach((r) => walk(r, null, false));
+  const own = (n) => (drag?.id === n.id ? drag : saved[n.id]);
+  const placed = [];
+  // Dragged spots first, as dropped (one left on another, from before drops found free spots, moves down).
+  for (const { n } of order) {
+    const o = own(n);
+    if (!o) continue;
+    n.x = o.x;
+    n.y = o.y;
+    if (drag?.id === n.id) continue;
+    settle(n, placed);
+    placed.push(n);
+  }
+  // Then the tree, each node relative to where its parent ended up, down past what's there.
+  for (const { n, parent, floating } of order) {
+    if (own(n)) continue;
+    const a = auto.get(n.id);
+    if (parent) { const pa = auto.get(parent.id); n.x = parent.x + (a.x - pa.x); n.y = parent.y + (a.y - pa.y); }
+    else { n.x = a.x; n.y = a.y; }
+    if (floating) continue; // follows the node being dragged, over the rest
+    settle(n, placed);
+    placed.push(n);
+  }
+}
+
+/**
+ * Where a node dropped at (x, y) lands: there, unless it would cover one of `others` (nodes with
+ * spots the person chose); then the nearest spot that covers none, looked for in rings 8 px apart.
+ */
+export function freeSpot(n, x, y, others) {
+  const probe = { x, y, w: n.w, h: n.h };
+  const free = () => !others.some((o) => hit(probe, o));
+  if (free()) return { x, y };
+  for (let r = 8; r <= 1200; r += 8) {
+    const ring = [];
+    for (let d = -r; d <= r; d += 8) ring.push([d, -r], [d, r], [-r, d], [r, d]);
+    ring.sort((p, q) => p[0] * p[0] + p[1] * p[1] - (q[0] * q[0] + q[1] * q[1]));
+    for (const [dx, dy] of ring) {
+      probe.x = x + dx;
+      probe.y = y + dy;
+      if (free()) return { x: probe.x, y: probe.y };
+    }
+  }
+  return { x, y };
+}
+
+/** Any two nodes that cover each other (for tests): [[id, id], ...]. */
+export function overlaps(nodes) {
+  const list = [...nodes];
+  const out = [];
+  for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+    const a = list[i], b = list[j];
+    if (a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h) out.push([a.id, b.id]);
+  }
+  return out;
 }
 
 /** The world box around every node, or null. */

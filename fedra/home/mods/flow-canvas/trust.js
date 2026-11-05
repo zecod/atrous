@@ -11,8 +11,13 @@
 // What it shows comes from its screen (`atc read`), only while the window is in front:
 // - in its first 3 minutes (and for an agent that reported idle without ever having a turn), a
 //   trust prompt, every 2.5 s;
-// - after its first 15 s, whether its screen still changes, every 4 s: "running" while it changed in
-//   the last 8 s, else idle. Never "needs you" from that: only the prompts below say so.
+// - after its first 15 s, whether its output still moves, every 4 s: "running" once it changed on two
+//   reads in a row (8 s), idle at the first read where it didn't. Leans idle: a lingering "running"
+//   is worse than a late one. Compared without what moves by itself (digits: timers, token counts;
+//   spinner glyphs) and without the bottom 6 lines (the input box you type in, the status line),
+//   so a clock, a spinner, your typing or a one-off redraw (a resize) don't count. Never "needs
+//   you" from that: only the prompts below say so. (OpenCode reports itself once Atrous's plugin is
+//   in: Settings > Privacy > Agents. This is what's left for agents that don't.)
 // Prompts verified against the real CLIs (2026-11-05):
 //   Claude Code 2.1.318:  "Accessing workspace: <folder>" ... "Quick safety check: Is this a
 //     project you created or one you trust? ..." then the options "❯ No, exit" / "Yes, I trust
@@ -28,7 +33,8 @@ import { core } from "atrous";
 const norm = (s) => String(s ?? "").replace(/\\/g, "/").toLowerCase();
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 export const ASK_MS = 3 * 60000; // trust prompts come at startup
-export const QUIET_MS = 8000; // no screen change for this long: idle
+export const READ_MS = 4000; // how often a running agent's screen is read
+export const STALE_MS = 3 * READ_MS; // no read for this long (window in the back): idle
 export const STARTING_MS = 15000; // "Starting…" at most this long, then its screen decides
 
 const BUILT = {
@@ -113,6 +119,21 @@ function hash(s) {
   return h;
 }
 
+// Spinner and progress glyphs, cursor blocks: they move without the agent doing anything new.
+const MOVING = /[\u2800-\u28ff\u2580-\u259f\u25a0-\u25ff\u2700-\u27bf\u2b1d\u2b1e\u00b7\u2022\u2219\u22c5*|\/\\_~-]/g;
+
+/** A screen as compared for activity: its output, without what moves by itself. */
+export function outputOf(text) {
+  const lines = String(text ?? "").split(/\r?\n/);
+  while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+  return lines
+    .slice(0, Math.max(0, lines.length - 6))
+    .join("\n")
+    .replace(/\d+/g, "#")
+    .replace(MOVING, "")
+    .replace(/[ \t]+/g, " ");
+}
+
 /**
  * The screen reader for a mod: call poll(view, cx, candidates) from a timer, only while the window is
  * in front. Reads at most one terminal per call, the one most overdue.
@@ -126,7 +147,7 @@ export function poll(view, cx, candidates) {
   const keep = new Set(want.map((c) => c.address));
   for (const a of [...view.prompts.keys()]) if (!keep.has(a)) view.prompts.delete(a);
   const due = want
-    .map((c) => ({ ...c, late: now - (view.prompts.get(c.address)?.at ?? 0) - (c.ask ? 2500 : 4000) }))
+    .map((c) => ({ ...c, late: now - (view.prompts.get(c.address)?.at ?? 0) - (c.ask ? 2500 : READ_MS) }))
     .filter((c) => c.late >= 0)
     .sort((x, y) => y.late - x.late)[0];
   if (!due) return;
@@ -140,12 +161,14 @@ export function poll(view, cx, candidates) {
     view.promptBusy = false;
     const was = view.prompts.get(due.address);
     const prompt = text != null && due.ask ? promptOf(text) : null;
-    const h = text == null ? was?.hash : hash(text);
+    const h = text == null ? was?.hash : hash(outputOf(text));
     const t = Date.now();
-    const changedAt = was && h !== was.hash ? t : was?.changedAt ?? 0;
-    // busy: what the status said at the last read (a quiet screen turns it idle only on a read)
-    const busy = t - changedAt < QUIET_MS;
-    view.prompts.set(due.address, { at: t, prompt, answered: prompt ? was?.answered ?? 0 : 0, hash: h, changedAt, busy });
+    const changed = Boolean(was) && text != null && h !== was.hash;
+    const changedAt = changed ? t : was?.changedAt ?? 0;
+    // streak: reads in a row whose output changed; busy (running) from the second one on.
+    const streak = changed ? (was?.streak ?? 0) + 1 : 0;
+    const busy = streak >= 2;
+    view.prompts.set(due.address, { at: t, prompt, answered: prompt ? was?.answered ?? 0 : 0, hash: h, changedAt, streak, busy });
     if (JSON.stringify(was?.prompt ?? null) !== JSON.stringify(prompt) || Boolean(was?.busy) !== busy) cx.notify();
   });
 }
@@ -153,5 +176,5 @@ export function poll(view, cx, candidates) {
 /** An unreported agent's status from its screen: "working" (output moving) or "idle". */
 export function activity(view, address, now = Date.now()) {
   const e = view.prompts.get(address);
-  return e && now - e.changedAt < QUIET_MS ? "working" : "idle";
+  return e?.busy && now - e.at < STALE_MS ? "working" : "idle";
 }

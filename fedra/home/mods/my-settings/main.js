@@ -5,19 +5,33 @@
 // Open: `mod.open my-settings` (Look), `mod.open accounts` (Accounts), or openOverlay({ mod:
 // "my-settings", kind: "dialog", width: 960, height: 660, props: { section: "usage" } }) for a
 // section. While it's open, `my-settings.section:<id>` (keys.json, `atrous do`) shows a
-// section: look, machines, alerts, updates, privacy, accounts, skills, usage; `my-settings.refresh`
+// section: look, machines, alerts, updates, privacy, accounts, skills, usage; `my-settings.opencode:on|off`
+// flips Privacy's OpenCode switch; `my-settings.refresh`
 // refreshes the usage numbers; `my-settings.login:<tool>:<id>` opens the login window of an added
 // account. With props { section: "usage", only: true } it is the standalone usage dialog instead
 // (what `mod.open usage-stats` opens).
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, Scrollbar, InputState, Input } from "gpui-base";
-import { core, run, theme, themes, fonts, updates, settings, layouts, shared, setShared, appHome, readTextFile, writeTextFile, playSound, props, closeOverlay, window, nextCommand } from "atrous";
+import { core, run, exec, home, theme, themes, fonts, updates, settings, layouts, shared, setShared, appHome, readTextFile, writeTextFile, playSound, props, closeOverlay, window, nextCommand } from "atrous";
 import { UsagePage } from "./usage.js";
 import { AccountsPage } from "./accounts.js";
 import { SkillsPage } from "./skills.js";
 
 const I = (name) => `mods/my-settings/${name}.svg`;
+
+// OpenCode's status in Atrous: opencode/atrous-status.js, an OpenCode plugin that reports
+// working / idle / needs you as OSC 7501 (OpenCode doesn't), put in OpenCode's global plugins
+// folder by opencode/install.mjs. On by default (shared "agents.opencodeStatus" !== false); the
+// status bar (my-status) installs it on start while it's on and missing. A scratch or test home
+// (ATROUS_HOME elsewhere) never touches the person's OpenCode.
+const slash = (p) => String(p ?? "").replace(/\\/g, "/").replace(/\/+$/, "");
+async function opencodeStatus(op) {
+  const h = slash(home());
+  if (slash(appHome()).toLowerCase() !== `${h}/.config/atrous`.toLowerCase()) return { ok: false, why: "This Atrous runs from another home (ATROUS_HOME): it leaves OpenCode alone." };
+  const r = await exec("node", [`${slash(appHome())}/mods/my-settings/opencode/install.mjs`, op, "--home", h]).catch((e) => ({ code: -1, stdout: "", stderr: String(e) }));
+  try { return JSON.parse(r.stdout); } catch { return { ok: false, why: (r.stderr || "node didn't run").trim().split("\n")[0] }; }
+}
 
 const SECTIONS = [
   { id: "look", title: "Look", icon: "palette" },
@@ -119,6 +133,12 @@ export default class Settings extends View {
           this.showUsage(cx);
           continue;
         }
+        if (c.startsWith("opencode:") && !this.only) {
+          // opencode:on|off: the Privacy section's "OpenCode status in Atrous" switch.
+          this.go("privacy", cx);
+          this.setOpencode(c.slice(9) === "on", cx);
+          continue;
+        }
         if (c.startsWith("login:") && !this.only) {
           // login:<tool>:<id>: the Accounts section, then that account's login window.
           const [, tool, id] = c.split(":");
@@ -142,7 +162,31 @@ export default class Settings extends View {
     if (id === "accounts") this.showAccounts(cx);
     if (id === "skills") this.showSkills(cx);
     if (id === "machines") cx.spawn(async (cx) => { await this.loadMachines(); cx.notify(); });
+    if (id === "privacy") cx.spawn(async (cx) => { this.opencode = await opencodeStatus("status"); cx.notify(); });
     cx.notify();
+  }
+
+  // The OpenCode switch: puts the plugin in or takes it out at once, then says where it is.
+  setOpencode(on, cx) {
+    setShared("agents.opencodeStatus", on);
+    this.opencodeBusy = true;
+    cx.notify();
+    cx.spawn(async (cx) => {
+      const r = await opencodeStatus(on ? "install" : "remove");
+      this.opencode = { ...(await opencodeStatus("status")), error: r?.ok === false ? r.why : null };
+      this.opencodeBusy = false;
+      cx.notify();
+    });
+  }
+
+  opencodeNote() {
+    const o = this.opencode;
+    if (this.opencodeBusy || !o) return null;
+    if (o.error) return o.error;
+    if (o.installed) return `Plugin in ${o.target.replace(/\\/g, "/").replace(slash(home()), "~")}`;
+    if (o.foreign) return "Another atrous-status.js is in OpenCode's plugins folder: left alone.";
+    if (shared("agents.opencodeStatus") !== false && !o.opencode) return "OpenCode isn't set up on this computer: Atrous adds the plugin once it is.";
+    return null;
   }
 
   // The usage page is a retained view (usage.js): made once, then it keeps its state while
@@ -840,7 +884,11 @@ export default class Settings extends View {
       // "trust" answer (trust.js); Claude Code's and Codex's configs are never edited by Atrous.
       .child(this.row(t, "Trust project folders automatically",
         "When Claude Code or Codex asks whether to trust the folder you started it in, Atrous answers yes for you. Only turn this on if you trust every project you open: a repository's own settings and hooks can run code on your computer.",
-        this.toggle(t, "st-auto-trust", shared("agents.autoTrust") === true, (_e, cx) => { setShared("agents.autoTrust", shared("agents.autoTrust") !== true); cx.notify(); })));
+        this.toggle(t, "st-auto-trust", shared("agents.autoTrust") === true, (_e, cx) => { setShared("agents.autoTrust", shared("agents.autoTrust") !== true); cx.notify(); })))
+      .child(this.row(t, "OpenCode status in Atrous",
+        "Claude Code and Codex tell Atrous when they're working, done or waiting for you; OpenCode needs a small plugin for it. Atrous puts atrous-status.js in OpenCode's plugins folder (~/.config/opencode/plugins). It only acts in Atrous's terminals and sends nothing anywhere. Off: Atrous takes it out and guesses OpenCode's state from its screen.",
+        this.toggle(t, "st-opencode-status", shared("agents.opencodeStatus") !== false, (_e, cx) => this.setOpencode(shared("agents.opencodeStatus") === false, cx))))
+      .when(Boolean(this.opencodeNote()), (el) => el.child(div().pt(8).text_size(12.5).line_height("18px").text_color(this.opencode?.error ? t.blocked : t.dim).child(this.opencodeNote())));
   }
 
   // ----------------------------------------------------------------------

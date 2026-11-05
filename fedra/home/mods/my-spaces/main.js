@@ -936,7 +936,8 @@ export default class Spaces extends View {
     };
     const pill = (id, label, primary, action) => div().id(`${id}-${a.address}`).h(18).px(6).flex().flex_none().items_center().rounded(5)
       .text_size(10.5).font_semibold().cursor_pointer()
-      .when(primary, (el) => el.bg(t.blocked).text_color(t.background).hover((s) => s.opacity(0.85)))
+      // Hover changes colours, never opacity: a fade on hover makes the sidebar draw its spinners inline.
+      .when(primary, (el) => el.bg(t.blocked).text_color(t.background).hover((s) => s.text_color(t.foreground)))
       .when(!primary, (el) => el.border_1().border_color(t.border).text_color(t.foreground).hover((s) => s.bg(t.hover)))
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .on_click((_e, cx) => { cx.stop_propagation(); action(cx); cx.notify(); })

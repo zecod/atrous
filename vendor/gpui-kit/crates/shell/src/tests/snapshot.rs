@@ -125,6 +125,60 @@ export default class TinyDash extends View {
     );
 }
 
+// HERDR: `flow(speed)` (a stroke's dashes moving along it) reaches the native path, and a
+// fill or a speed that isn't a finite number is refused in the script.
+#[gpui::test]
+fn path_flow_reaches_the_native_path(cx: &mut TestAppContext) {
+    let source = r##"
+import { View, PathBuilder } from "gpui-kit";
+export default class Flowing extends View {
+  render() {
+    const path = PathBuilder.stroke(2).dash_array([6, 4]).flow(30).move_to(0, 0).line_to(100, 0).build();
+    return window.paint_path(path, "#000");
+  }
+}
+"##;
+    let (_runtime, mut context, view) = script_view(cx, source);
+    render_once(&mut context, &view);
+    let tree = context.update(|_, cx| {
+        let view = view.read(cx);
+        match view.snapshot() {
+            Some(snapshot) => snapshot.debug_tree(),
+            None => panic!("no snapshot: {}", view.build_error().unwrap_or("no error recorded")),
+        }
+    });
+    assert!(tree.contains("flow"), "{tree}");
+    assert!(tree.contains("dash_array"), "{tree}");
+}
+
+#[gpui::test]
+fn path_flow_rejects_fills_and_bad_speeds(cx: &mut TestAppContext) {
+    let source = r##"
+import { div, View, PathBuilder } from "gpui-kit";
+export default class BadFlow extends View {
+  render() {
+    const said = [];
+    for (const bad of [() => PathBuilder.fill().flow(30), () => PathBuilder.stroke(1).flow(Infinity), () => PathBuilder.stroke(1).flow("fast")]) {
+      try { bad(); said.push("accepted"); } catch (e) { said.push(String(e.message)); }
+    }
+    return div().child(said.join(" | "));
+  }
+}
+"##;
+    let (_runtime, mut context, view) = script_view(cx, source);
+    render_once(&mut context, &view);
+    let tree = context.update(|_, cx| {
+        let view = view.read(cx);
+        match view.snapshot() {
+            Some(snapshot) => snapshot.debug_tree(),
+            None => panic!("no snapshot: {}", view.build_error().unwrap_or("no error recorded")),
+        }
+    });
+    assert!(tree.contains("only available on stroke paths"), "{tree}");
+    assert_eq!(tree.matches("finite number").count(), 2, "{tree}");
+    assert!(!tree.contains("accepted"), "{tree}");
+}
+
 /// A script whose `render` throws every other call, so a failed build can be
 /// observed next to a successful one.
 const FLAKY: &str = r#"
