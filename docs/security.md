@@ -20,7 +20,7 @@ Mods may store sensitive data here. Atrous does not encrypt this folder.
 The [installed guide's file map](../defaults/AGENTS.md#the-files) explains the files.
 
 Spaces, tabs and splits are stored in each machine's core document, not in the app home.
-Terminals and their output belong to [atrous-core](https://github.com/zecod/atrous-core).
+Terminals and their output belong to atrous-core (`core/`), which ships inside Atrous and runs as its own background process.
 Removing the app home does not stop the core or erase its data.
 
 The app exposes a local control socket in its home so agents can inspect and drive the window.
@@ -46,7 +46,7 @@ Do not assume every download is notarized or signed.
 
 Atrous sends no usage data. herdr-app had daily anonymous usage reports; Atrous removed them: nothing is collected, nothing is stored for it, and there is no setting to turn it on. **Settings → Privacy** says so. A `telemetry` key left in a `settings.json` brought over from herdr-app is ignored.
 
-What does reach the network on its own: update checks of an installed release (GitHub releases of zecod/atrous and zecod/atrous-core), and the core's own connections to machines you add. Mods can use the network like any program you run.
+What does reach the network on its own: update checks of an installed release (GitHub releases of zecod/atrous, which hold the app and its core), and the core's own connections to machines you add. Mods can use the network like any program you run.
 
 Feedback is never sent by the app. **Send feedback** (or `atrous feedback "<text>"` from an agent) opens a new GitHub issue on zecod/atrous in your browser, filled in with your message, the app and core versions, your OS and the name of a built-in layout. You read it and post it yourself.
 

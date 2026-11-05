@@ -812,28 +812,14 @@ export default class Settings extends View {
       : u.app.ready
         ? [`${u.app.ready} is ready. Restart to switch now; it also switches when you quit.`, primary("st-app-update", "Restart to update", () => run("app.update"))]
         : [result, check("st-check-app")];
-    const c = u.core;
-    const coreRow = c.managed
-      ? [`Managed by ${c.managed}: update it there.`, null]
-      : c.updating
-        ? ["Updating\u2026 your terminals keep running.", null]
-        : c.error
-          ? [`The update failed: ${c.error}`, primary("st-core-retry", "Try again", () => run("app.update_core"))]
-          : c.ready
-            ? [`${c.ready} is ready. Your terminals keep running through it.`, primary("st-core-update", "Update atrous-core", () => run("app.update_core"))]
-            : u.checks
-              ? [result, check("st-check-core")]
-              : ["Not checked: a build from source looks for no updates.", null];
     return v_flex()
       .w_full()
       .child(this.heading(t, "Atrous"))
       .child(this.row(t, `Atrous ${u.app.version}`, app[0], h_flex().gap(8).flex_none()
         .child(this.button(t, "st-whats-new", "What's new", () => { closeOverlay(props()?.overlay); run("app.whats_new"); }))
         .when(Boolean(app[1]), (el) => el.child(app[1]))))
-      .child(div().h(18))
-      .child(this.heading(t, "atrous-core"))
-      .child(this.row(t, `atrous-core ${c.version ?? ""}`, coreRow[0], coreRow[1] ?? div()))
-      .child(div().pt(12).text_size(12.5).line_height("18px").text_color(t.dim).child("Atrous looks for both every hour and tells you in the corner. atrous-core runs your terminals, so they keep running through its updates."));
+      .child(div().pt(12).text_size(12.5).line_height("18px").text_color(t.dim).child("Atrous looks every hour and tells you in the corner. Its core, which runs your terminals, comes inside and updates with it: your terminals keep running through updates."))
+      .when(Boolean(u.core.error), (el) => el.child(div().pt(8).text_size(12.5).line_height("18px").text_color(t.blocked).child(`The core didn't restart into this version: ${u.core.error}. Your terminals are still running; quit and reopen Atrous to try again.`)));
   }
 
 
@@ -846,7 +832,7 @@ export default class Settings extends View {
       .w_full()
       .child(this.heading(t, "Usage data"))
       .child(this.row(t, "No usage data", "Atrous sends no usage reports. Nothing from your terminals, files, folders or projects leaves your computer.", div()))
-      .child(this.row(t, "Update checks", "Atrous and atrous-core look for new releases on GitHub (zecod/atrous, zecod/atrous-core). The check sends nothing about you.", div()))
+      .child(this.row(t, "Update checks", "Atrous looks for new releases on GitHub (zecod/atrous). The check sends nothing about you.", div()))
       .child(this.row(t, "Feedback", "Send feedback opens a new GitHub issue for you to read and send yourself.", div()))
       .child(div().h(18))
       .child(this.heading(t, "Agents"))
@@ -871,7 +857,7 @@ export default class Settings extends View {
         .child(this.usage);
     }
     const u = updates();
-    const waiting = Boolean(u.app.ready || (u.core.ready && !u.core.managed));
+    const waiting = Boolean(u.app.ready);
     const nav = v_flex()
       .flex_none()
       .w(190)

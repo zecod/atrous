@@ -4,17 +4,18 @@
 //! after it opens and every hour, downloads a newer build for this
 //! machine, checks its sha256 and unpacks it next to itself (`<install>.new`).
 //! The frame then shows "Restart"; the swap happens on restart or the next
-//! quit, or before opening the next window after a crash. The first start
-//! after a swap runs `atc update` for the core. Until there are releases, a
-//! check finds nothing (a missing release is not an error).
+//! quit, or before opening the next window after a crash. Until there are
+//! releases, a check finds nothing (a missing release is not an error).
+//!
+//! One release holds the app and its core (atrous-core, `atc`): they share a
+//! version and update together. The core keeps running through the swap
+//! (from the old folder or bundle), so terminals do too; the next start
+//! restarts it into the new one the planned way (`handover`), every
+//! terminal kept.
 //!
 //! A build from source never updates: only `scripts/package` (the release
 //! builds) sets `ATROUS_RELEASE`. `scripts/install-macos` makes a
 //! Atrous.app too, so the install's shape alone can't tell.
-//!
-//! The core is checked on the same clock (zecod/atrous-core's `manifest.json`): a newer core
-//! of the same generation is offered (also applied after an app update), unless
-//! a package manager owns it. Within a generation a newer core only adds.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -79,11 +80,13 @@ pub fn ready() -> Option<String> {
     READY.lock().unwrap().clone()
 }
 
-/// The core the app runs, from its `server.status`, and a newer release waiting.
+/// The core the app runs, from its `server.status`. It ships inside Atrous
+/// and updates with it: `ready` stays null (kept for mods that read it);
+/// `updating` while it restarts into the bundled core, `error` if that failed.
 #[derive(Clone, Default, serde::Serialize)]
 pub struct CoreInfo {
     pub version: Option<String>,
-    /// A package manager that owns it (homebrew, nix, mise): never updated by the app.
+    /// Who owns it: `atrous` for the bundled core, or a package manager.
     pub managed: Option<String>,
     pub ready: Option<String>,
     pub updating: bool,
@@ -119,12 +122,7 @@ fn checks_app() -> Option<PathBuf> {
     root().filter(|_| option_env!("ATROUS_RELEASE").is_some() || std::env::var_os("ATROUS_RELEASES_URL").is_some())
 }
 
-/// A release build checks the core; a source build only when pointed at a test release server.
-fn checks_core() -> bool {
-    option_env!("ATROUS_RELEASE").is_some() || crate::brand::test_releases().is_some() || crate::brand::core_releases().is_some()
-}
-
-/// For the settings screen: both programs, what's waiting, when we last looked.
+/// For the settings screen: the app (with its core), what's waiting, when we last looked.
 pub fn status() -> serde_json::Value {
     serde_json::json!({
         "app": { "version": env!("CARGO_PKG_VERSION"), "ready": ready(), "updates": checks_app().is_some() },
@@ -150,14 +148,12 @@ fn sleep(d: Duration) {
     *woken = false;
 }
 
-/// Starts checking in the background: the app if it's an installed release, the core too.
+/// Starts checking in the background if this is an installed release.
 pub fn start() {
-    let app = checks_app();
-    let core = checks_core();
-    if app.is_none() && !core {
+    let Some(root) = checks_app() else {
         tracing::info!("a build from source: no updates");
         return;
-    }
+    };
     RUNNING.store(true, Ordering::Relaxed);
     CHECKING.store(true, Ordering::Relaxed);
     std::thread::spawn(move || {
@@ -166,25 +162,18 @@ pub fn start() {
             CHECKING.store(true, Ordering::Relaxed);
             let mut wait = EVERY;
             let mut succeeded = true;
-            if let Some(root) = &app {
-                match check(root) {
-                    Ok(found) => {
-                        if found.is_some() {
-                            *READY.lock().unwrap() = found;
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!("update check: {e}");
-                        crate::telemetry::count("app_update_failed");
-                        wait = RETRY;
-                        succeeded = false;
+            match check(&root) {
+                Ok(found) => {
+                    if found.is_some() {
+                        *READY.lock().unwrap() = found;
                     }
                 }
-            }
-            if core && let Err(e) = check_core() {
-                tracing::warn!("core update check: {e}");
-                wait = RETRY;
-                succeeded = false;
+                Err(e) => {
+                    tracing::warn!("update check: {e}");
+                    crate::telemetry::count("app_update_failed");
+                    wait = RETRY;
+                    succeeded = false;
+                }
             }
             let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
             *CHECKED.lock().unwrap() = checked_at(succeeded, now);
@@ -198,73 +187,25 @@ fn checked_at(succeeded: bool, now: u64) -> Option<u64> {
     succeeded.then_some(now)
 }
 
-/// Looks for a newer core of this app's generation.
-fn check_core() -> Result<(), String> {
-    let (have, managed) = {
-        let c = CORE.lock().unwrap();
-        (c.version.clone(), c.managed.clone())
-    };
-    let Some(have) = have else { return Ok(()) };
-    if managed.is_some() {
-        return Ok(());
-    }
-    let Some(latest) = latest_core()? else {
-        CORE.lock().unwrap().ready = None;
-        return Ok(());
-    };
-    let same = latest.generation == Some(crate::hc::GENERATION);
-    CORE.lock().unwrap().ready = (same && newer(&latest.version, &have)).then_some(latest.version);
-    Ok(())
-}
-
-#[derive(serde::Deserialize)]
-struct CoreRelease {
-    version: String,
-    generation: Option<u64>,
-}
-
-/// The core's latest release; Ok(None) while zecod/atrous-core has none.
-fn latest_core() -> Result<Option<CoreRelease>, String> {
-    let Some(text) = curl_found(&crate::brand::core_latest("manifest.json"))? else { return Ok(None) };
-    serde_json::from_str(&text).map(Some).map_err(|e| format!("core manifest.json: {e}"))
-}
-
-fn after_update_target<'a>(have: &str, latest: Option<&'a CoreRelease>, generation: u64, core_min: &'a str) -> Option<&'a str> {
-    if newer("0.1.5", have) {
-        return None;
-    }
-    Some(match latest {
-        Some(latest) if latest.generation == Some(generation) && newer(&latest.version, have) => &latest.version,
-        _ => core_min,
-    })
-}
-
-/// `atc update` (terminals keep running; the app reconnects when the core restarts).
-pub fn update_core() {
-    {
-        let mut c = CORE.lock().unwrap();
-        if c.updating {
-            return;
+/// Before the app connects: a core running from elsewhere (the separately
+/// installed atrous-core, an older Atrous) or an older one restarts into the
+/// core this app ships, the planned way: every terminal keeps running.
+pub fn handover() {
+    CORE.lock().unwrap().updating = true;
+    let result = crate::core_bin::handover();
+    let mut c = CORE.lock().unwrap();
+    c.updating = false;
+    match result {
+        Ok(Some(now)) => {
+            tracing::info!("atrous-core restarted into the bundled {now}; terminals kept");
+            c.error = None;
         }
-        c.updating = true;
-        c.error = None;
-    }
-    std::thread::spawn(|| {
-        let result = crate::core_bin::update();
-        let mut c = CORE.lock().unwrap();
-        c.updating = false;
-        match result {
-            Ok(now) => {
-                c.version = Some(crate::core_bin::number(&now).to_owned());
-                c.ready = None;
-                crate::telemetry::count("core_update_ok");
-            }
-            Err(e) => {
-                c.error = Some(e);
-                crate::telemetry::count("core_update_failed");
-            }
+        Ok(None) => {}
+        Err(e) => {
+            tracing::warn!("atrous-core restart into the bundled core: {e}");
+            c.error = Some(e);
         }
-    });
+    }
 }
 
 /// Downloads the latest release if it's newer. Ok(Some): a version is ready.
@@ -496,7 +437,7 @@ pub fn apply() -> bool {
 fn swap(root: &Path) -> bool {
     let staged = beside(root, ".new");
     let old = beside(root, ".old");
-    let _ = std::fs::remove_dir_all(&old);
+    retire(&old);
     if let Err(e) = std::fs::rename(root, &old) {
         tracing::warn!("update: cannot move {} aside: {e}", root.display());
         return false;
@@ -580,41 +521,55 @@ fn relaunch_expected(expected: Option<&str>) -> bool {
     }
 }
 
-/// Left by `apply`: the next start brings the core up to date too.
+/// Left by `apply`: the next start clears the previous version away.
 fn marker() -> PathBuf {
     crate::mods::app_dir().join(".updated")
 }
 
-/// The first start after an app update brings the core to the latest release
-/// of this app's generation (`atc update --version`, terminals kept). If the
-/// release check fails or offers another generation, keep the minimum pin.
-/// Cores before 0.1.5 lack `--version`: they keep their same-generation update
-/// path. A core a package manager owns is left alone (atc says so).
+/// Removes a previous version. Programs it started can still run from it
+/// (an older core's terminal holders, until their terminals end); Windows
+/// won't delete their files but will rename the folder, so what can't go
+/// moves aside and goes on a later start.
+fn retire(old: &Path) {
+    if std::fs::remove_dir_all(old).is_err() && old.exists() {
+        let mut name = old.file_name().unwrap_or_default().to_os_string();
+        name.push(format!("-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0)));
+        if let Err(e) = std::fs::rename(old, old.with_file_name(name)) {
+            tracing::warn!("update: cannot move {} aside: {e}", old.display());
+        }
+    }
+}
+
+/// Previous versions beside the install (`atrous.old`, `atrous.old-…`).
+fn previous(root: &Path) -> Vec<PathBuf> {
+    let Some(parent) = root.parent() else { return Vec::new() };
+    let mut prefix = root.file_name().unwrap_or_default().to_string_lossy().into_owned();
+    prefix.push_str(".old");
+    std::fs::read_dir(parent)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with(&prefix) && e.path().is_dir())
+        .map(|e| e.path())
+        .collect()
+}
+
+/// The first start after an app update clears the previous versions away
+/// (the core was already restarted into the new one by `handover`). What a
+/// still-running program holds stays until a later update.
 pub fn after_update() {
     if std::fs::remove_file(marker()).is_err() {
         return;
     }
-    std::thread::spawn(|| {
-        let have = crate::core_bin::version(&crate::core_bin::path()).unwrap_or_default();
-        CORE.lock().unwrap().updating = true;
-        let latest = latest_core().map_err(|e| tracing::warn!("core release check after app update: {e}")).ok().flatten();
-        let target = after_update_target(crate::core_bin::number(&have), latest.as_ref(), crate::hc::GENERATION, crate::hc::core_min());
-        let result = crate::core_bin::update_to(target);
-        let mut core = CORE.lock().unwrap();
-        core.updating = false;
-        match result {
-            Ok(now) => {
-                if let Some(root) = root() {
-                    let _ = std::fs::remove_dir_all(beside(&root, ".old"));
-                }
-                tracing::info!("atrous-core is {now}");
-                core.version = Some(crate::core_bin::number(&now).to_owned());
-                core.error = None;
-            }
-            Err(e) => {
-                tracing::warn!("atrous-core update: {e}");
-                core.error = Some(e);
-            }
+    let Some(root) = root() else { return };
+    // A core that didn't move to the new version still runs from the old
+    // folder and starts terminals with its files: keep it whole.
+    if core().error.is_some() {
+        return;
+    }
+    std::thread::spawn(move || {
+        for old in previous(&root) {
+            let _ = std::fs::remove_dir_all(&old);
         }
     });
 }
@@ -795,20 +750,18 @@ mod tests {
     }
 
     #[test]
-    fn after_app_update_targets_latest_only_in_our_generation() {
-        let release = |version: &str, generation| CoreRelease { version: version.into(), generation };
-        let latest = release("0.1.13", Some(1));
-        assert_eq!(after_update_target("0.1.12", Some(&latest), 1, "0.1.11"), Some("0.1.13"));
-        for have in ["0.1.13", "0.1.14"] {
-            assert_eq!(after_update_target(have, Some(&latest), 1, "0.1.11"), Some("0.1.11"));
+    fn previous_versions_are_the_old_folders_beside_the_install() {
+        let work = std::env::temp_dir().join(format!("atrous-previous-{}", std::process::id()));
+        let root = work.join("atrous");
+        for dir in ["atrous", "atrous.old", "atrous.old-1234", "atrous.new", "atrous-core", "other.old"] {
+            std::fs::create_dir_all(work.join(dir)).unwrap();
         }
-        for latest in [None, Some(release("0.2.0", Some(2))), Some(release("0.1.13", None))] {
-            assert_eq!(after_update_target("0.1.12", latest.as_ref(), 1, "0.1.11"), Some("0.1.11"));
-            assert_eq!(after_update_target("0.1.4", latest.as_ref(), 1, "0.1.11"), None);
-        }
-        assert_eq!(after_update_target("0.1.4", Some(&latest), 1, "0.1.11"), None);
-        assert_eq!(after_update_target("0.1.5", Some(&latest), 1, "0.1.11"), Some("0.1.13"));
-        assert_eq!(after_update_target("0.1.5", None, 1, "0.1.11"), Some("0.1.11"));
+        let mut found: Vec<String> = previous(&root).iter().map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect();
+        found.sort();
+        assert_eq!(found, ["atrous.old", "atrous.old-1234"]);
+        retire(&work.join("atrous.old"));
+        assert!(!work.join("atrous.old").exists());
+        std::fs::remove_dir_all(work).unwrap();
     }
 
     #[test]

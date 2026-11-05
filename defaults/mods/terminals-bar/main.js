@@ -171,7 +171,8 @@ export default class TerminalsBar extends View {
       )
       .child(div().flex_1())
       .child(iconButton("tm-keys", "command", () => run("app.palette")))
-      .child(iconButton("tm-new", "plus", () => run("tab.new", { space: space.id })))
+      // A terminal or an agent: the same picker as Fedra's tab bar, at the pointer.
+      .child(iconButton("tm-new", "plus", () => openOverlay({ mod: "my-new-menu", kind: "popup", width: 250, height: 512 })))
       .when(Boolean(w.buttons), (el) =>
         el.child(
           h_flex()

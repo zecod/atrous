@@ -17,10 +17,13 @@ from the same parts you have.
 ## Two programs
 
 - **`atrous`**, the window: spaces, tabs, layouts, panels.
-- **atrous-core (`atc`)**, which runs every terminal and agent. They keep
-  running when the window closes or updates. You can use `atc` yourself:
-  start a terminal, read its screen, send it text, wait for an agent
-  (`atc --help`). The Atrous app is one client of it.
+- **atrous-core (`atc`)**, which runs every terminal and agent. It ships
+  inside Atrous (same version, one install, one update) but runs as its own
+  background process, so terminals keep running when the window closes or
+  updates. You can use `atc` yourself: start a terminal, read its screen,
+  send it text, wait for an agent (`atc --help`). Terminals Atrous starts
+  find `atc` (and `atrous`) first on their PATH. The Atrous app is one
+  client of it.
 
 `atrous` controls this app; `atc` controls atrous-core.
 
@@ -139,7 +142,16 @@ the highlighted line shows where it will land.
   and mod panes stay. An exited or killed terminal is closed, not restarted.
   Focus, zoom, recent spaces, settled tabs and seen attention stay on this screen.
 - Every terminal is a core terminal. Atrous labels the ones it starts with
-  `atrous.space=<id>` and `atrous.tab=<id>`. **A terminal with those
+  `atrous.space=<id>` and `atrous.tab=<id>`, and one that runs a known agent
+  (a `run` entry of programs.json, the accounts launchers included, or that
+  agent's program) with `atrous.agent=<key>`: the programs.json key, like
+  `claude`, `codex`, `opencode`, `gemini` or `pi`. It marks an agent that never
+  reports itself (no OSC 7501); `terminals()` carries it in `labels`. Beside it,
+  `atrous.resume` (an argv as JSON) is what the core runs when that kept
+  terminal comes back after a crash or reboot: the agent continuing its last
+  session (Claude Code and OpenCode `--continue`, Codex `resume --last`).
+  Relabel it with an exact session (`claude --resume <id>`) when you know one.
+  **A terminal with those
   labels shows up there**, even one you start yourself:
   `atc run --keep --label atrous.space=<id> --label atrous.tab=<id> -- claude`.
   Labels use ids local to that machine; remote ids shown by the app have a
@@ -610,8 +622,7 @@ The main ones:
   `layout.clone {name, as?}` (duplicate, then switch; default `<name>-copy`).
 - App: `mod.clone {name, as?}` (duplicate; default `<name>-copy`), `mod.open {name}` (again: closes it), `overlay.close {id?}`, `app.help` (again: closes it), `app.palette` (again: closes it), `app.settings {section?}` (Fedra's Settings, `my-settings`; the same as `mod.open my-settings`)
   (sections: `look`, `machines`, `alerts`, `updates`, `privacy`; Machines lists, updates, renames and removes ssh machines; settings edit the same files you do).
-  `app.check_updates` (only a successful check reports Up to date; a failed check clears the checked time and can be retried), `app.update_core` (a newer atrous-core of this generation, terminals kept;
-  never one a package manager owns), `app.welcome`, `app.whats_new`, `app.feedback {message?, from?}` (from `"person"` or `"agent"`; opens a review window; Open on GitHub opens a new issue on zecod/atrous, prefilled, which the person posts there; the app sends nothing), `app.reset`,
+  `app.check_updates` (only a successful check reports Up to date; a failed check clears the checked time and can be retried), `app.welcome`, `app.whats_new`, `app.feedback {message?, from?}` (from `"person"` or `"agent"`; opens a review window; Open on GitHub opens a new issue on zecod/atrous, prefilled, which the person posts there; the app sends nothing), `app.reset`,
   `app.theme {name}`, `app.zoom_in`, `app.zoom_out`, `app.zoom_reset`,
   `app.update` (restart into a downloaded update).
   Add machine lists all named ssh-config hosts in a scrollable list. Setup
@@ -656,9 +667,10 @@ What's about the user, never a look:
   goes there when clicked. `done` / `blocked` replace the bundled MP3s
   (path absolute or relative to `~/.config/atrous`). Changes apply live,
   including the Play buttons in Settings > Alerts.
-- `core`: the atrous-core binary to use, when it isn't where Atrous looks
-  (PATH, the login shell's PATH, `~/.local/bin`, Homebrew, mise, Nix,
-  cargo). Read at start.
+- `core`: another atrous-core binary to use instead of the one Atrous
+  ships (a core you built). Read at start. Without it, Atrous uses its own
+  (beside `atrous`, or `Atrous.app/Contents/Helpers/Atrous Core.app`), and
+  only a build without one looks on PATH and the usual install places.
 - `font`, `font_size`, `ui_font`: used where the layout doesn't set its
   own. Classic (main) leaves these unset. Bigger panels: `zoom`.
 - `font_ligatures`: programming ligatures are off by default; set `true` to
@@ -672,10 +684,11 @@ What's about the user, never a look:
   with a light and a dark theme shows the matching one.
 - Updates: an installed app downloads them by itself and offers Restart and
   What changed. If the app crashes or is killed with a verified newer update
-  waiting, the next launch installs it before opening a window. The first
-  start after an app update also updates atrous-core
-  to the latest release of the same generation, keeping terminals running.
-  Settings → Updates keeps app and core actions together;
+  waiting, the next launch installs it before opening a window. One update
+  holds the app and its core: the core keeps running through it, and the
+  next start restarts it into the new one the planned way (every terminal
+  kept), as it does for a core still running from a separate atrous-core
+  install. Settings → Updates shows just Atrous;
   its What's new button opens the waiting update's release range, or this
   version's notes, in the What's new window. Reading never clears the waiting-update dot.
   Rare spotlight releases open What’s new after restart, once; otherwise a

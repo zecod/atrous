@@ -2340,8 +2340,9 @@ impl AppWindow {
             let id = o.id.clone();
             return self.close_overlay(&id, window, cx);
         }
-        if self.chrome.find(block).is_some_and(|n| n.terminal().is_some()) {
-            self.chrome.remove(block);
+        // A layout block's own terminal closes up; one shown there by a click
+        // (layout.terminal) gives the block back to what its file shows.
+        if self.chrome.terminal_left(&self.file_chrome, block) {
             self.sync(window, cx);
         }
         // How its stream ended, for `reconcile` (`atc run --rm` leaves no record).
@@ -2409,11 +2410,18 @@ impl AppWindow {
     /// Starts a terminal for `space`, on `on` (another machine) or here. An
     /// empty `cwd`: the machine's home. With no argv, that machine's core
     /// picks its own shell.
-    fn spawn(&self, argv: Option<Vec<String>>, cwd: String, space: &str, ctx: &str, on: Option<&str>, size: Option<(u16, u16)>, window: &Window) -> Result<String, String> {
+    /// `agent`: the agent it runs and how it resumes (`agent_labels`),
+    /// labeled `atrous.agent=<key>` and `atrous.resume=<argv as JSON>`.
+    #[allow(clippy::too_many_arguments)]
+    fn spawn(&self, argv: Option<Vec<String>>, agent: Option<(String, Vec<String>)>, cwd: String, space: &str, ctx: &str, on: Option<&str>, size: Option<(u16, u16)>, window: &Window) -> Result<String, String> {
         let argv = argv.unwrap_or_default();
         let cwd = Some(cwd).filter(|c| !c.is_empty());
         self.require_document(on)?;
-        let labels = json!({ "atrous.space": crate::mirror::local(space, on), "atrous.tab": crate::mirror::local(ctx, on), "atrous.seen": "0" });
+        let mut labels = json!({ "atrous.space": crate::mirror::local(space, on), "atrous.tab": crate::mirror::local(ctx, on), "atrous.seen": "0" });
+        if let Some((agent, resume)) = agent {
+            labels["atrous.agent"] = agent.into();
+            labels["atrous.resume"] = serde_json::to_string(&resume).unwrap_or_default().into();
+        }
         let addr = match self.core.run(argv.clone(), cwd.clone(), labels.clone(), on, size, crate::terminal::initial_display(window)) {
             // An agent on a machine without `sh` (Windows): in its PowerShell instead.
             Err(e) if on.is_some() && argv.first().map(String::as_str) == Some("sh") && format!("{e:#}").contains("not found") => {
@@ -2424,6 +2432,18 @@ impl AppWindow {
         .map_err(|e| format!("cannot start a terminal: {e:#}"))?;
         self.born.borrow_mut().insert(addr.clone(), Instant::now());
         Ok(addr)
+    }
+
+    /// For a terminal started with `argv` (as asked, before any shell wraps
+    /// it): the known agent it runs (`programs::agent_of`), and the argv that
+    /// resumes it after its core was lost (a reboot), wrapped like any agent
+    /// start so the shell stays when it exits. The core runs that instead of
+    /// a bare shell (`atrous.resume`).
+    fn agent_labels(argv: Option<&[String]>, on: Option<&str>) -> Option<(String, Vec<String>)> {
+        let argv = argv?;
+        let key = crate::programs::agent_of(argv)?;
+        let resume = Self::agent_argv(Some(crate::programs::resume_of(&key, argv)), None, on)?;
+        Some((key, resume))
     }
 
     /// The PowerShell form of a remote agent start (`agent_argv`): the program,
@@ -2463,7 +2483,8 @@ impl AppWindow {
         let folder = folder.or_else(here).unwrap_or_else(|| if on.is_some() { String::new() } else { home() });
         let (space, ctx, pane) = (self.model.fresh_id_on("sp", on), self.model.fresh_id_on("tb", on), self.model.fresh_id_on("p", on));
         let size = self.initial_size(&Tab::new(&ctx, "", &pane, "").root, &pane, window);
-        let addr = self.spawn(Self::agent_argv(argv.clone(), task, on).or(argv), folder.clone(), &space, &ctx, on, size, window)?;
+        let agent = Self::agent_labels(argv.as_deref(), on);
+        let addr = self.spawn(Self::agent_argv(argv.clone(), task, on).or(argv), agent, folder.clone(), &space, &ctx, on, size, window)?;
         let ctx_name = ctx_name.map(str::trim).unwrap_or_default();
         self.model.add_space(&space, name.trim(), &folder, Tab::new(&ctx, ctx_name, &pane, &addr));
         if let Some(p) = self.model.space_mut(&space) {
@@ -2482,7 +2503,8 @@ impl AppWindow {
         let on = self.machine_of(&space);
         let (ctx, pane) = (self.model.fresh_id_on("tb", on.as_deref()), self.model.fresh_id_on("p", on.as_deref()));
         let size = self.initial_size(&Tab::new(&ctx, "", &pane, "").root, &pane, window);
-        let addr = self.spawn(Self::agent_argv(argv.clone(), task, on.as_deref()).or(argv), folder, &space, &ctx, on.as_deref(), size, window)?;
+        let agent = Self::agent_labels(argv.as_deref(), on.as_deref());
+        let addr = self.spawn(Self::agent_argv(argv.clone(), task, on.as_deref()).or(argv), agent, folder, &space, &ctx, on.as_deref(), size, window)?;
         self.model.add_tab(&space, Tab::new(&ctx, name.trim(), &pane, &addr));
         self.model.active = Some(space.clone());
         Ok(json!({ "space": space, "tab": ctx, "terminal": addr }))
@@ -2518,7 +2540,8 @@ impl AppWindow {
         root.split(&target, axis, Node::block(new.clone(), Content::Terminal { terminal: String::new() }), "initial-size".into());
         let size = self.model.active_tab().filter(|tab| tab.id == ctx)
             .and_then(|_| self.initial_size(&root, &new, window));
-        let addr = self.spawn(argv, cwd, &space, &ctx, on.as_deref(), size, window)?;
+        let agent = Self::agent_labels(argv.as_deref(), on.as_deref());
+        let addr = self.spawn(argv, agent, cwd, &space, &ctx, on.as_deref(), size, window)?;
         self.model.split(&target, axis, &new, &addr);
         Ok(json!({ "pane": new, "terminal": addr }))
     }
@@ -3387,12 +3410,6 @@ impl AppWindow {
                 return;
             }
             "app.check_updates" => crate::update::check_now(),
-            "app.update_core" => {
-                if crate::update::core().ready.is_none() && crate::update::core().error.is_none() {
-                    return self.fail("atrous-core is up to date");
-                }
-                crate::update::update_core();
-            }
             "app.help" => {
                 if self.overlays.iter().any(|o| o.id == "help") {
                     self.close_overlay("help", window, cx);
@@ -4397,7 +4414,7 @@ impl AppWindow {
                 .border_1().border_color(c("border")).text_size(settings::z(13.0)).text_color(c("foreground"))
                 .id("core-update-error").cursor_pointer()
                 .on_click(cx.listener(|this, _, w, cx| this.run("app.settings", json!({ "section": "updates" }), w, cx)))
-                .child(format!("atrous-core update failed: {error} · Open Updates")).into_any_element());
+                .child(format!("atrous-core didn't restart into this Atrous's core: {error} · Open Updates")).into_any_element());
         }
         out.extend(pill);
         out
@@ -4410,14 +4427,7 @@ impl AppWindow {
     /// "Atrous 0.2.0 is ready · Restart": the frame's, so no layout or mod can hide it.
     /// What's waiting, in words: the pill shows it until clicked or dismissed.
     fn update_label() -> Option<String> {
-        let core = crate::update::core();
-        let core = core.ready.filter(|_| !core.updating);
-        match (crate::update::ready(), core) {
-            (Some(a), Some(c)) => Some(format!("Atrous {a} and atrous-core {c} are ready")),
-            (Some(a), None) => Some(format!("Atrous {a} is ready")),
-            (None, Some(c)) => Some(format!("atrous-core {c} is ready")),
-            (None, None) => None,
-        }
+        crate::update::ready().map(|a| format!("Atrous {a} is ready"))
     }
 
     fn render_update_pill(&self, cx: &mut Context<Self>) -> Option<AnyElement> {

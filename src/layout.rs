@@ -561,6 +561,27 @@ impl Node {
         }
     }
 
+    /// The terminal shown in block `id` ended. A block the layout file
+    /// (`file`) gives that terminal goes, and its row or column closes up. A
+    /// block that shows a terminal only as a click (`layout.terminal`, the
+    /// quick terminal, Flow's panel) stays and shows its file content again:
+    /// removing it would collapse its column into a sibling that takes the
+    /// column's size and id slot, a layout the clicks would then save.
+    /// True if the tree changed.
+    pub fn terminal_left(&mut self, file: &Node, id: &str) -> bool {
+        if self.find(id).and_then(Node::terminal).is_none() {
+            return false;
+        }
+        let shown = file.find(id).and_then(Node::content).filter(|c| !matches!(c, Content::Terminal { .. })).cloned();
+        match (shown, self.find_mut(id)) {
+            (Some(content), Some(node)) => {
+                node.kind = Kind::Block { content };
+                true
+            }
+            _ => self.remove(id).is_some(),
+        }
+    }
+
     /// Removes the node `id`. A row/column left with one child is replaced by
     /// that child (which takes its slot's size); stacks are kept even empty.
     pub fn remove(&mut self, id: &str) -> Option<Node> {
@@ -830,6 +851,27 @@ mod tests {
         n.split("a", Axis::Row, term("d"), "unused".into());
         n.remove("a");
         assert_eq!((w(&n, "d"), w(&n, "b")), (0.7, 0.3));
+    }
+
+    #[test]
+    fn a_terminal_shown_by_a_click_ends_without_collapsing_its_column() {
+        let panel = |agent: Content| {
+            let mut header = Node::block("panel-header", Content::Mod { name: "flow-canvas".into(), props: Default::default() });
+            header.size = Some(Size::Px { px: 36.0 });
+            let mut col = Node::container("panel", Axis::Column, vec![header, Node::block("panel-agent", agent)]);
+            col.size = Some(Size::Px { px: 560.0 });
+            Node::container("root", Axis::Row, vec![term("canvas"), col])
+        };
+        let file = panel(Content::Mod { name: "flow-canvas".into(), props: Default::default() });
+        let mut live = panel(Content::Terminal { terminal: "t8".into() });
+        assert!(live.terminal_left(&file, "panel-agent"));
+        assert_eq!(live, file, "back to the file: the column, its sizes and ids stay");
+        assert!(!live.terminal_left(&file, "panel-agent"), "nothing shows a terminal there now");
+        // A terminal the file itself puts in a block: that pane closes up as before.
+        let mut own = Node::container("root", Axis::Row, vec![term("a"), term("b")]);
+        let own_file = own.clone();
+        assert!(own.terminal_left(&own_file, "b"));
+        assert!(own.find("b").is_none());
     }
 
     #[test]

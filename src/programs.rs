@@ -176,6 +176,69 @@ fn built_in() -> Table {
     table
 }
 
+/// Programs that start other programs: their name alone says nothing.
+const LAUNCHERS: &[&str] = &["sh", "bash", "zsh", "fish", "pwsh", "powershell", "cmd", "node", "npx", "bun", "bunx", "deno", "python", "python3", "env"];
+
+/// A program's name without folder or extension, lowercase (`claude.ps1` -> `claude`).
+fn stem(program: &str) -> String {
+    let name = program.rsplit(['/', '\\']).next().unwrap_or(program);
+    let name = match name.rsplit_once('.') {
+        Some((stem, ext)) if !stem.is_empty() && ext.len() <= 4 => stem,
+        _ => name,
+    };
+    name.to_ascii_lowercase()
+}
+
+/// The agent an argv starts (its key in programs.json: `claude`, `codex`,
+/// `opencode`, `gemini`, `pi`…), if it is one people can start (an entry
+/// with `run`). Its `run` first (a prefix: a first message after it still
+/// counts, and the accounts launchers are run entries), else the program's
+/// name as its key, its `run` program or one of its `match` names. The app
+/// labels the terminal `atrous.agent=<key>`: an agent that never says what
+/// it is (no OSC 7501) still shows as one.
+pub fn agent_of(argv: &[String]) -> Option<String> {
+    TABLE.with(|t| agent_in(&t.borrow(), argv))
+}
+
+fn agent_in(t: &Table, argv: &[String]) -> Option<String> {
+    let agents = || t.programs.iter().filter(|(_, e)| !e.run.is_empty());
+    if let Some((key, _)) = agents().filter(|(_, e)| argv.starts_with(&e.run)).max_by_key(|(_, e)| e.run.len()) {
+        return Some(key.clone());
+    }
+    let name = stem(argv.first()?);
+    if name.is_empty() || LAUNCHERS.contains(&name.as_str()) {
+        return None;
+    }
+    if t.programs.get(&name).is_some_and(|e| !e.run.is_empty()) {
+        return Some(name);
+    }
+    agents()
+        .find(|(_, e)| stem(&e.run[0]) == name || e.also.iter().any(|a| stem(a) == name))
+        .map(|(key, _)| key.clone())
+}
+
+/// How an agent started with `argv` continues its last session in the same
+/// folder, for when its terminal comes back after the core was lost (a
+/// reboot): Claude Code and OpenCode `--continue`, Codex `resume --last`;
+/// any other agent starts again. Its `run` (else just the program), never a
+/// first message that followed it. The app labels the terminal
+/// `atrous.resume` with this, wrapped like any agent start; a mod that knows
+/// the exact session can relabel it (`claude --resume <id>`).
+pub fn resume_of(key: &str, argv: &[String]) -> Vec<String> {
+    let run = TABLE.with(|t| t.borrow().programs.get(key).map(|e| e.run.clone())).unwrap_or_default();
+    resume_with(key, &run, argv)
+}
+
+fn resume_with(key: &str, run: &[String], argv: &[String]) -> Vec<String> {
+    let mut cmd: Vec<String> = if !run.is_empty() && argv.starts_with(run) { run.to_vec() } else { argv.iter().take(1).cloned().collect() };
+    match key {
+        "claude" | "opencode" => cmd.push("--continue".into()),
+        "codex" => cmd.extend(["resume".into(), "--last".into()]),
+        _ => {}
+    }
+    cmd
+}
+
 pub fn load() -> Result<(), String> {
     let mut table = built_in();
     let result = match std::fs::read_to_string(path()) {
@@ -341,6 +404,38 @@ fn hash_color(s: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_agent_resumes_its_last_session_without_its_first_message() {
+        let v = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let claude = v(&["C:/home/accounts/claude.ps1", "--dangerously-skip-permissions"]);
+        let mut asked = claude.clone();
+        asked.push("fix the build".into());
+        assert_eq!(resume_with("claude", &claude, &asked), v(&["C:/home/accounts/claude.ps1", "--dangerously-skip-permissions", "--continue"]));
+        assert_eq!(resume_with("codex", &v(&["codex.ps1", "--yolo"]), &v(&["codex.ps1", "--yolo"])), v(&["codex.ps1", "--yolo", "resume", "--last"]));
+        assert_eq!(resume_with("opencode", &v(&["opencode", "--auto"]), &v(&["opencode"])), v(&["opencode", "--continue"]), "matched by name: just the program");
+        assert_eq!(resume_with("pi", &v(&["pi"]), &v(&["pi", "hello"])), v(&["pi"]), "others start again");
+    }
+
+    #[test]
+    fn an_agent_is_known_by_its_run_or_its_name() {
+        let t = built_in();
+        let v = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let claude = t.programs["claude"].run.clone();
+        assert_eq!(agent_in(&t, &claude).as_deref(), Some("claude"), "the accounts launcher");
+        let mut with_task = claude.clone();
+        with_task.push("fix the build".into());
+        assert_eq!(agent_in(&t, &with_task).as_deref(), Some("claude"), "a first message after it");
+        assert_eq!(agent_in(&t, &v(&["opencode", "--auto"])).as_deref(), Some("opencode"));
+        assert_eq!(agent_in(&t, &v(&["opencode"])).as_deref(), Some("opencode"), "by name");
+        assert_eq!(agent_in(&t, &v(&[r"C:\Users\me\AppData\Roaming\npm\gemini.cmd"])).as_deref(), Some("gemini"));
+        assert_eq!(agent_in(&t, &v(&["/home/me/.local/bin/codex", "resume"])).as_deref(), Some("codex"));
+        assert_eq!(agent_in(&t, &v(&["cursor-agent"])).as_deref(), Some("cursor"), "its run program");
+        assert_eq!(agent_in(&t, &v(&["pi"])).as_deref(), Some("pi"));
+        for other in [v(&["powershell.exe"]), v(&["bash", "-l"]), v(&["node", "server.js"]), v(&["vim"]), Vec::new()] {
+            assert_eq!(agent_in(&t, &other), None, "{other:?}");
+        }
+    }
 
     fn t() -> Table {
         serde_json::from_str(BUILT_IN).unwrap()

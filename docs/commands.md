@@ -488,13 +488,7 @@ Open Settings, Fedra's my-settings (section: look, machines, alerts, updates, pr
 
 ## `app.check_updates`
 
-Look for a newer Atrous and atrous-core now.
-
-No arguments.
-
-## `app.update_core`
-
-Update atrous-core to its latest release of this generation; terminals keep running.
+Look for a newer Atrous (its core comes inside) now.
 
 No arguments.
 

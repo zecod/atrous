@@ -278,9 +278,11 @@ export function themes(): { name: string; light: boolean; colors: Record<string,
 /** The font families on this machine, by name. */
 export function fonts(): string[];
 
-/** Atrous's and atrous-core's versions and what's waiting. `app.updates`: false for a build from
- *  source (it never updates). `core.managed`: the package manager that owns the core (homebrew,
- *  nix, mise), which the app never updates. `checked`: unix seconds of the last successful
+/** Atrous's version (its core ships inside and updates with it) and what's waiting.
+ *  `app.updates`: false for a build from source (it never updates). `core`: the running core;
+ *  `core.ready` is always null (no separate core updates), `core.updating` while it restarts
+ *  into the core this Atrous ships, `core.error` if that failed, `core.managed` who owns it
+ *  (`atrous`, or a package manager). `checked`: unix seconds of the last successful
  *  check; null before success or after a failed check.
  *  `checks`: anything is checked at all (not in a build from source); `checking`: looking now
  *  (`app.check_updates` starts a look). */

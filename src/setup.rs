@@ -1,9 +1,9 @@
 //! The frame's core screens, shown instead of the main window until a core
-//! that can serve this app runs:
-//! - none found (core_bin.rs): install it for me (the core's own installer),
-//!   or point at one;
-//! - too old (or missing a method the app calls): update it (`atc update`,
-//!   terminals kept);
+//! that can serve this app runs. Atrous ships its core, so these show only
+//! on a damaged install or a build without one:
+//! - none found (core_bin.rs): reinstall Atrous, or point at an atrous-core;
+//! - too old (or missing a method the app calls): restart it from the core
+//!   Atrous ships (`atc server restart`, terminals kept);
 //! - a newer generation than this app speaks: update the app.
 //! Then the main window opens.
 
@@ -16,7 +16,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 const ICON: &[u8] = include_bytes!("../assets/brand/atrous-128.png");
-const CORE_PLACE: &str = if cfg!(windows) { r"%LOCALAPPDATA%\Programs\atrous-core" } else { "~/.local/bin" };
 
 /// What's missing before the main window can open.
 pub enum Need {
@@ -94,12 +93,13 @@ impl Setup {
         .detach();
     }
 
-    fn install(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.run("Installing atrous-core…", || crate::core_bin::install().map(Some), window, cx);
-    }
-
+    /// The running core is too old for this app: it restarts from the core
+    /// Atrous ships, the planned way, so every terminal keeps running.
     fn update(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.run("Updating atrous-core… your terminals keep running.", || crate::core_bin::update().map(|_| None), window, cx);
+        self.run("Restarting atrous-core… your terminals keep running.", || {
+            let bin = crate::core_bin::bundled().unwrap_or_else(crate::core_bin::path);
+            crate::core_bin::restart_into(&bin).map(|_| None)
+        }, window, cx);
     }
 
     fn choose(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -128,19 +128,19 @@ impl Setup {
     fn words(&self) -> (String, String, String) {
         match &self.need {
             Need::Install => (
-                "Atrous needs atrous-core".into(),
-                "atrous-core runs your terminals and agents, and keeps them alive when this window closes. Atrous couldn't find it on this computer.".into(),
-                format!("Install it for me puts it in {CORE_PLACE} (with atc), like its own installer: {}", crate::brand::core_install_command()),
+                "Atrous's core is missing".into(),
+                "atrous-core runs your terminals and agents, and keeps them alive when this window closes. It ships inside Atrous, but this install doesn't have it.".into(),
+                format!("Reinstall Atrous ({}), or point at an atrous-core you built.", crate::brand::app_install_command()),
             ),
             Need::Fix(Mismatch::TooOld { have, need }) => (
                 "Atrous needs a newer atrous-core".into(),
-                format!("Yours is {have}; this Atrous needs {need} or newer. Updating keeps your terminals running."),
-                "Or update it yourself: atc update".into(),
+                format!("The running core is {have}; this Atrous needs {need} or newer. Restarting it from the core Atrous ships keeps your terminals running."),
+                "Or restart it yourself: atc server restart".into(),
             ),
             Need::Fix(Mismatch::Missing(methods)) => (
                 "Atrous needs a newer atrous-core".into(),
-                format!("Your atrous-core can't do everything this Atrous needs ({}). Updating keeps your terminals running.", methods.join(", ")),
-                "Or update it yourself: atc update".into(),
+                format!("The running core can't do everything this Atrous needs ({}). Restarting it from the core Atrous ships keeps your terminals running.", methods.join(", ")),
+                "Or restart it yourself: atc server restart".into(),
             ),
             Need::Fix(Mismatch::Newer { generation }) => (
                 "This Atrous is older than your atrous-core".into(),
@@ -175,8 +175,7 @@ impl Render for Setup {
             Need::Install => div()
                 .flex()
                 .gap(px(10.0))
-                .child(button("install", "Install it for me", true).when(!busy, |d| d.on_click(cx.listener(|this, _, w, cx| this.install(w, cx)))))
-                .child(button("choose", "I have it somewhere…", false).when(!busy, |d| d.on_click(cx.listener(|this, _, w, cx| this.choose(w, cx))))),
+                .child(button("choose", "I have it somewhere…", true).when(!busy, |d| d.on_click(cx.listener(|this, _, w, cx| this.choose(w, cx))))),
             Need::Fix(Mismatch::Newer { .. }) => div()
                 .flex()
                 .gap(px(10.0))
@@ -184,7 +183,7 @@ impl Render for Setup {
             Need::Fix(_) => div()
                 .flex()
                 .gap(px(10.0))
-                .child(button("update", "Update atrous-core", true).when(!busy, |d| d.on_click(cx.listener(|this, _, w, cx| this.update(w, cx))))),
+                .child(button("update", "Restart atrous-core", true).when(!busy, |d| d.on_click(cx.listener(|this, _, w, cx| this.update(w, cx))))),
         };
         div()
             .size_full()

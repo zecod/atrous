@@ -132,13 +132,17 @@ fn main() {
     telemetry::clock();
     // A first start sizes the app to the screen and the system's text size.
     let fresh = !settings::path().exists();
-    // The core people installed; without one, the setup screen installs it.
+    // The core Atrous ships (or one chosen in settings); without one, the setup screen says so.
     let person = settings::load_person();
     let configured = person.as_ref().ok().and_then(|p| p.core.clone());
     let core: Result<std::sync::Arc<hc::Core>, setup::Need> = match core_bin::find(configured.as_deref()) {
         None => Err(setup::Need::Install),
         Some(bin) => {
             core_bin::use_core(bin);
+            core_bin::ensure_atc();
+            // A core from the separate install or an older Atrous restarts
+            // into the bundled one first; its terminals keep running.
+            update::handover();
             match hc::Core::connect() {
                 // One that can't serve this app gets the screen that fixes it.
                 Ok(core) => hc::check(&core.hello).map(|()| core).map_err(setup::Need::Fix),

@@ -486,11 +486,11 @@ fn settings_sections_and_updates(cx: &mut TestAppContext) {
             let tree = describe(cx, &staged, "mods/my-settings", true, p, updates(app, core), None)
                 .unwrap_or_else(|e| panic!("updates/{app}/{core}: {e:#}"));
             if app == "current" && core == "current" {
-                assert!(
-                    tree.contains("check-app") && tree.contains("check-core"),
-                    "both update buttons must exist: {tree}"
-                );
+                assert!(tree.contains("check-app"), "the update button must exist: {tree}");
             }
+            // One app, one update: the core has no row or button of its own.
+            assert!(!tree.contains("check-core") && !tree.contains("st-core-update"), "no separate core update: {tree}");
+            assert_eq!(tree.contains("didn't restart into this version"), core == "error", "a failed core restart is said: {tree}");
         }
     }
     for (checking, checked, asked) in [
@@ -509,7 +509,7 @@ fn settings_sections_and_updates(cx: &mut TestAppContext) {
         let succeeded = !checking && checked.is_some();
         assert_eq!(tree.contains("Up to date"), succeeded, "success requires a completed, successful check: {tree}");
         if !checking && checked.is_none() {
-            assert!(tree.contains("check-app") && tree.contains("check-core"), "failed checks must remain retryable: {tree}");
+            assert!(tree.contains("check-app"), "failed checks must remain retryable: {tree}");
         }
         assert!(tree.contains(if checking { "Checking" } else if succeeded { "Up to date" } else { "Check your connection" }), "check status missing: {tree}");
     }
@@ -579,7 +579,7 @@ fn settings_keep_notes_in_the_whats_new_window(cx: &mut TestAppContext) {
     let mut p = props();
     p["section"] = json!("updates");
     let tree = describe(cx, &staged, "mods/my-settings", true, p, update.clone(), None).unwrap();
-    assert!(tree.contains("st-whats-new") && tree.contains("st-app-update") && tree.contains("st-check-core"));
+    assert!(tree.contains("st-whats-new") && tree.contains("st-app-update") && !tree.contains("st-check-core"));
     assert!(!tree.contains("Newest details") && !tree.contains("Older headline"));
     let mut p = props();
     p["notes"] = notes;

@@ -13,6 +13,27 @@ and each `labels` event carries the whole map. Remote terminals
 Clients that don't know these labels keep working: everything here is
 optional, and a missing label falls back to what the client did before.
 
+## `atrous.agent=<key>`: the agent a client started
+
+When Atrous starts a terminal to run a known agent (`tab.new`, `pane.split`
+or `space.new` with an `argv` that is a programs.json `run` entry, the
+accounts launchers included, or names that agent's program), it labels the
+terminal `atrous.agent=<key>` with the programs.json key: `claude`, `codex`,
+`opencode`, `gemini`, `pi`, ... Set once at start and never changed. It lets
+a client show an agent that never reports itself (OpenCode sends no OSC 7501)
+as an agent; its state still comes from the screen.
+
+## `atrous.resume=<argv as JSON>`: how a lost agent comes back
+
+Set beside `atrous.agent`: a JSON array, the argv the core runs when this
+kept terminal comes back after its core was lost (a crash, a reboot)
+instead of a bare shell. Atrous writes the agent's own "continue" form,
+wrapped in a shell that stays: Claude Code and OpenCode `--continue`, Codex
+`resume --last`, any other agent started again. A client that knows the
+exact session may relabel it, for example with `claude --resume <sessionId>`
+wrapped the same way. Anything that isn't a non-empty JSON array of
+strings is ignored (a shell comes back).
+
 ## `atrous.seen=<turn>`: the last turn a person looked at
 
 `turn` is core's counter: it goes up each time the terminal stops working.
