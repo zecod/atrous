@@ -12,7 +12,7 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, Scrollbar, InputState, Input } from "gpui-base";
-import { core, run, theme, themes, fonts, updates, settings, layouts, shared, appHome, readTextFile, writeTextFile, playSound, props, closeOverlay, window, nextCommand } from "atrous";
+import { core, run, theme, themes, fonts, updates, settings, layouts, shared, setShared, appHome, readTextFile, writeTextFile, playSound, props, closeOverlay, window, nextCommand } from "atrous";
 import { UsagePage } from "./usage.js";
 import { AccountsPage } from "./accounts.js";
 import { SkillsPage } from "./skills.js";
@@ -847,7 +847,14 @@ export default class Settings extends View {
       .child(this.heading(t, "Usage data"))
       .child(this.row(t, "No usage data", "Atrous sends no usage reports. Nothing from your terminals, files, folders or projects leaves your computer.", div()))
       .child(this.row(t, "Update checks", "Atrous and atrous-core look for new releases on GitHub (zecod/atrous, zecod/atrous-core). The check sends nothing about you.", div()))
-      .child(this.row(t, "Feedback", "Send feedback opens a new GitHub issue for you to read and send yourself.", div()));
+      .child(this.row(t, "Feedback", "Send feedback opens a new GitHub issue for you to read and send yourself.", div()))
+      .child(div().h(18))
+      .child(this.heading(t, "Agents"))
+      // Read by my-spaces and flow-canvas (shared "agents.autoTrust"): they press the agent's own
+      // "trust" answer (trust.js); Claude Code's and Codex's configs are never edited by Atrous.
+      .child(this.row(t, "Trust project folders automatically",
+        "When Claude Code or Codex asks whether to trust the folder you started it in, Atrous answers yes for you. Only turn this on if you trust every project you open: a repository's own settings and hooks can run code on your computer.",
+        this.toggle(t, "st-auto-trust", shared("agents.autoTrust") === true, (_e, cx) => { setShared("agents.autoTrust", shared("agents.autoTrust") !== true); cx.notify(); })));
   }
 
   // ----------------------------------------------------------------------

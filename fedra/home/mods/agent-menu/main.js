@@ -5,12 +5,14 @@
 // - Copy session ID: the Claude Code / Codex session id (claude --resume <id>), when known.
 // - Copy message for another agent: a ready-to-paste note with both and the exact commands.
 // Plus Go to and Pin. Props: { address, title, program, cwd, sessionId, source, pinned, pane, overlay }.
+// Close agent (last, in red): asks in the menu first, then closes its pane (its tab when that's
+// the tab's only pane), or ends it (atc kill) when it has no pane (a sub-agent).
 // smart split: "Move to this tab" (Left, Right, Top, Bottom, New tab) puts the agent
 // beside the focused pane of the shown tab; mods/snap-split does the move.
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { props, closeOverlay, run, theme, notify, openOverlay, panes, focused, spaces, agents } from "atrous"; // smart split: openOverlay..agents
+import { props, closeOverlay, run, theme, notify, openOverlay, panes, focused, spaces, agents, nextCommand } from "atrous"; // smart split: openOverlay..agents
 
 // smart split: the five places, and a tiny drawing of each (a pane with its new half filled).
 const MOVES = [["left", "Left"], ["right", "Right"], ["top", "Top"], ["bottom", "Bottom"], ["tab", "New tab"]];
@@ -48,11 +50,34 @@ function handoff(p) {
   return lines.join("\n");
 }
 
+// Ends the agent: its pane, or its tab when that's the tab's only pane (closing a space's last tab
+// closes the space, as everywhere in Atrous), or, with no pane (a sub-agent), the terminal itself.
+function closeAgent(p) {
+  const ps = panes();
+  const pane = p.pane ?? ps.find((x) => x.terminal === p.address)?.pane ?? null;
+  if (!pane) return run("terminal.kill", { terminal: p.address });
+  const tab = ps.find((x) => x.pane === pane)?.tab;
+  if (tab && ps.filter((x) => x.tab === tab).length <= 1) run("tab.close", { id: tab, confirmed: true });
+  else run("pane.close", { pane });
+}
+
 export default class AgentMenu extends View {
   init(_props, cx) {
     this.at = 0;
     this.handle = cx.focus_handle();
     this.handle.focus();
+    // Test commands (`atrous do agent-menu.<cmd>`): close (what clicking "Close agent" does), confirm
+    // (its Close button), cancel.
+    cx.spawn(async (cx) => {
+      for (;;) {
+        const c = String(await nextCommand());
+        const p = props() ?? {};
+        if (c === "close") this.confirming = true;
+        else if (c === "cancel") this.confirming = false;
+        else if (c === "confirm" && this.confirming) { closeOverlay(p.overlay); closeAgent(p); }
+        cx.notify();
+      }
+    });
   }
 
   items() {
@@ -107,16 +132,35 @@ export default class AgentMenu extends View {
         .child(div().text_size(10.5).text_color(why ? t.dim : t.muted).child(word)))));
   }
 
+  // The last row: "Close agent", or, once chosen, the question and its two buttons.
+  closeRow(t, p) {
+    const btn = (id, label, danger, action) => div().id(id).h(26).px(10).flex().items_center().rounded(6).text_size(12).cursor_pointer()
+      .when(danger, (el) => el.bg(t.blocked).text_color(t.background).font_semibold().hover((s) => s.opacity(0.85)))
+      .when(!danger, (el) => el.border_1().border_color(t.border).text_color(t.foreground).hover((s) => s.bg(t.hover)))
+      .on_click(action).child(label);
+    return v_flex().px(8).py(6).gap(8).rounded(7).bg(t.selected)
+      .child(div().text_size(12.5).text_color(t.foreground).child(`Close ${p.title ?? p.address}? The agent stops.`))
+      .child(h_flex().gap(6)
+        .child(btn("am-close-yes", "Close", true, () => { closeOverlay(p.overlay); closeAgent(p); }))
+        .child(btn("am-close-no", "Cancel", false, (_e, cx) => { this.confirming = false; cx.notify(); })));
+  }
+
   render() {
     const t = theme();
     const p = props() ?? {};
     const list = this.items();
     return v_flex().id("agent-menu").track_focus(this.handle).w_full().min_h(0).p(5).bg(t.popover).text_size(12.8)
       .on_key_down((e, cx) => {
-        if (e.key === "down") this.at = (this.at + 1) % list.length;
-        else if (e.key === "up") this.at = (this.at + list.length - 1) % list.length;
-        else if (e.key === "enter") return this.choose(this.at, cx);
-        else if (e.key === "escape") return closeOverlay(p.overlay);
+        if (e.key === "down") this.at = (this.at + 1) % (list.length + 1);
+        else if (e.key === "up") this.at = (this.at + list.length) % (list.length + 1);
+        else if (e.key === "enter") {
+          if (this.confirming) { closeOverlay(p.overlay); closeAgent(p); return; }
+          if (this.at === list.length) { this.confirming = true; cx.notify(); return; }
+          return this.choose(this.at, cx);
+        } else if (e.key === "escape") {
+          if (this.confirming) { this.confirming = false; cx.notify(); return; }
+          return closeOverlay(p.overlay);
+        }
         else return;
         cx.notify();
       })
@@ -124,15 +168,22 @@ export default class AgentMenu extends View {
       .children(list.map((it, i) => v_flex()
         .when(Boolean(it.sep), (el) => el)
         .child(h_flex().id(`am-${i}`).h(31).px(8).gap(9).rounded(7).items_center()
-          .text_color(it.enabled === false ? t.dim : t.foreground)
+          .text_color(it.enabled === false ? t.dim : it.danger ? t.blocked : t.foreground)
           .when(i === this.at && it.enabled !== false, (el) => el.bg(t.selected))
           .when(it.enabled !== false, (el) => el.hover((s) => s.bg(t.hover)).cursor_pointer())
           .on_click((_e, cx) => this.choose(i, cx))
-          .child(svg(I(it.icon)).size(14).flex_none().text_color(t.muted))
+          .child(svg(I(it.icon)).size(14).flex_none().text_color(it.danger ? t.blocked : t.muted))
           .child(div().flex_1().truncate().child(it.label))
           .child(div().flex_none().text_size(11).text_color(t.dim).child(it.hint ?? "")))
         .when(Boolean(it.sep), (el) => el.child(div().mx(7).my(4).h(1).bg(t.border)))))
       .child(div().mx(7).my(4).h(1).bg(t.border)) // smart split
-      .child(this.moveRow(t, p)); // smart split
+      .child(this.moveRow(t, p)) // smart split
+      .child(div().mx(7).my(4).h(1).bg(t.border))
+      .child(this.confirming ? this.closeRow(t, p) : h_flex().id("am-close").h(31).px(8).gap(9).rounded(7).items_center()
+        .text_color(t.blocked).cursor_pointer().hover((s) => s.bg(t.hover))
+        .when(this.at === list.length, (el) => el.bg(t.selected))
+        .on_click((_e, cx) => { this.confirming = true; cx.notify(); })
+        .child(svg(I("close")).size(14).flex_none().text_color(t.blocked))
+        .child(div().flex_1().truncate().child("Close agent")));
   }
 }

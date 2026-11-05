@@ -6,7 +6,8 @@
 //   (none)     the canvas (the Flow layout's main block)
 //   "bar"      the slim title bar: logo, Fedra | Flow switch, counts, search, settings, window buttons
 //   "terminal" the header over the focused agent's live terminal (layout block { agent: "focused" })
-//   "add"      the popup a space's "+" node opens: start an agent there (knownAgents -> tab.new)
+//   "add"      the popup a space's "+" node opens: start an agent there (agent-order.js -> tab.new),
+//              then the canvas shows it at once, before it reports (trust.js)
 //
 // The canvas
 // - Pan: drag the background (or anywhere with the middle button), or the wheel (shift+wheel:
@@ -43,23 +44,68 @@
 // saved), stats (render times -> shared "flow.stats"), active:1|0|auto (treat the window as in
 // front or not, for screenshots of a window kept in the back), off:<grid,edges,anim,nodes> (leave
 // parts out, to measure them), subagents-test:<session dir> | subagents-test-off (my-spaces' switch:
-// every Claude agent shows that session's subagents).
+// every Claude agent shows that session's subagents), add:<space id>,<agent key | shell> (a row of
+// the "+" popup), trust:<address> / open:<address> (a card's Trust / Open), hover:<node id>,
+// autotrust:1|0 (Settings > Privacy's switch), dump:<address> (shared "flow.debug").
 
 import { View, div, svg, image, PathBuilder } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import {
   spaces, agents, terminals, panes, focused, theme, run, openOverlay, closeOverlay, props, shared, setShared,
-  nextCommand, exec, layout, knownAgents, setAgentOrder, watchFolder, window as appWindow,
+  nextCommand, exec, layout, setAgentOrder, watchFolder, window as appWindow,
 } from "atrous";
+
+const PROMPT_H = 94; // a card asking to trust its folder: its text, then Trust and Open
+const BLOCK = "flow-terminal-agent"; // the panel's terminal block ({ agent: "focused" } in the file)
+const PROMPTS = "agents.prompts"; // shared: address -> { app, question, keys }, what a starting agent asks (my-spaces too)
+const PENDING = "flow.pending"; // shared: an agent "+" just started, to show once its terminal exists
+const UNREPORTED = "agents.unreported"; // shared: address -> { key, name, status }, agents with no OSC 7501 (my-spaces too)
+
+// Tab id -> its name, for named tabs (an agent's tab is named after it: older builds' only clue).
+function tabNames() {
+  const m = new Map();
+  for (const s of spaces()) for (const c of s.tabs ?? []) if (c.named) m.set(c.id, c.name);
+  return (id) => m.get(id) ?? null;
+}
+
+// The terminal the panel shows instead of the focused agent (layout.terminal), or null.
+function pinned() {
+  const c = find(layout(), BLOCK)?.content;
+  return typeof c?.terminal === "string" ? c.terminal : null;
+}
+
+// Shows a terminal in the panel and gives it the keyboard: an agent through agent.focus, one that
+// hasn't reported yet (starting, at a trust prompt) by putting it in the block itself.
+export function openTerminal(address, isAgent) {
+  if (isAgent) {
+    if (pinned()) run("layout.terminal", { id: BLOCK });
+    run("agent.focus", { terminal: address });
+  } else run("layout.terminal", { id: BLOCK, terminal: address });
+  run("layout.show", { id: "flow-terminal" });
+}
+
+// "+": starts an agent in a space, and has the canvas show it the moment its terminal exists.
+export function startAgent(spaceId, agent) {
+  if (agent) noteAgentUse(agent.key);
+  const before = terminals().filter((k) => k.labels?.["atrous.space"] === spaceId).map((k) => k.address);
+  setShared(PENDING, { space: spaceId, before, at: Date.now() });
+  run("tab.new", { space: spaceId, ...(agent ? { name: agent.name, argv: agent.run } : {}) });
+}
+
+function cleanPrompt(p) {
+  return p ? { app: p.app, question: p.question, keys: p.keys } : null;
+}
 import * as G from "./graph.js";
 import * as SA from "./subagents.js";
 import { claudeSessionDir } from "./session.js";
+import * as T from "./trust.js";
+import { agentOrder, noteAgentUse, cachedAgents, loadAgents } from "./agent-order.js"; // shared with my-new-menu, onboarding, project-start
 
 const I = (n) => `mods/flow-canvas/${n}.svg`;
 const RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
 const GRID = 24; // world px between grid dots
 const ZMIN = 0.2, ZMAX = 1.8;
-const WORD = { working: "Working", blocked: "Needs you", done: "Done", idle: "Idle" };
+const WORD = { working: "Working", blocked: "Needs you", done: "Done", idle: "Idle", starting: "Starting" };
 const FLOW_K = 7; // edge dots per turn of the wedge: the gap between two lit runs
 const FLOW_MS = 1100; // one turn
 const DOTS = 120; // edge dots on screen, at most
@@ -135,6 +181,16 @@ export default class Flow extends View {
     this.subDirs = new Map(); // agent address -> { dir, pid, at }
     this.subWatching = new Set();
     this.subDirty = new Map();
+    this.prompts = new Map(); // address -> { at, prompt, answered } (trust.js)
+    this.known = cachedAgents(null); // knownAgents() (agent-order.js): what a starting agent is
+    this.loadKnown(cx);
+    // Starting agents' screens, for a trust prompt: one read every 1.5 s at most, only while the
+    // window is in front and something is starting.
+    cx.timer.every(1500, (cx) => {
+      if ((this.forceActive ?? (appWindow()?.active !== false)) === false) return;
+      T.poll(this, cx, () => this.promptCandidates());
+      if (Date.now() - (this.knownAt ?? 0) > 300000) this.loadKnown(cx);
+    });
     this.active = appWindow()?.active !== false;
     // Folders only (no process) every 4 s, and only while the window is in front.
     cx.timer.every(4000, (cx) => { if (appWindow()?.active !== false) this.subScan(cx); });
@@ -148,12 +204,82 @@ export default class Flow extends View {
     });
   }
 
+  loadKnown(cx) {
+    this.knownAt = Date.now();
+    cx.spawn(async (cx) => {
+      // (loadAgents keeps it in shared "new-menu.agents": the panel header and the "+" popup read it)
+      try { this.known = await loadAgents(null); cx.notify(); } catch {}
+    });
+  }
+
+  // Terminals whose screen to read: agents that haven't reported (a trust prompt in their first
+  // minutes, else whether output moves), and agents that reported idle but never had a turn (a
+  // prompt, their first minutes).
+  promptCandidates() {
+    const now = Date.now();
+    const agentsBy = new Map(agents().map((a) => [a.address, a]));
+    const tab = tabNames();
+    const out = [];
+    for (const k of terminals()) {
+      if (k.state !== "live" || !k.labels?.["atrous.space"]) continue;
+      const age = now - (k.created_ms ?? now);
+      if (!T.reported(k) && T.launchOf(k, this.known, tab)) out.push({ address: k.address, ask: age < T.ASK_MS });
+      else {
+        const a = agentsBy.get(k.address);
+        if (a && (a.status === "idle" || a.status === "blocked") && !k.turn && age < T.ASK_MS) out.push({ address: k.address, ask: true });
+      }
+    }
+    return out;
+  }
+
+  // After a render: show the agent "+" just started the moment its terminal exists (before it
+  // reports anything); give the panel back to the focused agent once the terminal pinned there
+  // reports (and asks nothing) or ends; answer trust prompts when Settings says so.
+  follow(cx, terms, ag) {
+    const todo = [];
+    const isAgent = (address) => ag.some((a) => a.address === address);
+    const p = shared(PENDING);
+    if (p) {
+      const fresh = [...terms.values()].find((k) => k.state === "live" && k.labels?.["atrous.space"] === p.space && !(p.before ?? []).includes(k.address));
+      if (fresh) todo.push(() => { setShared(PENDING, null); openTerminal(fresh.address, isAgent(fresh.address)); run("pane.focus", { terminal: fresh.address }); });
+      else if (Date.now() - (p.at ?? 0) > 30000) todo.push(() => setShared(PENDING, null));
+    }
+    const pin = pinned();
+    if (pin && !p) {
+      const k = terms.get(pin);
+      if (!k || k.state !== "live") todo.push(() => run("layout.terminal", { id: BLOCK }));
+      else if (isAgent(pin) && !this.prompts.get(pin)?.prompt) todo.push(() => { run("layout.terminal", { id: BLOCK }); run("agent.focus", { terminal: pin }); });
+    }
+    if (shared("agents.autoTrust") === true) {
+      for (const [address, e] of this.prompts) {
+        if (e.prompt?.keys && (e.prompt.app === "claude" || e.prompt.app === "codex") && !e.answered) {
+          e.answered = Date.now();
+          todo.push((cx) => this.trust(address, cx, true));
+        }
+      }
+    }
+    if (todo.length) cx.spawn(async (cx) => { await cx.sleep(0); for (const f of todo) f(cx); });
+  }
+
+  // Presses the accepting keys for a terminal's trust prompt.
+  trust(address, cx, auto = false) {
+    const p = this.prompts.get(address)?.prompt ?? shared(PROMPTS)?.[address];
+    if (!p?.keys) return;
+    const e = this.prompts.get(address);
+    if (e && !auto) e.answered = Date.now();
+    cx.spawn(async (cx) => {
+      await T.answer(address, p.keys).catch(() => false);
+      if (e) e.at = 0; // read it again soon
+      cx.notify();
+    });
+  }
+
   load(k, d) { try { return JSON.parse(localStorage.getItem(k) ?? "null") ?? d; } catch { return d; } }
   save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
 
   render(cx) {
     if (this.part === "bar") return this.renderBar();
-    if (this.part === "terminal") return this.renderTerminalHeader();
+    if (this.part === "terminal") return this.renderTerminalHeader(cx);
     if (this.part === "add") return this.renderAdd();
     const t0 = Date.now();
     const el = this.renderCanvas(cx);
@@ -391,13 +517,12 @@ export default class Flow extends View {
   clickNode(n, dbl, cx) {
     if (n.kind === "agent") {
       if (n.synthetic) return;
-      run("agent.focus", { terminal: n.a.address });
-      if (!panelShown()) run("layout.show", { id: "flow-terminal" });
+      // Starting (no report yet): the panel shows its terminal itself, and it takes the keyboard.
+      openTerminal(n.a.address, !n.unreported);
       // Double-click: the keyboard goes to its terminal in the panel.
-      if (dbl) run("pane.focus", { terminal: n.a.address });
+      if (dbl || n.unreported || n.prompt) run("pane.focus", { terminal: n.a.address });
     } else if (n.kind === "cc") {
-      run("agent.focus", { terminal: n.agent.address });
-      if (!panelShown()) run("layout.show", { id: "flow-terminal" });
+      openTerminal(n.agent.address, true);
     } else if (n.kind === "more") {
       this.subsOpen.add(n.agent.address);
     } else if (n.kind === "space") {
@@ -413,16 +538,17 @@ export default class Flow extends View {
     } else if (n.kind === "agent" && !n.synthetic) {
       const a = n.a;
       const title = G.agentTitle(a);
-      const cwd = (a.pane && panes().find((p) => p.pane === a.pane)?.cwd) || n.term?.cwd || null;
+      const pane = a.pane ?? panes().find((p) => p.terminal === a.address)?.pane ?? null;
+      const cwd = (pane && panes().find((p) => p.pane === pane)?.cwd) || n.term?.cwd || null;
       const dir = this.subDirs.get(a.address)?.dir;
-      openOverlay({ mod: "agent-menu", kind: "popup", width: 236, height: 300,
-        props: { address: a.address, title, program: a.program?.name, pane: a.pane ?? null, pinned: Boolean(a.pinned), cwd,
+      openOverlay({ mod: "agent-menu", kind: "popup", width: 236, height: 380,
+        props: { address: a.address, title, program: a.program?.name, pane, pinned: Boolean(a.pinned), cwd,
           sessionId: dir ? dir.split("/").pop() : null, source: dir ? "claude" : null } });
     }
   }
 
   openAdd(s) {
-    openOverlay({ mod: "flow-canvas", kind: "popup", width: 250, height: 330, props: { part: "add", space: s.id, machine: s.machine ?? null } });
+    openOverlay({ mod: "flow-canvas", kind: "popup", width: 250, height: 460, props: { part: "add", space: s.id, machine: s.machine ?? null } });
   }
 
   // ---- test commands -----------------------------------------------------------------------------
@@ -454,7 +580,16 @@ export default class Flow extends View {
       }
       this.release(cx);
     } else if (name === "off") { this.off = new Set(arg.split(",").filter(Boolean)); // perf experiments: grid,edges,nodes,anim
-    } else if (name === "menu") {
+    } else if (name === "add") {
+      // add:<space id>,<agent key | shell>: what a row of the "+" popup does
+      const [space, key] = arg.split(",");
+      const agent = key === "shell" ? null : this.known.find((a) => a.key === key);
+      if (key !== "shell" && !agent) return console.log(`flow-canvas: no known agent ${key}`);
+      startAgent(space, agent);
+    } else if (name === "trust") this.trust(arg, cx);
+    else if (name === "open") { const n = this.graph?.nodes.get(`a:${arg}`); if (n) this.clickNode(n, false, cx); }
+    else if (name === "dump") setShared("flow.debug", { terminal: terminals().find((k) => k.address === arg) ?? null, prompt: this.prompts.get(arg) ?? null, pinned: pinned(), block: find(layout(), BLOCK)?.content ?? null });
+    else if (name === "menu") {
       const n = this.graph?.nodes.get(arg);
       if (n) this.menuFor(n);
     } else if (name === "stress") {
@@ -474,6 +609,8 @@ export default class Flow extends View {
       console.log(`flow-canvas stats ${JSON.stringify(stats)}`);
       this.times = [];
     } else if (name === "active") this.forceActive = arg === "1" ? true : arg === "0" ? false : undefined; // screenshots of a window in the back
+    else if (name === "autotrust") setShared("agents.autoTrust", arg === "1"); // what Settings > Privacy's switch sets
+    else if (name === "hover") this.hover = arg || null; // what the pointer over a card does
     else if (name === "subagents-test") setShared("subagents.test", arg);
     else if (name === "subagents-test-off") setShared("subagents.test", null);
   }
@@ -488,7 +625,32 @@ export default class Flow extends View {
     const sp = spaces(), ag = agents(), ps = panes();
     const terms = new Map(terminals().map((k) => [k.address, k]));
     this.askGit(sp, ps, cx);
-    const graph = G.build({ sp, ag, terms, ps, git: this.git, ccOf: (a) => this.ccOf(a), extra: this.extra, open: this.subsOpen });
+    // Agents with no OSC 7501 report: starting (at a trust prompt, loading) or never reporting
+    // (OpenCode). Their status comes from their screen (trust.js).
+    const tab = tabNames();
+    const now = Date.now();
+    const starting = [];
+    for (const k of terms.values()) {
+      if (T.reported(k)) continue;
+      const known = T.launchOf(k, this.known, tab);
+      if (!known) continue;
+      const e = this.prompts.get(k.address);
+      const young = now - (k.created_ms ?? now) < T.STARTING_MS && !(e?.changedAt);
+      starting.push({ term: k, known, status: young ? "starting" : T.activity(this, k.address, now) });
+    }
+    const unreported = Object.fromEntries(starting.map(({ term, known, status }) => [term.address, { key: known.key, name: known.name, status }]));
+    if (JSON.stringify(unreported) !== JSON.stringify(shared(UNREPORTED) ?? {})) setShared(UNREPORTED, unreported);
+    const graph = G.build({ sp, ag, terms, ps, git: this.git, ccOf: (a) => this.ccOf(a), extra: this.extra, open: this.subsOpen, starting });
+    // What starting agents ask (their trust prompt), for the nodes, the panel header and my-spaces.
+    const asks = {};
+    for (const [address, e] of this.prompts) if (e.prompt && terms.get(address)?.state === "live") asks[address] = cleanPrompt(e.prompt);
+    for (const n of graph.nodes.values()) {
+      if (n.kind !== "agent" || !asks[n.a.address]) continue;
+      n.prompt = { ...asks[n.a.address], answered: this.prompts.get(n.a.address)?.answered ?? 0 };
+      n.h = PROMPT_H;
+    }
+    if (JSON.stringify(asks) !== JSON.stringify(shared(PROMPTS) ?? {})) setShared(PROMPTS, asks);
+    this.follow(cx, terms, ag);
     // The "+" node at the end of each space: start an agent there (n8n's add-node).
     for (const n of [...graph.nodes.values()]) {
       if (n.kind !== "space") continue;
@@ -515,7 +677,7 @@ export default class Flow extends View {
     const v = this.view ?? { z: 1, x: 48, y: 48 };
     const z = v.z;
     const sx = (x) => x * z + v.x, sy = (y) => y * z + v.y;
-    const shownAgent = focused()?.agent ?? null;
+    const shownAgent = pinned() ?? focused()?.agent ?? null;
 
     // Edges, grouped by look: one path per group.
     const groups = { idle: [], done: [], work: [], block: [], link: [], add: [] };
@@ -532,7 +694,7 @@ export default class Flow extends View {
       const c = G.curve(x0, y0, x1, y1, z);
       if (!inView(Math.min(x0, c[1][0], c[2][0], x1), Math.min(y0, y1), Math.max(x0, c[1][0], c[2][0], x1), Math.max(y0, y1))) continue;
       const st = G.statusOf(n);
-      const g = n.kind === "add" ? "add" : n.kind === "space" ? "link" : st === "working" ? "work" : st === "blocked" ? "block" : st === "done" ? "done" : "idle";
+      const g = n.kind === "add" || st === "starting" ? "add" : n.kind === "space" ? "link" : st === "working" ? "work" : st === "blocked" ? "block" : st === "done" ? "done" : "idle";
       groups[g].push(c);
       if (g === "work" && z >= 0.3) work.push([c, x0, x1]);
     }
@@ -615,20 +777,26 @@ export default class Flow extends View {
     const S = (k) => k * z;
     const st = G.statusOf(n);
     const dragging = this.drag?.id === n.id;
+    // No tooltips on cards: hovering a space shows its folder in place of its status line, hovering a
+    // subagent its whole description; nothing pops up over the canvas.
+    const hovered = this.hover === n.id && !dragging && !this.press;
     const base = div().id(`node-${n.id}`).absolute().left(x).top(y).w(w).h(h)
       .on_mouse_down("left", (e, cx) => { cx.stop_propagation(); this.pressNode(n, e); })
-      .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); this.menuFor(n); });
+      .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); this.menuFor(n); })
+      .on_hover((over, cx) => {
+        const next = over ? n.id : this.hover === n.id ? null : this.hover;
+        if (next !== this.hover) { this.hover = next; cx.notify(); }
+      });
 
     if (n.kind === "add") {
       return base.flex().items_center().justify_center().rounded(S(9)).border_1().border_dashed().border_color(alpha(t.foreground, 0.3))
         .bg(t.canvas).cursor_pointer().hover((s) => s.border_color(t.accent).bg(t.hover))
-        .tooltip(`Start an agent in ${n.s.name}`)
         .child(svg(I("plus")).size(S(18)).text_color(t.muted));
     }
     if (n.kind === "more") {
       return base.flex().items_center().justify_center().rounded(S(8)).border_1().border_color(t.border).bg(t.background)
         .cursor_pointer().hover((s) => s.bg(t.hover)).text_size(S(12)).text_color(t.muted)
-        .tooltip("Show all subagents").child(`+${n.n} more`);
+        .child(`+${n.n} more`);
     }
 
     const sub = n.kind === "cc";
@@ -659,10 +827,17 @@ export default class Flow extends View {
         .child(div().flex_none().text_color(t.dim).child(`${branch ? "· " : ""}${mine} agent${mine === 1 ? "" : "s"}`))
         .when(n.worktree, (el) => el.child(div().flex_none().px(S(4)).rounded(S(4)).border_1().border_color(t.border).text_size(S(9.5)).child("worktree")))
         .when(Boolean(n.s.machine), (el) => el.child(div().flex_none().text_color(t.dim).child(`· ${n.s.machine}`)));
+    } else if (n.kind === "agent" && n.prompt) {
+      const trusting = Date.now() - (n.prompt.answered ?? 0) < 10000;
+      line = h_flex().gap(S(5)).items_center().min_w(0)
+        .child(div().flex_none().text_color(t.blocked).child(trusting ? "Trusting\u2026" : "Needs you"))
+        .when(!trusting, (el) => el.child(div().min_w(0).truncate().text_color(t.muted).child(`\u00b7 ${n.prompt.question}`)));
+    } else if (n.kind === "agent" && n.starting) {
+      line = h_flex().min_w(0).child(div().min_w(0).truncate().text_color(t.dim).child("Starting\u2026"));
     } else if (n.kind === "agent") {
       const msg = n.synthetic ? null : G.msgOf(n.term);
       line = h_flex().gap(S(5)).items_center().min_w(0)
-        .child(div().flex_none().text_color(st === "idle" ? t.dim : t[st] ?? t.dim).child(WORD[st] ?? st))
+        .child(div().flex_none().text_color(st === "idle" ? t.dim : t[st] ?? t.dim).child(n.unreported && st === "working" ? "Running" : WORD[st] ?? st))
         .when(Boolean(msg) && st !== "idle", (el) => el.child(div().min_w(0).truncate().text_color(t.muted).child(`· ${msg}`)));
     } else {
       const s = n.sub;
@@ -676,7 +851,24 @@ export default class Flow extends View {
     // The mark on the right: spinner, needs-you dot (pulsing), check, grey dot.
     const markSize = S(sub ? 12 : 14);
     let mark = null;
-    if (n.kind !== "space") {
+    // Asking to trust its folder: a row of buttons under the text (the card is taller, PROMPT_H):
+    // Trust answers it, Open shows its terminal in the panel and gives it the keyboard.
+    let buttons = null;
+    if (n.kind === "agent" && n.prompt && z >= 0.45 && Date.now() - (n.prompt.answered ?? 0) >= 10000) {
+      const pill = (id, label, primary, action) => div().id(`${id}-${n.a.address}`).h(S(22)).px(S(10)).flex().items_center().rounded(S(6))
+        .text_size(S(11.5)).font_semibold().cursor_pointer()
+        .when(primary, (el) => el.bg(t.blocked).text_color(t.background).hover((s) => s.opacity(0.85)))
+        .when(!primary, (el) => el.border_1().border_color(t.border).text_color(t.foreground).hover((s) => s.bg(t.hover)))
+        .on_mouse_down("left", stop)
+        .on_click((_e, cx) => { action(cx); cx.notify(); })
+        .child(label);
+      buttons = h_flex().gap(S(6)).items_center().pl(S(48))
+        .when(Boolean(n.prompt.keys), (el) => el.child(pill("flow-trust", "Trust", true, (cx) => this.trust(n.a.address, cx))))
+        .child(pill("flow-open", "Open", !n.prompt.keys, (cx) => this.clickNode(n, false, cx)));
+    }
+    if (n.kind === "agent" && n.starting && !n.prompt) {
+      mark = svg(I("spinner")).size(markSize).flex_none().text_color(t.muted).spin(1400);
+    } else if (n.kind !== "space") {
       if (st === "working") mark = svg(I("spinner")).size(markSize).flex_none().text_color(t.working).spin(900);
       else if (st === "done") mark = svg(I("check")).size(markSize).flex_none().text_color(t.done);
       else if (st === "blocked") {
@@ -690,27 +882,34 @@ export default class Flow extends View {
       if (top === "blocked" || top === "done") mark = div().size(S(8)).flex_none().rounded_full().bg(t[top]);
     }
 
-    const tip = n.kind === "space"
-      ? [n.s.name, n.s.branch, n.git?.top ?? n.s.folder].filter(Boolean).join("\n")
-      : n.kind === "agent"
-        ? [title, p?.name !== title ? p?.name : null, WORD[st], n.synthetic ? null : G.msgOf(n.term), "Click: show it · double-click: type into it · right-click: menu"].filter(Boolean).join("\n")
-        : [n.sub.description, n.sub.type, `${SA.activityText(n.sub) ?? ""}`, n.sub.result ? n.sub.result.split("\n")[0].slice(0, 140) : null].filter(Boolean).join("\n");
+    // What the hover line says: a space's folder; an agent's folder (or the one it asks to trust).
+    const about = n.kind === "space"
+      ? (n.git?.top ?? n.s.folder ?? "").replace(/\//g, n.s.machine ? "/" : "\\")
+      : n.kind === "cc" ? [n.sub.description, n.sub.type].filter(Boolean).join(" \u00b7 ") : null;
+    if (hovered && about) {
+      // a path keeps its end, the folder's own name ("…/Temp/fe2e/repo")
+      const fit = Math.max(12, Math.floor((w - S(84)) / S(6.4)));
+      const text = n.kind === "space" && about.length > fit ? `…${about.slice(about.length - fit + 1)}` : about;
+      line = h_flex().min_w(0).child(div().min_w(0).truncate().text_color(t.dim).child(text));
+    }
 
     const edge = on ? t.accent : st === "blocked" ? t.blocked : st === "working" ? alpha(t.working, 0.5) : st === "done" ? alpha(t.done, 0.55) : t.border;
     const faded = (sub && n.sub.state !== "running") || (n.kind === "agent" && st === "idle" && !on);
-    const card = base.flex().items_center().gap(S(10)).pl(S(sub ? 9 : 11)).pr(S(12)).rounded(S(11))
-      .bg(t.background).border_color(edge)
-      .when(on, (el) => el.border_2())
-      .when(!on, (el) => el.border_1())
-      .when(dragging, (el) => el.shadow_lg().cursor_grabbing())
-      .when(!dragging, (el) => el.shadow_sm().cursor_pointer().hover((s) => s.border_color(on ? t.accent : t.input)))
-      .when(faded, (el) => el.opacity(0.72))
-      .tooltip(tip)
+    const row = h_flex().w_full().items_center().gap(S(10))
       .child(tile)
       .child(v_flex().flex_1().min_w(0).gap(S(2))
         .child(div().truncate().text_size(S(sub ? 12 : 13)).font_semibold().text_color(t.foreground).child(title))
         .when(z >= 0.5, (el) => el.child(line.text_size(S(sub ? 10.5 : 11.5)))))
       .when(Boolean(mark), (el) => el.child(mark));
+    const card = base.flex().flex_col().justify_center().gap(S(8)).pl(S(sub ? 9 : 11)).pr(S(12)).rounded(S(11))
+      .bg(t.background).border_color(edge)
+      .when(on, (el) => el.border_2())
+      .when(!on, (el) => el.border_1())
+      .when(dragging, (el) => el.shadow_lg().cursor_grabbing())
+      .when(!dragging, (el) => el.shadow_sm().cursor_pointer().hover((s) => s.border_color(on ? t.accent : t.input)))
+      .when(faded && !hovered, (el) => el.opacity(0.72))
+      .child(row)
+      .when(Boolean(buttons), (el) => el.child(buttons));
 
     // Ports: in on the left (when it has a parent), out on the right (when it has children).
     const port = (left) => div().absolute().left(left).top(h / 2 - S(4)).size(S(8)).rounded_full().bg(t.background).border_1().border_color(alpha(t.foreground, 0.4));
@@ -785,7 +984,11 @@ export default class Flow extends View {
   renderBar() {
     const t = theme();
     const w = appWindow();
-    const list = agents();
+    // Agents that report, and those that don't (starting, asking to trust, OpenCode), as the canvas has them.
+    const reporting = agents();
+    const quiet = Object.entries(shared(UNREPORTED) ?? {}).filter(([a]) => !reporting.some((x) => x.address === a));
+    const asks = shared(PROMPTS) ?? {};
+    const list = [...reporting, ...quiet.map(([address, q]) => ({ address, status: asks[address] ? "blocked" : q.status }))];
     const count = (s) => list.filter((a) => a.status === s).length;
     const working = count("working"), needs = count("blocked");
     const current = shared("layout") ?? "flow";
@@ -822,28 +1025,42 @@ export default class Flow extends View {
 
   // ---- the terminal panel's header -------------------------------------------------------------------
 
-  renderTerminalHeader() {
+  renderTerminalHeader(cx) {
     const t = theme();
-    const addr = focused()?.agent ?? null;
+    // The panel shows a terminal of its own (a starting agent, layout.terminal) or the focused agent.
+    const addr = pinned() ?? focused()?.agent ?? null;
     const list = agents();
     const a = list.find((x) => x.address === addr) ?? null;
     const term = addr ? terminals().find((k) => k.address === addr) : null;
-    const st = a?.status ?? (term ? G.stateOf(term) : null);
-    const title = a ? G.agentTitle(a) : term ? term.name || term.title || addr : "No agent";
-    const p = a?.program ?? term?.program ?? null;
-    const msg = G.msgOf(term);
-    const space = a ? spaces().find((s) => s.id === a.space) : null;
+    const known = !a && term ? T.launchOf(term, shared("new-menu.agents")?.[""] ?? [], tabNames()) : null;
+    const ask = addr ? shared(PROMPTS)?.[addr] ?? null : null;
+    const quiet = addr ? shared(UNREPORTED)?.[addr]?.status : null;
+    const st = ask ? "blocked" : a?.status ?? (known ? quiet ?? "starting" : term ? G.stateOf(term) : null);
+    const title = a ? G.agentTitle(a) : known ? known.name : term ? term.name || term.title || addr : "No agent";
+    const p = a?.program ?? known ?? term?.program ?? null;
+    const msg = ask ? ask.question : G.msgOf(term);
+    const space = spaces().find((s) => s.id === (a?.space ?? term?.labels?.["atrous.space"])) ?? null;
+    const trusting = ask && this.trusted === addr && Date.now() - (this.trustedAt ?? 0) < 10000;
     const btn = (id, icon, tip, action) => div().id(id).size(24).flex_none().flex().items_center().justify_center().rounded(6)
       .text_color(t.dim).hover((s) => s.bg(t.hover).text_color(t.foreground)).tooltip(tip).on_click(action).child(svg(I(icon)).size(14));
     return h_flex().size_full().px(10).gap(8).items_center().bg(t.background).border_b(1).border_color(t.border).text_size(12.5)
       .child(programIcon(p, 15, t.foreground) ?? svg(I("terminal")).size(14).text_color(t.muted))
       .child(div().min_w(0).flex_shrink(1).truncate().font_semibold().text_color(t.foreground).child(title))
       .when(Boolean(st), (el) => el.child(h_flex().flex_none().gap(5).items_center().text_size(11.5).text_color(t[st] ?? t.dim)
-        .when(st === "working", (el) => el.child(svg(I("spinner")).size(11).spin(900)))
-        .when(st !== "working", (el) => el.child(div().size(6).rounded_full().bg(t[st] ?? t.dim)))
-        .child(WORD[st] ?? st)))
+        .when(st === "working" || st === "starting", (el) => el.child(svg(I("spinner")).size(11).spin(st === "starting" ? 1400 : 900)))
+        .when(st !== "working" && st !== "starting", (el) => el.child(div().size(6).rounded_full().bg(t[st] ?? t.dim)))
+        .child(trusting ? "Trusting\u2026" : known && st === "working" ? "Running" : WORD[st] ?? st)))
       .when(Boolean(msg) && st !== "idle", (el) => el.child(div().min_w(0).flex_1().truncate().text_size(11.5).text_color(t.muted).child(msg)))
       .when(!(msg && st !== "idle"), (el) => el.child(div().flex_1()))
+      .when(Boolean(ask?.keys) && !trusting, (el) => el.child(div().id("flow-header-trust").flex_none().h(22).px(9).flex().items_center().rounded(6)
+        .bg(t.blocked).text_color(t.background).text_size(11.5).font_semibold().cursor_pointer().hover((s) => s.opacity(0.85))
+        .on_click((_e, cx) => {
+          this.trusted = addr;
+          this.trustedAt = Date.now();
+          cx.spawn(async () => { await T.answer(addr, ask.keys).catch(() => false); });
+          cx.notify();
+        })
+        .child("Trust")))
       .when(Boolean(space), (el) => el.child(div().flex_none().max_w(140).truncate().text_size(11.5).text_color(t.dim).child(space.name)))
       .child(btn("flow-prev", "chevron-left", "Previous agent", () => run("agent.prev")))
       .child(btn("flow-next", "chevron-right", "Next agent", () => run("agent.next")))
@@ -853,15 +1070,12 @@ export default class Flow extends View {
   // ---- the "+" popup: start an agent in a space --------------------------------------------------------
 
   initAdd(cx) {
-    const where = props()?.machine ?? "";
-    this.agents = shared("new-menu.agents")?.[where] ?? [];
+    const machine = props()?.machine ?? null;
+    this.agents = cachedAgents(machine);
     this.handle = cx.focus_handle();
     this.handle.focus();
     cx.spawn(async (cx) => {
-      try {
-        this.agents = await knownAgents({ on: props()?.machine ?? null });
-        setShared("new-menu.agents", { ...(shared("new-menu.agents") ?? {}), [where]: this.agents });
-      } catch { this.failed = true; }
+      try { this.agents = await loadAgents(machine); } catch { this.failed = true; }
       cx.notify();
     });
   }
@@ -870,21 +1084,23 @@ export default class Flow extends View {
     const t = theme();
     const p = props() ?? {};
     const space = spaces().find((s) => s.id === p.space);
-    const installed = (this.agents ?? []).filter((a) => a.installed);
-    const start = (argv, name) => { closeOverlay(p.overlay); run("tab.new", { space: p.space, ...(name ? { name } : {}), ...(argv ? { argv } : {}) }); };
+    const { installed, missing } = agentOrder(this.agents ?? []);
+    const start = (agent) => { closeOverlay(p.overlay); startAgent(p.space, agent); };
     const row = (id, icon, label, hint, action) => h_flex().id(id).h(31).px(9).gap(10).rounded(7).items_center().flex_none()
-      .cursor_pointer().hover((s) => s.bg(t.selected)).on_click(action)
+      .when(Boolean(action), (el) => el.cursor_pointer().hover((s) => s.bg(t.selected)).on_click(action))
+      .when(!action, (el) => el.opacity(0.5))
       .child(icon).child(div().flex_1().truncate().child(label)).child(div().text_size(11).text_color(t.dim).child(hint));
     return v_flex().id("flow-add").track_focus(this.handle).w_full().min_h(0).p(5).bg(t.popover).text_size(12.8).text_color(t.foreground)
       .on_key_down((e) => {
         if (e.key === "escape") return closeOverlay(p.overlay);
         const a = /^[1-9]$/.test(e.key) ? installed[Number(e.key) - 1] : null;
-        if (a) start(a.run, a.name);
+        if (a) start(a);
       })
       .child(div().px(8).pt(4).pb(6).text_size(11).text_color(t.dim).truncate().child(`New agent in ${space?.name ?? "this space"}`))
-      .children(installed.map((a, i) => row(`flow-add-${a.key}`, programIcon(a, 15, t.foreground) ?? svg(I("bot")).size(15), a.name, i < 9 ? String(i + 1) : "", () => start(a.run, a.name))))
+      .children(installed.map((a, i) => row(`flow-add-${a.key}`, programIcon(a, 15, t.foreground) ?? svg(I("bot")).size(15), a.name, i < 9 ? String(i + 1) : "", () => start(a))))
       .when(!installed.length, (el) => el.child(div().px(9).py(6).text_size(12).text_color(t.dim).child(this.failed ? "Couldn't list the agents." : "Looking for agents…")))
+      .children(missing.slice(0, 2).map((a) => row(`flow-add-${a.key}`, programIcon(a, 15, t.foreground) ?? svg(I("bot")).size(15), a.name, "not installed", null)))
       .child(div().mx(7).my(4).h(1).bg(t.border))
-      .child(row("flow-add-shell", svg(I("terminal")).size(14).text_color(t.muted), "Terminal", "", () => start(null, null)));
+      .child(row("flow-add-shell", svg(I("terminal")).size(14).text_color(t.muted), "Terminal", "", () => start(null)));
   }
 }

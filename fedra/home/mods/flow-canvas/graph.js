@@ -47,9 +47,11 @@ export const whereKey = (s, ps) => JSON.stringify([s.machine ?? null, placeOf(s,
  *   git: whereKey -> { common, top, linked } | null (null or missing: not a repo / not known yet)
  *   ccOf(agent) -> Claude Code subagents to show (subagents.js shown())
  *   extra: test-only synthetic agents [{ space, ...AgentInfo }]
+ *   starting: agents with no OSC 7501 report [{ term, known, status }] (trust.js): starting, or
+ *     never reporting (OpenCode), their status read from their screen
  * Returns { roots, nodes: Map id -> node, order: agent addresses in tree order }.
  */
-export function build({ sp, ag, terms, ps, git, ccOf, extra = [], open = new Set() }) {
+export function build({ sp, ag, terms, ps, git, ccOf, extra = [], open = new Set(), starting = [] }) {
   const nodes = new Map();
   const add = (n) => { nodes.set(n.id, n); n.children = []; return n; };
   const all = [...ag, ...extra];
@@ -78,6 +80,16 @@ export function build({ sp, ag, terms, ps, git, ccOf, extra = [], open = new Set
     if (starter(a.address)) continue;
     if (!nodes.has(`s:${a.space}`)) continue;
     agentNode(a, `s:${a.space}`);
+  }
+  // No report (at its trust prompt, still loading, or a program that never reports): shown at once,
+  // as its program.
+  for (const { term, known, status } of starting) {
+    const space = term.labels?.["atrous.space"];
+    if (!nodes.has(`s:${space}`) || nodes.has(`a:${term.address}`) || listed.has(term.address)) continue;
+    add({
+      id: `a:${term.address}`, kind: "agent", unreported: true, starting: status === "starting", term, parentId: `s:${space}`,
+      a: { address: term.address, status, app: known.key, program: known, title: known.name, tab_name: "", space, tab: term.labels?.["atrous.tab"] ?? null },
+    });
   }
   // atc sub-agents: live terminals whose parent is an agent on the canvas (listed in agents() or not).
   const subTree = (addr, depth) => {
@@ -187,6 +199,7 @@ export function bounds(nodes) {
 
 /** A node's status for its mark and its incoming edge: working | blocked | done | idle | null. */
 export function statusOf(n) {
+  if (n.prompt) return "blocked"; // asking something (a trust prompt): needs you
   if (n.kind === "agent") return n.a.status ?? "idle";
   if (n.kind === "cc") return n.sub.state === "running" ? "working" : n.sub.state === "done" ? "done" : "idle";
   if (n.kind === "space") return null;

@@ -23,10 +23,21 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { spaces, machines, panes, agents, terminals, setAgentOrder, run, openOverlay, exec, core, theme, shared, setShared, watchFolder, window, layout } from "atrous";
+import { spaces, machines, panes, agents, terminals, setAgentOrder, run, openOverlay, exec, core, theme, shared, setShared, watchFolder, window, layout, knownAgents, nextCommand } from "atrous";
 import { smartPress, smartMove, smartRelease } from "./smart-split.js"; // smart split: drag an agent onto the shown tab
 import { lastTurnSpeed, peekSpeed, speedNeedsRefresh, formatSpeed, claudeSessionDir } from "./speed.js"; // tokens/s of each finished turn
 import * as SA from "./subagents.js"; // Claude Code subagents: mini rows under their agent
+import * as T from "./trust.js"; // agents with no status report yet: starting, asking to trust their folder, or never reporting
+
+const PROMPTS = "agents.prompts"; // shared with Flow: address -> { app, question, keys }
+const UNREPORTED = "agents.unreported"; // shared with Flow: address -> { key, name, status }
+
+// Tab id -> its name, for named tabs (an agent's tab is named after it: older builds' only clue).
+function tabNames() {
+  const m = new Map();
+  for (const s of spaces()) for (const c of s.tabs ?? []) if (c.named) m.set(c.id, c.name);
+  return (id) => m.get(id) ?? null;
+}
 
 const clean = (s) => (s ?? "").replace(/^[^\p{L}\p{N}]+/u, "").trim();
 const isPath = (s) => /^[~/]|^[A-Za-z]:\\/.test(s) || s.includes("@");
@@ -146,6 +157,93 @@ export default class Spaces extends View {
       this.subScan(cx);
     });
     this.subScan(cx);
+    // Agents that haven't reported a status (trust.js): their screen, one read every 1.5 s at most,
+    // only while the window is in front and one exists.
+    this.prompts = new Map();
+    this.known = shared("new-menu.agents")?.[""] ?? [];
+    this.loadKnown(cx);
+    cx.timer.every(1500, (cx) => {
+      if ((this.forceActive ?? window().active !== false) === false) return;
+      T.poll(this, cx, () => this.promptCandidates());
+      if (Date.now() - (this.knownAt ?? 0) > 300000) this.loadKnown(cx);
+    });
+    // Test commands (`atrous do my-spaces.<cmd>`): trust:<address> (a row's Trust), open:<address>
+    // (a row's Open), active:1|0|auto (read screens though the window is in back), autotrust:1|0.
+    cx.spawn(async (cx) => {
+      for (;;) {
+        const c = String(await nextCommand());
+        const [name, arg] = [c.split(":")[0], c.split(":").slice(1).join(":")];
+        if (name === "trust") this.trust(arg, cx);
+        else if (name === "open") { const a = (this.unreported ?? []).find((x) => x.address === arg); if (a?.pane) run("pane.focus", { pane: a.pane }); }
+        else if (name === "active") this.forceActive = arg === "1" ? true : arg === "0" ? false : undefined;
+        else if (name === "autotrust") setShared("agents.autoTrust", arg === "1"); // what Settings > Privacy's switch sets
+        cx.notify();
+      }
+    });
+  }
+
+  loadKnown(cx) {
+    this.knownAt = Date.now();
+    cx.spawn(async (cx) => {
+      // (only read here: my-new-menu's agent-order.js keeps shared "new-menu.agents", with its
+      // installed check for the account launchers; which agent a terminal is doesn't need that)
+      try { this.known = await knownAgents(); cx.notify(); } catch {}
+    });
+  }
+
+  // Unreported agents (a trust prompt in their first minutes, else whether output moves), and agents
+  // that reported idle without ever having a turn (a prompt, in their first minutes).
+  promptCandidates() {
+    const now = Date.now();
+    const agentsBy = new Map(agents().map((a) => [a.address, a]));
+    const tab = tabNames();
+    const out = [];
+    for (const k of terminals()) {
+      if (k.state !== "live" || !k.labels?.["atrous.space"]) continue;
+      const age = now - (k.created_ms ?? now);
+      if (!T.reported(k) && T.launchOf(k, this.known, tab)) out.push({ address: k.address, ask: age < T.ASK_MS });
+      else {
+        const a = agentsBy.get(k.address);
+        if (a && (a.status === "idle" || a.status === "blocked") && !k.turn && age < T.ASK_MS) out.push({ address: k.address, ask: true });
+      }
+    }
+    return out;
+  }
+
+  // Agents started in spaces that haven't reported (OSC 7501) yet, as agent-like rows: starting,
+  // asking to trust their folder, or (OpenCode) never reporting, their status from their screen.
+  unreportedAgents() {
+    const now = Date.now();
+    const tab = tabNames();
+    const ps = panes();
+    const out = [];
+    for (const k of this.terms.values()) {
+      if (T.reported(k)) continue;
+      const known = T.launchOf(k, this.known, tab);
+      if (!known) continue;
+      const e = this.prompts.get(k.address);
+      const young = now - (k.created_ms ?? now) < T.STARTING_MS && !(e?.changedAt);
+      const prompt = e?.prompt ?? null;
+      out.push({
+        address: k.address, space: k.labels["atrous.space"], tab: k.labels["atrous.tab"] ?? null, pane: ps.find((x) => x.terminal === k.address)?.pane ?? null,
+        status: young ? "starting" : T.activity(this, k.address, now), program: known, title: known.name, tab_name: "", focused: false, pinned: false,
+        unreported: true, prompt, answered: e?.answered ?? 0,
+      });
+    }
+    return out;
+  }
+
+  // Presses the accepting keys of a trust prompt.
+  trust(address, cx) {
+    const e = this.prompts.get(address);
+    const p = e?.prompt ?? shared(PROMPTS)?.[address];
+    if (!p?.keys) return;
+    if (e) e.answered = Date.now();
+    cx.spawn(async (cx) => {
+      await T.answer(address, p.keys).catch(() => false);
+      if (e) e.at = 0; // read it again soon
+      cx.notify();
+    });
   }
 
   // After a redraw (live data changed), once: what that change makes due.
@@ -524,7 +622,7 @@ export default class Spaces extends View {
   agentMenu(address, title, program, pane, pinned) {
     const r = peekSpeed(address);
     const cwd = (pane && panes().find((p) => p.pane === pane)?.cwd) || this.terms.get(address)?.cwd || null;
-    openOverlay({ mod: "agent-menu", kind: "popup", width: 236, height: 300, // smart split: was 230, room for "Move to this tab"
+    openOverlay({ mod: "agent-menu", kind: "popup", width: 236, height: 380, // smart split: was 230, room for "Move to this tab"
       props: { address, title, program, pane, pinned, cwd, sessionId: r?.sessionId ?? null, source: r?.source ?? null } });
   }
 
@@ -745,13 +843,14 @@ export default class Spaces extends View {
   // A pulse (`loop`) rebuilds this whole list ~30 times a second (a spinner doesn't: the
   // app turns it on its own layer), so it pulses only while the window is in front.
   statusMark(t, status, id) {
+    if (status === "starting") return svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.muted).spin(1400);
     if (status === "working") return svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900);
     if (status === "blocked") return div().id(`mark-${id}`).size(8).flex_none().rounded(4).bg(t.blocked).when(this.windowActive !== false, (el) => el.loop("opacity", { from: 0.35, to: 1, period: 1100 }));
     if (status === "done") return div().size(8).flex_none().rounded(4).bg(t.done);
     return div().size(6).mx(1).flex_none().rounded(3).bg(t.idle ?? t.dim);
   }
 
-  treeRow(t, { id, lines, base, first, on, pic, title, status, tip, muted, action, drag, speed, menu }) { // smart split: drag
+  treeRow(t, { id, lines, base, first, on, pic, title, status, tip, muted, action, drag, speed, menu, end }) { // smart split: drag; end: in place of the status mark
     const x = base + (lines.length - 1) * LEVEL;
     const body = h_flex().id(`${id}-body`).ml(x + 11).flex_1().min_w(0).h(AGENT_ROW - 2).pl(6).pr(8).gap(7).items_center().rounded(7)
         .when(on, (el) => el.bg(t.selected))
@@ -764,7 +863,7 @@ export default class Spaces extends View {
         .when(Boolean(pic), (el) => el.child(pic))
         .child(div().flex_1().min_w(0).truncate().text_color(muted ? t.muted : t.foreground).child(title))
         .when(Boolean(speed), (el) => el.child(div().flex_none().text_size(10.5).text_color(t.dim).child(speed)))
-        .child(this.statusMark(t, status, id));
+        .child(end ?? this.statusMark(t, status, id));
     return h_flex().relative().id(id).h(AGENT_ROW).flex_none().items_center().text_size(12.5)
       .children(this.connectors(lines, base, first, t))
       .child(body);
@@ -789,10 +888,11 @@ export default class Spaces extends View {
   // lead: the tree lines of the levels above; more: siblings follow the last agent (worktrees).
   agentRows({ w }, t, lead = [], more = false) {
     if (this.agentsFolded.has(w.id)) return [];
-    const list = this.agentList.filter((a) => a.space === w.id);
+    const list = [...this.agentList.filter((a) => a.space === w.id), ...this.unreported.filter((a) => a.space === w.id)];
     const base = this.iconX(false);
     return list.flatMap((a, i) => {
       const last = i === list.length - 1 && !more;
+      if (a.unreported) return [this.unreportedRow(t, a, [...lead, last ? "└" : "├"], base, i === 0)];
       const title = agentTitle(a);
       const msg = msgOf(this.terms.get(a.address));
       const row = this.treeRow(t, {
@@ -823,6 +923,39 @@ export default class Spaces extends View {
         });
       });
       return [row, ...ccRows, ...subs];
+    });
+  }
+
+  // An agent that hasn't reported: "Claude Code" with a dim spinner while it starts; asking to
+  // trust its folder: red, with Trust (answers it) and Open (its tab, the keyboard); OpenCode and
+  // other programs that never report: their screen's activity (working while output moves).
+  unreportedRow(t, a, lines, base, first) {
+    const open = () => {
+      if (a.pane) run("pane.focus", { pane: a.pane });
+      else run("pane.focus", { terminal: a.address });
+    };
+    const pill = (id, label, primary, action) => div().id(`${id}-${a.address}`).h(18).px(6).flex().flex_none().items_center().rounded(5)
+      .text_size(10.5).font_semibold().cursor_pointer()
+      .when(primary, (el) => el.bg(t.blocked).text_color(t.background).hover((s) => s.opacity(0.85)))
+      .when(!primary, (el) => el.border_1().border_color(t.border).text_color(t.foreground).hover((s) => s.bg(t.hover)))
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_click((_e, cx) => { cx.stop_propagation(); action(cx); cx.notify(); })
+      .child(label);
+    const trusting = a.prompt && Date.now() - (a.answered ?? 0) < 10000;
+    const end = a.prompt && !trusting
+      ? h_flex().flex_none().gap(4).items_center()
+        .when(Boolean(a.prompt.keys), (el) => el.child(pill("sp-trust", "Trust", true, (cx) => this.trust(a.address, cx))))
+        .child(pill("sp-open", "Open", !a.prompt.keys, () => open()))
+      : null;
+    const word = a.prompt ? (trusting ? "Trusting\u2026" : a.prompt.question) : a.status === "starting" ? "Starting\u2026" : a.status === "working" ? "Running" : "Idle";
+    return this.treeRow(t, {
+      id: `ag-${a.address}`, lines, base, first, on: false,
+      pic: programIcon(a.program, 14, t.foreground), title: a.prompt && !trusting ? "Trust folder?" : a.title,
+      status: a.prompt ? "blocked" : a.status, end,
+      tip: [a.title, word, a.address].filter(Boolean).join(" \u00b7 "),
+      muted: a.status === "idle" && !a.prompt,
+      action: () => open(),
+      menu: () => this.agentMenu(a.address, a.title, a.program?.name, a.pane, false),
     });
   }
 
@@ -971,6 +1104,20 @@ export default class Spaces extends View {
     if (changed) setShared("space.colors", kept);
     this.agentList = agents();
     this.terms = new Map(terminals().map((k) => [k.address, k]));
+    this.unreported = this.unreportedAgents();
+    const asks = Object.fromEntries(this.unreported.filter((a) => a.prompt).map((a) => [a.address, { app: a.prompt.app, question: a.prompt.question, keys: a.prompt.keys }]));
+    if (JSON.stringify(asks) !== JSON.stringify(shared(PROMPTS) ?? {})) setShared(PROMPTS, asks);
+    const quiet = Object.fromEntries(this.unreported.map((a) => [a.address, { key: a.program?.key, name: a.title, status: a.status }]));
+    if (JSON.stringify(quiet) !== JSON.stringify(shared(UNREPORTED) ?? {})) setShared(UNREPORTED, quiet);
+    if (shared("agents.autoTrust") === true) {
+      for (const a of this.unreported) {
+        const e = this.prompts.get(a.address);
+        if (e?.prompt?.keys && (e.prompt.app === "claude" || e.prompt.app === "codex") && !e.answered) {
+          e.answered = Date.now();
+          cx.spawn(async (cx) => { await cx.sleep(0); await T.answer(a.address, e.prompt.keys).catch(() => false); e.at = 0; cx.notify(); });
+        }
+      }
+    }
     // agent.next / agent.prev follow the order the tree shows them in.
     const order = new Map(sp.map((s, n) => [s.id, n]));
     setAgentOrder([...this.agentList].sort((a, b) => (order.get(a.space) ?? 0) - (order.get(b.space) ?? 0)).map((a) => a.address));
