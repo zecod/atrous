@@ -21,20 +21,18 @@ modifiers and smooth pointer movement. Coordinates match the sandbox's
 1280×820 app window at its default 120% zoom. Update these when UI changes,
 and inspect the generated clip before uploading.
 
-Output: `/var/tmp/herdr-notes-media/<version>/<scene>.webp`.
-Override the base with `HERDR_NOTES_MEDIA_DIR`. Launch the app with that
+Output: `/var/tmp/atrous-notes-media/<version>/<scene>.webp`.
+Override the base with `ATROUS_NOTES_MEDIA_DIR`. Launch the app with that
 same variable to preview CHANGELOG images pointing at the final URLs:
-`https://media.herdr.dev/<version>/<scene>.webp`. No CHANGELOG rewrite needed.
+`https://github.com/zecod/atrous/releases/download/v<version>/<scene>.webp`.
+No CHANGELOG rewrite needed.
 
-`just notes-upload <version>` uploads the version's WebP files to
-`herdr-media`, using Bun's S3Client and credentials in
-`~/.config/herdr-media/env`:
-`R2_MEDIA_ACCESS_KEY_ID=...` and `R2_MEDIA_SECRET_ACCESS_KEY=...`.
-Never commit that file. Uploads set image/webp and immutable one-year caching.
-Existing keys are refused, including concurrent writes. Upload only final
-clips: immutable URLs must never be reused for changed content.
+`just notes-upload <version>` attaches the version's WebP files to the GitHub
+release `v<version>` of zecod/atrous with `gh release upload` (create it as a
+draft first: `gh release create v<version> --draft`). An asset name already on
+the release is refused. Upload only final clips.
 
 `just notes-check <version>` checks every image in that CHANGELOG entry
-for HTTP 200 and an image content type. The release publish job runs it
-before any release files or manifest are uploaded. An entry without media
+for HTTP 200 and an image content type. Run it before tagging a release,
+before any release files are published. An entry without media
 is valid; a missing entry isn't.

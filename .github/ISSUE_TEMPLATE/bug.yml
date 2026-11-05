@@ -1,5 +1,5 @@
 name: Bug
-description: Something broke in Herdr or a shipped layout or mod.
+description: Something broke in Atrous or a shipped layout or mod.
 labels: [bug]
 body:
   - type: textarea
@@ -18,8 +18,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: Herdr version
-      description: Find it in Settings or run herdr-app --version.
+      label: Atrous version
+      description: Find it in Settings or run atrous --version.
     validations:
       required: true
   - type: input

@@ -120,7 +120,7 @@ jobs:
         if: runner.os == 'macOS'
         timeout-minutes: 5
         env:
-          HERDR_SHOT_NATIVE_TEST: "1"
+          ATROUS_SHOT_NATIVE_TEST: "1"
         run: cargo test --locked --config 'profile.dev.package."*".opt-level=0' --test shot_pixels
       - name: Check release packaging
         if: matrix.platform == 'linux-x86_64'

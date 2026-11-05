@@ -1,8 +1,8 @@
 # A release of the app: push a tag `v<version>` matching Cargo.toml. Each
 # platform builds and packs the app (scripts/package; no core inside, people
-# get the core's own release); then everything goes to the
-# releases bucket, versioned files first and app/latest.json last, so nobody
-# sees a version whose files aren't there yet.
+# get the core's own release); then everything goes to the GitHub release
+# v<version> of this repo, published only once every file is uploaded, so
+# nobody sees a version whose files aren't there yet.
 #
 # Caches: a tag's own cache is visible only to that tag, so tags restore
 # master's. Master keeps them warm by building (without publishing) when
@@ -130,11 +130,11 @@ jobs:
         run: scripts/package
       - name: Verify release notices
         run: |
-          archive="dist/herdr-app-${{ matrix.target }}.tar.gz"
+          archive="dist/atrous-${{ matrix.target }}.tar.gz"
           if [[ '${{ runner.os }}' == macOS ]]; then
-            prefix=Herdr.app/Contents/Resources
+            prefix=Atrous.app/Contents/Resources
           else
-            prefix=herdr-app
+            prefix=atrous
           fi
           tar -xOf "$archive" "$prefix/THIRD-PARTY-NOTICES" | cmp - THIRD-PARTY-NOTICES
           tar -xOf "$archive" "$prefix/LICENSE" | cmp - LICENSE
@@ -149,8 +149,8 @@ jobs:
           key: release-v2-${{ matrix.target }}-${{ env.RUST_TOOLCHAIN }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('Cargo.lock') }}-${{ github.sha }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: herdr-app-${{ matrix.target }}
-          path: dist/herdr-app-${{ matrix.target }}.tar.gz
+          name: atrous-${{ matrix.target }}
+          path: dist/atrous-${{ matrix.target }}.tar.gz
           if-no-files-found: error
           retention-days: 7
 
@@ -179,16 +179,16 @@ jobs:
             sleep 30
           done
 
-  # Signs herdr-app.exe with Azure Artifact Signing and repacks it, on Can's
-  # tag pushes and manual runs (to test signing without publishing). Azure
-  # trusts only jobs in the signing environment (v* tags and master). The
-  # Azure IDs are signing environment variables; the certificate profile is a
-  # repository variable (job-level `if` can't see environment ones), and
+  # Signs atrous.exe with Azure Artifact Signing and repacks it, on the repo
+  # owner's tag pushes and manual runs (to test signing without publishing).
+  # Azure trusts only jobs in the signing environment. The Azure IDs and the
+  # signing account are signing environment variables; the certificate profile
+  # is a repository variable (job-level `if` can't see environment ones), and
   # while it's unset this is skipped and releases go out unsigned.
   sign-windows:
     needs: build
     if: >-
-      github.triggering_actor == 'ogulcancelik' && vars.AZURE_SIGNING_PROFILE != ''
+      github.triggering_actor == github.repository_owner && vars.AZURE_SIGNING_PROFILE != ''
       && ((github.event_name == 'push' && github.ref_type == 'tag') || github.event_name == 'workflow_dispatch')
     environment: signing
     runs-on: windows-2022
@@ -202,9 +202,9 @@ jobs:
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: herdr-app-windows-x86_64
+          name: atrous-windows-x86_64
           path: dist
-      - run: tar -xzf dist/herdr-app-windows-x86_64.tar.gz -C dist
+      - run: tar -xzf dist/atrous-windows-x86_64.tar.gz -C dist
       - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
@@ -213,86 +213,45 @@ jobs:
       - uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
         with:
           endpoint: https://eus.codesigning.azure.net/
-          signing-account-name: herdrsigning
+          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
           certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
-          files: ${{ github.workspace }}\dist\herdr-app\herdr-app.exe
-          description: Herdr
-          description-url: https://herdr.dev
+          files: ${{ github.workspace }}\dist\atrous\atrous.exe
+          description: Atrous
+          description-url: https://github.com/zecod/atrous
       - name: Check the signature
         shell: pwsh
         run: |
-          $sig = Get-AuthenticodeSignature dist\herdr-app\herdr-app.exe
+          $sig = Get-AuthenticodeSignature dist\atrous\atrous.exe
           $sig | Format-List Status, StatusMessage, SignerCertificate
           if ($sig.Status -ne 'Valid') { exit 1 }
-      - run: tar -czf dist/herdr-app-windows-x86_64.tar.gz -C dist herdr-app
+      - run: tar -czf dist/atrous-windows-x86_64.tar.gz -C dist atrous
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: herdr-app-windows-x86_64
-          path: dist/herdr-app-windows-x86_64.tar.gz
+          name: atrous-windows-x86_64
+          path: dist/atrous-windows-x86_64.tar.gz
           if-no-files-found: error
           overwrite: true
           retention-days: 7
 
-  # A website download, never a dependency of update publishing below.
-  mac-dmg:
-    needs: [build, ci-passed]
-    if: github.event_name == 'push' && github.ref_type == 'tag' && github.triggering_actor == 'ogulcancelik'
-    environment: release
-    runs-on: macos-15
-    timeout-minutes: 40
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: herdr-app-macos-aarch64
-          path: dist
-      - name: Install DMG tools
-        run: brew install create-dmg jq awscli
-      - name: Build, sign, notarize and verify DMG
-        env:
-          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-        run: |
-          tar -xzf dist/herdr-app-macos-aarch64.tar.gz -C dist
-          scripts/mac-dmg dist/Herdr.app dist/Herdr.dmg
-      - name: Upload website download
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: auto
-          ENDPOINT: https://${{ vars.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
-          BUCKET: ${{ vars.R2_BUCKET }}
-        run: |
-          version="${GITHUB_REF_NAME#v}"
-          aws s3 cp --endpoint-url "$ENDPOINT" dist/Herdr.dmg "s3://$BUCKET/app/$version/Herdr.dmg" --cache-control "public, max-age=31536000, immutable" --content-type application/x-apple-diskimage
-          aws s3 cp --endpoint-url "$ENDPOINT" dist/Herdr.dmg "s3://$BUCKET/app/Herdr.dmg" --cache-control "no-cache" --content-type application/x-apple-diskimage
-
+  # The GitHub release v<version>: created as a draft, every file uploaded,
+  # then published, so `releases/latest/download/latest.json` (what installed
+  # apps and the installers read) never points at a version whose files
+  # aren't there yet.
   publish:
     needs: [build, sign-windows, ci-passed]
-    # Only a tag push by Can publishes: anyone with write access can re-run an
-    # old tag's run, which would point latest.json back at that version.
-    # sign-windows may be skipped, not failed.
+    # Only a tag push by the repo owner publishes: anyone with write access can
+    # re-run an old tag's run. sign-windows may be skipped, not failed.
     if: >-
       !cancelled() && needs.build.result == 'success' && needs.sign-windows.result != 'failure'
       && needs.ci-passed.result == 'success'
-      && github.event_name == 'push' && github.ref_type == 'tag' && github.triggering_actor == 'ogulcancelik'
-    # The R2 keys live here, usable only from v* tags.
+      && github.event_name == 'push' && github.ref_type == 'tag' && github.triggering_actor == github.repository_owner
     environment: release
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: write
     env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-      AWS_DEFAULT_REGION: auto
-      ENDPOINT: https://${{ vars.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
-      BUCKET: ${{ vars.R2_BUCKET }}
-      RELEASES_URL: ${{ vars.RELEASES_URL }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -301,37 +260,70 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-      - name: Install Bun for release media check
-        run: curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.4"
-      - name: Check release media before publishing
-        run: ~/.bun/bin/bun scripts/notes-media.ts check "${GITHUB_REF_NAME#v}"
-      - name: Manifest
+      - name: Manifest and notes
         run: |
           version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
           core=$(tr -d '[:space:]' < distribution/core-version)
           python3 - "$version" "$core" <<'PY'
           import hashlib, json, pathlib, sys, os
           version, core = sys.argv[1], sys.argv[2]
-          base = os.environ["RELEASES_URL"]
+          base = f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/v{version}"
           targets = {}
-          for f in sorted(pathlib.Path("dist").glob("herdr-app-*.tar.gz")):
-              t = f.name.removeprefix("herdr-app-").removesuffix(".tar.gz")
-              targets[t] = {"url": f"{base}/app/{version}/{f.name}", "sha256": hashlib.sha256(f.read_bytes()).hexdigest()}
+          for f in sorted(pathlib.Path("dist").glob("atrous-*.tar.gz")):
+              t = f.name.removeprefix("atrous-").removesuffix(".tar.gz")
+              targets[t] = {"url": f"{base}/{f.name}", "sha256": hashlib.sha256(f.read_bytes()).hexdigest()}
           # core_min: the oldest core this app works with.
-          doc = {"version": version, "core_min": core, "notes": f"Herdr {version}", "targets": targets}
-          pathlib.Path("dist/manifest.json").write_text(json.dumps(doc, indent=2) + "\n")
+          doc = {"version": version, "core_min": core, "notes": f"Atrous {version}", "targets": targets}
+          pathlib.Path("dist/latest.json").write_text(json.dumps(doc, indent=2) + "\n")
           print(json.dumps(doc, indent=2))
+          # This version's section of the changelog, as the release's notes.
+          text = pathlib.Path("CHANGELOG.md").read_text()
+          section = text.split(f"## [{version}]", 1)[1].split("\n## [", 1)[0]
+          pathlib.Path("dist/notes.md").write_text(section.split("\n", 1)[1].strip() + "\n")
           PY
-      - name: Upload
+          cp CHANGELOG.md dist/changelog.md
+          cp distribution/install.sh distribution/install.ps1 dist/
+      - name: Release
         run: |
           version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
-          s3() { aws s3 cp --endpoint-url "$ENDPOINT" "$@"; }
-          for f in dist/herdr-app-*.tar.gz dist/manifest.json; do
-            s3 "$f" "s3://$BUCKET/app/$version/$(basename "$f")" --cache-control "public, max-age=31536000, immutable"
-          done
-          s3 CHANGELOG.md "s3://$BUCKET/app/$version/changelog.md" --cache-control "public, max-age=31536000, immutable" --content-type text/markdown
-          s3 dist/manifest.json "s3://$BUCKET/app/latest.json" --cache-control "no-cache" --content-type application/json
-          # 0.1.0/0.1.1 set to the preview channel still ask here.
-          s3 dist/manifest.json "s3://$BUCKET/app/preview/latest.json" --cache-control "no-cache" --content-type application/json
-          s3 distribution/install.sh "s3://$BUCKET/app/install.sh" --cache-control "no-cache" --content-type text/x-shellscript
-          s3 distribution/install.ps1 "s3://$BUCKET/app/install.ps1" --cache-control "no-cache" --content-type text/plain
+          gh release create "v$version" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
+            --title "Atrous $version" --notes-file dist/notes.md
+          gh release upload "v$version" --repo "$GITHUB_REPOSITORY" \
+            dist/atrous-*.tar.gz dist/latest.json dist/changelog.md dist/install.sh dist/install.ps1
+          gh release edit "v$version" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+
+  # The drag-and-drop download, added to the published release; never holds
+  # up update publishing above.
+  mac-dmg:
+    needs: [build, ci-passed, publish]
+    if: github.event_name == 'push' && github.ref_type == 'tag' && github.triggering_actor == github.repository_owner
+    environment: release
+    runs-on: macos-15
+    timeout-minutes: 40
+    continue-on-error: true
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: atrous-macos-aarch64
+          path: dist
+      - name: Install DMG tools
+        run: brew install create-dmg jq
+      - name: Build, sign, notarize and verify DMG
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          tar -xzf dist/atrous-macos-aarch64.tar.gz -C dist
+          scripts/mac-dmg dist/Atrous.app dist/Atrous.dmg
+      - name: Add to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" dist/Atrous.dmg --clobber

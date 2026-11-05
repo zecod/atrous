@@ -1,5 +1,5 @@
 # Fake pointer input for the sandbox's private X display (XTest). Coordinates
-# are in the Herdr window, px. Run through `scripts/sandbox`, not directly.
+# are in the Atrous window, px. Run through `scripts/sandbox`, not directly.
 #   move x0 y0 x1 y1        glide the pointer, no buttons
 #   click x y [button]      button: 1 left (default), 3 right
 #   drag x0 y0 x1 y1        press, glide, release
@@ -20,7 +20,7 @@ root = d.screen().root
 
 
 def find(w):
-    if w.get_wm_name() == "Herdr":
+    if w.get_wm_name() == "Atrous":
         return w
     for c in w.query_tree().children:
         r = find(c)
@@ -31,13 +31,13 @@ def find(w):
 
 win = find(root)
 if win is None:
-    sys.exit("no Herdr window on this display")
+    sys.exit("no Atrous window on this display")
 pos = win.translate_coords(root, 0, 0)
 ox, oy = -pos.x, -pos.y
 
 
 cursor = "arrow"
-pointer_file = os.environ.get("HERDR_NOTES_POINTER_FILE")
+pointer_file = os.environ.get("ATROUS_NOTES_POINTER_FILE")
 pointer = (0, 0)
 
 

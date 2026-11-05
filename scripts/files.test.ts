@@ -20,7 +20,7 @@ test("Files retries a remote Windows directory with PowerShell on that machine",
   const calls: { command: string; args: string[]; on: string }[] = [];
   const list = loadDirectory(async (command: string, args: string[], options: { on: string }) => {
     calls.push({ command, args, on: options.on });
-    if (command === "sh") throw new Error("herdr.exec: cannot start sh: program not found");
+    if (command === "sh") throw new Error("atrous.exec: cannot start sh: program not found");
     return { code: 0, stdout: '{"name":"中文.txt","dir":false}', stderr: "" };
   }, "linux");
   const path = "C:/O’Brien's $folder";
@@ -55,7 +55,7 @@ test("Files keeps remote POSIX directory listings on sh", async () => {
 });
 
 test("Files lists literal folder names, not shell expressions", async () => {
-  const root = await mkdtemp(join(process.platform === "linux" ? "/var/tmp" : tmpdir(), "herdr-files-"));
+  const root = await mkdtemp(join(process.platform === "linux" ? "/var/tmp" : tmpdir(), "atrous-files-"));
   try {
     for (const name of ["Test Folder (ACME)", "O'Brien $folder; (ACME)", "O’Brien ‘quoted’ ‚low‛"]) {
       const folder = join(root, name);
@@ -72,7 +72,7 @@ test("Files lists literal folder names, not shell expressions", async () => {
 });
 
 test("Files preserves Unicode names when listing and expanding folders", async () => {
-  const root = await mkdtemp(join(tmpdir(), "herdr-files-unicode-"));
+  const root = await mkdtemp(join(tmpdir(), "atrous-files-unicode-"));
   try {
     const folder = "中文目录 O'Brien (测试)", file = "项目说明.txt", child = "子文件.txt";
     await mkdir(join(root, folder));
@@ -89,7 +89,7 @@ test("Files preserves Unicode names when listing and expanding folders", async (
 });
 
 test("Files follows directory links one level at a time", async () => {
-  const root = await mkdtemp(join(tmpdir(), "herdr-files-links-"));
+  const root = await mkdtemp(join(tmpdir(), "atrous-files-links-"));
   try {
     const target = join(root, "versions");
     await mkdir(target);

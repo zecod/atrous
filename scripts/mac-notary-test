@@ -25,12 +25,12 @@ umask 077
 printf '%s' "$APPLE_API_KEY" > "$work/key.p8"
 auth=(--key "$work/key.p8" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER")
 tar -xzf "$archive" -C "$work"
-codesign --verify --deep --strict "$work/Herdr.app"
+codesign --verify --deep --strict "$work/Atrous.app"
 # Authority lines only appear at verbosity 2.
-signature=$(codesign -dvv "$work/Herdr.app" 2>&1)
+signature=$(codesign -dvv "$work/Atrous.app" 2>&1)
 [[ $signature == *"Authority=Developer ID Application:"* ]] || { echo 'notary test requires a Developer ID signature' >&2; exit 1; }
-ditto -c -k --keepParent "$work/Herdr.app" "$work/Herdr.zip"
-xcrun notarytool submit "$work/Herdr.zip" "${auth[@]}" --output-format json | tee "$work/submission.json"
+ditto -c -k --keepParent "$work/Atrous.app" "$work/Atrous.zip"
+xcrun notarytool submit "$work/Atrous.zip" "${auth[@]}" --output-format json | tee "$work/submission.json"
 id=$(jq -er '.id' "$work/submission.json")
 printf '\nSubmission: %s\n' "$id" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 # Leave time in the job for Apple's log and the end timestamp even on timeout.
