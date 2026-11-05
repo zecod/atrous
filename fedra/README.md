@@ -1,6 +1,6 @@
 # Fedra
 
-Fedra is Atrous's built-in UI: the default layout and the mods around it. Atrous redraws itself from files in its home, `~/.config/atrous`; Fedra is those files, and Atrous ships them, so a fresh install opens on Fedra. The stock layouts stay one switch away: Terminals and Atrous 98 in Settings > Look, and Ctrl+Shift+L cycles through every layout, Classic included.
+Fedra is Atrous's built-in UI: the default layout and the mods around it. Atrous redraws itself from files in its home, `~/.config/atrous`; Fedra is those files, and Atrous ships them, so a fresh install opens on Fedra. The other built-in layouts are one switch away in Settings > Look: Flow (a node canvas of your projects and agents) and Terminals. Ctrl+Shift+L cycles through every layout, Classic (the stock window, kept as the safe fallback) included.
 
 ![Fedra](home/layouts/fedra.svg)
 
@@ -17,7 +17,7 @@ node install.mjs          # add --dry-run to see what it would change
 
 The installer copies Fedra's layout, mods, account launchers and agent skills into the home and adds two keys and the agent launch commands. It backs up anything it replaces into `fedra-backup-<time>/` and switches the running app to Fedra. Your accounts, usage data and app state are never touched.
 
-`node sync-from-home.mjs` does the reverse: it copies Fedra's files from a working home (`~/.config/atrous`, `$ATROUS_HOME` or `--home <path>`) back into `home/` so they can be committed.
+`node sync-from-home.mjs` does the reverse: it copies Fedra's files from a working home (`~/.config/atrous`, `$ATROUS_HOME` or `--home <path>`) back into `home/` so they can be committed. It takes the mods and layouts already in `home/` (add a new mod with `--add <name>`), so nothing another change added is dropped.
 
 ## What's in it
 

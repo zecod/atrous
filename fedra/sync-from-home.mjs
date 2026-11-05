@@ -3,7 +3,11 @@
 // so the repo can be committed. The reverse of install.mjs. Never copies app state, account
 // state/folders, usage data, or files Atrous generates (.d.ts, jsconfig.json).
 //
-//   node sync-from-home.mjs [--home <path>]
+//   node sync-from-home.mjs [--home <path>] [--add <mod>]...
+//
+// Which mods and layouts: the ones already in fedra/home (each mods/<name>/ and
+// layouts/<name>.json there), so a mod or layout another change added is never dropped.
+// A new mod comes in with --add <name> (or by creating its folder in fedra/home/mods).
 
 import fs from "node:fs";
 import os from "node:os";
@@ -15,11 +19,12 @@ const at = process.argv.indexOf("--home");
 const home = at > 0 ? process.argv[at + 1] : process.env.ATROUS_HOME || path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "atrous");
 const out = path.join(here, "home");
 
-const MODS = [
-  "accounts", "add-project", "agent-menu", "browser-panel", "my-chrome", "my-files", "my-menu",
-  "my-new-menu", "my-pane", "my-settings", "my-spaces", "my-status", "my-tabs", "my-worktree", "open-in",
-  "snap-split", "usage-card", "usage-stats",
-];
+const added = process.argv.flatMap((a, i) => (a === "--add" ? [process.argv[i + 1]] : [])).filter(Boolean);
+const listed = (dir, test) => (fs.existsSync(dir) ? fs.readdirSync(dir, { withFileTypes: true }).filter(test).map((e) => e.name) : []);
+// Fedra's mods: every folder in fedra/home/mods (onboarding, flow-canvas, my-*, ...), plus --add.
+const MODS = [...new Set([...listed(path.join(out, "mods"), (e) => e.isDirectory()), ...added])].sort();
+// Fedra's layouts: every layouts/<name>.json in fedra/home (fedra, flow, ...).
+const LAYOUTS = listed(path.join(out, "layouts"), (e) => e.isFile() && e.name.endsWith(".json")).map((n) => n.slice(0, -5)).sort();
 const SKIP = (name) => name.endsWith(".d.ts") || name === "jsconfig.json" || name === "node_modules"
   || name === "bin" || name === "obj" || name.startsWith(".")
   || /\.(tmp|error|log|fedra-tmp)$/.test(name) || /\.(exe|dll|pdb)$/i.test(name);
@@ -40,25 +45,32 @@ function find(node, id) {
   return null;
 }
 
-fs.rmSync(path.join(out, "mods"), { recursive: true, force: true });
+// Each mod is replaced whole; one the home doesn't have stays as the repo has it.
 for (const m of MODS) {
   const from = path.join(home, "mods", m);
-  if (!fs.existsSync(from)) { console.warn(`  missing mods/${m}`); continue; }
+  if (!fs.existsSync(from)) { console.warn(`  missing mods/${m} in the home: kept as it is here`); continue; }
+  fs.rmSync(path.join(out, "mods", m), { recursive: true, force: true });
   copyDir(from, path.join(out, "mods", m));
   console.log(`  mods/${m}/`);
 }
 
-// The layout, without this machine's state: the quick terminal shows a placeholder until a
-// shell of the new machine is attached, and starts hidden.
+// The layouts, without this machine's state: a quick terminal shows a placeholder until a
+// shell of the new machine is attached, and starts hidden. (Atrous keeps the quick terminal's
+// state as clicks in layouts/.state, so a home's layout file normally has none.)
 fs.mkdirSync(path.join(out, "layouts"), { recursive: true });
-const layout = JSON.parse(fs.readFileSync(path.join(home, "layouts", "fedra.json"), "utf8"));
-const term = find(layout, "quick-terminal-term");
-if (term) term.content = { mod: "my-status", props: { part: "terminal-empty" } };
-const qt = find(layout, "quick-terminal");
-if (qt) qt.hidden = true;
-fs.writeFileSync(path.join(out, "layouts", "fedra.json"), `${JSON.stringify(layout, null, 2)}\n`);
-fs.copyFileSync(path.join(home, "layouts", "fedra.svg"), path.join(out, "layouts", "fedra.svg"));
-console.log("  layouts/fedra.json, fedra.svg");
+for (const name of LAYOUTS) {
+  const file = path.join(home, "layouts", `${name}.json`);
+  if (!fs.existsSync(file)) { console.warn(`  missing layouts/${name}.json in the home: kept as it is here`); continue; }
+  const layout = JSON.parse(fs.readFileSync(file, "utf8"));
+  const term = find(layout, "quick-terminal-term");
+  if (term) term.content = { mod: "my-status", props: { part: "terminal-empty" } };
+  const qt = find(layout, "quick-terminal");
+  if (qt) qt.hidden = true;
+  fs.writeFileSync(path.join(out, "layouts", `${name}.json`), `${JSON.stringify(layout, null, 2)}\n`);
+  const svg = path.join(home, "layouts", `${name}.svg`);
+  if (fs.existsSync(svg)) fs.copyFileSync(svg, path.join(out, "layouts", `${name}.svg`));
+  console.log(`  layouts/${name}.json${fs.existsSync(svg) ? `, ${name}.svg` : ""}`);
+}
 
 // Agent skills (skills/<name>/): SKILL.md, their scripts and docs.
 fs.rmSync(path.join(out, "skills"), { recursive: true, force: true });
