@@ -1,0 +1,20 @@
+# Shell scripts run under bash or sh on every platform, Git Bash on Windows
+# included: they check out with LF whatever core.autocrlf says.
+*.sh text eol=lf
+scripts/build text eol=lf
+scripts/ci-sources text eol=lf
+scripts/install-linux text eol=lf
+scripts/install-macos text eol=lf
+scripts/mac-dmg text eol=lf
+scripts/mac-notary-test text eol=lf
+scripts/mac-sign text eol=lf
+scripts/package text eol=lf
+scripts/sandbox text eol=lf
+scripts/stage-core text eol=lf
+scripts/test-peek-paste text eol=lf
+core/scripts/mac-bundle text eol=lf
+core/scripts/mac-notarize text eol=lf
+core/scripts/mac-sign text eol=lf
+core/scripts/manifest text eol=lf
+core/scripts/notices text eol=lf
+core/scripts/package text eol=lf
