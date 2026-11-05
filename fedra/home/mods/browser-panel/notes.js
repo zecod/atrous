@@ -48,6 +48,9 @@ export const Notes = {
     this.showNotes = false;
     this.undo = null;
     this.toastMsg = null;
+    this.picks = new Map(); // native: page pick id -> the helper's picked element
+    this.saves = []; // native: note saves waiting for their pick
+    this.cardCollapsed = false;
   },
 
   inspectMode() {
@@ -72,18 +75,69 @@ export const Notes = {
     if (this.lastPick === undefined) this.lastPick = st.picked?.seq ?? 0;
     else if (st.picked && st.picked.seq !== this.lastPick) {
       this.lastPick = st.picked.seq;
-      if (st.picked.mode === "annotate") {
+      if (st.picked.mode === "annotate" && st.native) {
+        // natively the note editor is in the page: its save names this pick
+        this.picks.set(st.picked.uiPick, st.picked);
+        if (this.picks.size > 20) this.picks.delete(this.picks.keys().next().value);
+        this.flushSaves(cx);
+      } else if (st.picked.mode === "annotate") {
         this.draft = { picked: st.picked, intent: "change", editing: null };
         this.noteBox.set_value("");
         this.noteBox.focus();
       }
     }
+    // what the person did in the page UI (native view)
+    if (this.lastUi === undefined || st.pid !== this.lastUiPid) { this.lastUi = st.uiSeq ?? 0; this.lastUiPid = st.pid; }
+    for (const e of st.uiEvents ?? []) if (e.seq > this.lastUi) { this.lastUi = e.seq; this.uiAction(e, cx); }
     if (this.lastToast === undefined) this.lastToast = st.toast?.seq ?? 0;
     else if (st.toast && st.toast.seq !== this.lastToast) { this.lastToast = st.toast.seq; this.toast(st.toast.text, null, cx); }
     if (prev && (prev.targetId !== st.targetId || prev.url !== st.url)) {
       if (this.draft && !this.draft.editing) this.draft = null; // its element was on the page that's gone
       if (this.notes.length) this.syncMarks(cx);
     }
+  },
+
+  uiAction(e, cx) {
+    if (e.type === "note-save") {
+      const intent = e.intent === "question" ? "question" : "change";
+      if (e.edit) {
+        const note = this.notes.find((x) => x.id === e.edit);
+        if (note) { note.text = e.text; note.intent = intent; }
+        this.syncMarks(cx);
+      } else {
+        this.saves.push({ pickId: e.pickId, text: e.text, intent, at: Date.now() });
+        this.flushSaves(cx);
+      }
+    } else if (e.type === "note-cancel") this.picks.delete(e.pickId);
+    else if (e.type === "note-delete") this.removeNote(e.id, cx);
+    else if (e.type === "send") this.openSend(cx);
+    else if (e.type === "copy-all") this.copyAll(cx);
+    else if (e.type === "clear") this.clearNotes(cx);
+    else if (e.type === "collapse") this.cardCollapsed = Boolean(e.collapsed);
+    cx.notify();
+  },
+
+  // A save waits for its pick (the element's details and screenshot come a moment after the click).
+  flushSaves(cx) {
+    let added = false;
+    this.saves = this.saves.filter((s) => {
+      const p = this.picks.get(s.pickId);
+      if (!p) return Date.now() - s.at < 15000;
+      this.picks.delete(s.pickId);
+      this.notes.push({ id: `${Date.now()}-${this.notes.length}`, targetId: p.targetId, url: p.url, title: p.title, intent: s.intent,
+        text: s.text, tag: p.tag, selector: p.selector, snippet: p.text, html: p.html, shot: p.shot, backendNodeId: p.backendNodeId });
+      added = true;
+      return false;
+    });
+    if (added) { this.syncMarks(cx); cx.notify(); }
+  },
+
+  removeNote(id, cx) {
+    const i = this.notes.findIndex((x) => x.id === id);
+    if (i < 0) return;
+    const [gone] = this.notes.splice(i, 1);
+    this.syncMarks(cx);
+    this.toast(`Deleted note ${i + 1}`, { label: "Undo", run: (cx) => { this.notes.splice(Math.min(i, this.notes.length), 0, gone); this.syncMarks(cx); cx.notify(); } }, cx, 6000);
   },
 
   toast(text, action, cx, ms = 2600) {
@@ -138,13 +192,16 @@ export const Notes = {
     this.toast(`${label} ${kept.length} note${kept.length === 1 ? "" : "s"}`, { label: "Undo", run: (cx) => { this.notes = kept; this.syncMarks(cx); cx.notify(); } }, cx, 9000);
   },
 
-  // Numbered markers for the notes on the shown page.
+  // Numbered markers for the notes on the shown page (natively also the card's list).
   syncMarks(cx) {
     const st = this.st;
     if (!st) return;
     const marks = [];
-    this.notes.forEach((n, i) => { if (n.targetId === st.targetId && n.url === st.url && n.backendNodeId) marks.push({ n: i + 1, backendNodeId: n.backendNodeId }); });
-    this.call("/marks", { marks }, cx);
+    this.notes.forEach((n, i) => { if (n.targetId === st.targetId && n.url === st.url && n.backendNodeId) marks.push({ n: i + 1, id: n.id, backendNodeId: n.backendNodeId }); });
+    const host = (u) => { try { return new URL(u).host; } catch { return ""; } };
+    const notes = this.notes.map((n, i) => ({ n: i + 1, id: n.id, tag: n.tag, label: clip(oneLine(n.snippet) || n.selector || "", 70), text: n.text,
+      intent: n.intent, here: n.targetId === st.targetId && n.url === st.url, host: host(n.url) }));
+    this.call("/marks", { marks, notes, collapsed: Boolean(this.cardCollapsed) }, cx);
   },
 
   copyAll(cx) {

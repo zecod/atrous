@@ -60,6 +60,13 @@ fs.writeFileSync(path.join(out, "layouts", "fedra.json"), `${JSON.stringify(layo
 fs.copyFileSync(path.join(home, "layouts", "fedra.svg"), path.join(out, "layouts", "fedra.svg"));
 console.log("  layouts/fedra.json, fedra.svg");
 
+// Agent skills (skills/<name>/): SKILL.md, their scripts and docs.
+fs.rmSync(path.join(out, "skills"), { recursive: true, force: true });
+for (const s of fs.existsSync(path.join(home, "skills")) ? fs.readdirSync(path.join(home, "skills")) : []) {
+  copyDir(path.join(home, "skills", s), path.join(out, "skills", s));
+  console.log(`  skills/${s}/`);
+}
+
 fs.rmSync(path.join(out, "accounts"), { recursive: true, force: true });
 fs.mkdirSync(path.join(out, "accounts"), { recursive: true });
 for (const f of fs.readdirSync(path.join(home, "accounts"))) {

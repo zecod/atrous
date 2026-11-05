@@ -61,6 +61,7 @@ import path from "node:path";
 import os from "node:os";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import zlib from "node:zlib";
 
 // ---- options ----------------------------------------------------------------------------
 
@@ -107,9 +108,28 @@ const TMP_DIR = path.join(BASE, `tmp${API_PORT === 9334 ? "" : `-${API_PORT}`}`)
 let NATIVE = opt.native === "true" && WIN;
 const HOST_PORT = Number(opt["host-port"] ?? 9335);
 const HOST = `http://127.0.0.1:${HOST_PORT}`;
-const HOST_DIR = path.join(BASE, "host");
+// One host build per helper port too: a running host locks its exe, so a second panel (tests)
+// builds and runs its own copy.
+const HOST_DIR = path.join(BASE, API_PORT === 9334 ? "host" : `host-${API_PORT}`);
 const HOST_EXE = path.join(HOST_DIR, "herdr-browser-host.exe");
-const NATIVE_SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), "native");
+const MOD_DIR = path.dirname(fileURLToPath(import.meta.url));
+const NATIVE_SRC = path.join(MOD_DIR, "native");
+// Natively the pick/annotate UI is drawn by the page itself (page-ui.js, in an isolated world
+// named "herdr"): read once, with the panel's icons it uses.
+let UI_SOURCE = "";
+const UI_ICONS = {};
+function loadUi() {
+  if (opt["no-page-ui"] === "true") { log("page UI off (--no-page-ui)"); return; } // tests: a page exactly as it comes
+  try { UI_SOURCE = fs.readFileSync(path.join(MOD_DIR, "page-ui.js"), "utf8"); } catch (e) { log("page-ui.js:", e.message); }
+  for (const name of ["code", "camera", "copy", "trash", "pencil", "send", "chevron-down", "question", "check", "x"]) {
+    try {
+      const svg = fs.readFileSync(path.join(MOD_DIR, "icons", `${name}.svg`), "utf8");
+      const kids = [...svg.matchAll(/<(path|circle|rect|line|polyline|polygon|ellipse)\b([^>]*?)\/?>/g)]
+        .map(([, tag, attrs]) => [tag, Object.fromEntries([...attrs.matchAll(/([\w:-]+)="([^"]*)"/g)].map(([, k, v]) => [k, v]))]);
+      UI_ICONS[name] = { attrs: { viewBox: /viewBox="([^"]+)"/.exec(svg)?.[1] ?? "0 0 24 24" }, kids };
+    } catch {}
+  }
+}
 const DEFAULT_URL = "https://www.google.com"; // a newly started Chrome opens this unless told otherwise
 
 fs.mkdirSync(BASE, { recursive: true });
@@ -298,7 +318,7 @@ async function ensureHostBuilt() {
   let built = 0;
   try { built = fs.statSync(HOST_EXE).mtimeMs; } catch {}
   if (built && built >= newest) return;
-  const work = path.join(BASE, "host-build");
+  const work = path.join(BASE, API_PORT === 9334 ? "host-build" : `host-build-${API_PORT}`);
   fs.mkdirSync(work, { recursive: true });
   for (const f of srcs) fs.copyFileSync(path.join(NATIVE_SRC, f), path.join(work, f));
   S.phase = "Building the native browser view (first run, about a minute)…";
@@ -417,6 +437,10 @@ const S = {
   hoverNode: null,
   toast: null, // { seq, text } a short confirmation for the panel to show
   phase: "", // what the helper is busy with before the browser is up
+  uiEvents: [], // natively: what the person did in the page UI (note saved, deleted, send...), for the panel
+  uiSeq: 0,
+  notesUi: null, // natively: the panel's notes for the page UI: { notes, marks, collapsed }
+  uiTheme: null,
 };
 let pickSeq = 0, toastSeq = 0;
 const PERF = { inputAt: 0, kind: "", chromeAt: 0, samples: [], written: 0, mod: null, hoverAt: 0, hover: [], writeMs: [] };
@@ -447,7 +471,7 @@ function publicState() {
     targets: [...targets.values()].filter((t) => !internal(t.url)).sort((a, b) => a.order - b.order)
       .map((t) => ({ id: t.id, url: t.url, title: t.title, current: t.id === S.targetId })),
     cdp: `http://127.0.0.1:${CDP_PORT}`, browser: S.browser, error: S.error, pid: process.pid,
-    native: NATIVE, host: NATIVE ? HOST : null, ready, phase: S.phase,
+    native: NATIVE, host: NATIVE ? HOST : null, ready, phase: S.phase, uiEvents: S.uiEvents, uiSeq: S.uiSeq,
     inspect: S.inspect, picked: S.picked, toast: S.toast, hover: S.inspect !== "off" ? S.hover : null,
     dver: tabs.get(S.targetId)?.dver ?? 0, // the debug drawer's lists changed when this did
   };
@@ -486,8 +510,16 @@ async function attach(targetId) {
       cdp.send("Log.enable", {}, sessionId).catch(() => {}),
       cdp.send("Network.enable", { maxTotalBufferSize: 0, maxResourceBufferSize: 0 }, sessionId).catch(() => {}),
       NATIVE ? Promise.resolve() : cdp.send("Emulation.setFocusEmulationEnabled", { enabled: true }, sessionId).catch(() => {}),
-      NATIVE ? cdp.send("Runtime.addBinding", { name: "__herdrKey" }, sessionId).catch(() => {}) : Promise.resolve(),
+      NATIVE ? cdp.send("Runtime.addBinding", { name: "__herdrUi", executionContextName: "herdr" }, sessionId).catch((e) => log("binding", e.message)) : Promise.resolve(),
+      NATIVE && UI_SOURCE ? cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: UI_SOURCE, worldName: "herdr" }, sessionId).catch((e) => log("ui script", e.message)) : Promise.resolve(),
+      NATIVE ? cdp.send("DOM.enable", {}, sessionId).catch(() => {}) : Promise.resolve(),
     ]);
+    // the document already there gets its world now (later ones get it from the script above)
+    if (NATIVE && UI_SOURCE && !tab.ui) {
+      cdp.send("Page.createIsolatedWorld", { frameId: targetId, worldName: "herdr" }, sessionId)
+        .then(({ executionContextId }) => { if (!tab.ui) { tab.ui = executionContextId; uiReady(tab).catch(() => {}); } })
+        .catch((e) => log("ui world", e.message));
+    }
     return sessionId;
   })();
   try { return await tab.attaching; } finally { tab.attaching = null; }
@@ -510,7 +542,12 @@ async function follow(targetId) {
   if (NATIVE) hostPost("/tabs/activate", { id: targetId }).catch(() => {});
   else cdp.send("Target.activateTarget", { targetId }).catch(() => {});
   await refreshHistory();
-  if (S.inspect !== "off") await inspectOn(sessionId, true);
+  if (NATIVE) {
+    const was = old ? tabFor(old) : null;
+    if (was?.ui) uiEval(was, "__herdr.mode('off')").catch(() => {});
+    const tab = tabs.get(targetId);
+    if (tab?.ui) uiReady(tab).catch(() => {});
+  } else if (S.inspect !== "off") await inspectOn(sessionId, true);
   try { fs.writeFileSync(path.join(BASE, `last-target${SUFFIX}`), targetId); } catch {}
   log("following", targetId, S.url);
   if (watching()) await startCast();
@@ -832,7 +869,7 @@ function onEvent(method, p, session) {
         // A new document: the console marks it.
         const tab = tabFor(session);
         if (tab) pushConsole(tab, { level: "nav", text: `Navigated to ${p.frame.url}`, source: "" });
-        if (session === S.session && S.inspect !== "off") setTimeout(() => S.session === session && inspectOn(session, true), 300);
+        if (!NATIVE && session === S.session && S.inspect !== "off") setTimeout(() => S.session === session && inspectOn(session, true), 300);
       }
       if (session === S.session && !p.frame.parentId && S.frame) { blankUntil = Date.now() + 1500; hold(1500); }
       if (session === S.session && !p.frame.parentId) { S.url = p.frame.url; refreshHistory().then(bump); bump(); }
@@ -893,7 +930,23 @@ function onEvent(method, p, session) {
     case "Overlay.nodeHighlightRequested":
       if (session === S.session) { S.hoverNode = p.nodeId; measureHover(p.nodeId, session); }
       break;
+    case "Runtime.executionContextCreated": {
+      const c = p.context, tab = tabFor(session);
+      if (NATIVE && tab && c.name === "herdr" && c.auxData?.frameId === tab.id && c.id !== tab.ui) { tab.ui = c.id; uiReady(tab).catch(() => {}); }
+      break;
+    }
+    case "Runtime.executionContextDestroyed": {
+      const tab = tabFor(session);
+      if (tab && tab.ui === p.executionContextId) tab.ui = null;
+      break;
+    }
+    case "Runtime.executionContextsCleared": {
+      const tab = tabFor(session);
+      if (tab) tab.ui = null;
+      break;
+    }
     case "Runtime.bindingCalled":
+      if (p.name === "__herdrUi" && NATIVE) { uiMessage(p.payload, session).catch((e) => log("page ui", e.message)); break; }
       // pick/annotate keys pressed in the page itself (native mode: the page has the keyboard)
       if (p.name === "__herdrKey" && session === S.session && S.inspect !== "off") {
         if (p.payload === "escape") setInspect("off").catch(() => {});
@@ -1143,6 +1196,83 @@ function debugList(kind, since) {
 // ---- pick / annotate --------------------------------------------------------------------
 
 // Chrome's own inspect overlay: a light fill and its tag + size label, drawn into the frames.
+// ---- the page UI (native) ----------------------------------------------------------
+
+function uiEval(tab, expression, byValue = true) {
+  if (!tab?.ui) return Promise.reject(new Error("no page UI"));
+  return cdp.send("Runtime.evaluate", { expression, contextId: tab.ui, returnByValue: byValue, awaitPromise: false }, tab.session, 5000);
+}
+
+// A new document's UI (or the shown tab's): its looks, the mode and the notes.
+async function uiReady(tab) {
+  if (!tab?.ui) return;
+  await uiEval(tab, UI_SOURCE).catch(() => {});
+  const shown = tab.id === S.targetId;
+  await uiEval(tab, `__herdr.init(${JSON.stringify({ theme: S.uiTheme ?? undefined, icons: UI_ICONS, mode: shown ? S.inspect : "off", collapsed: S.notesUi?.collapsed ?? false })})`);
+  if (shown) await uiNotes(tab);
+}
+
+// The element the page UI points at (picked, or under the pointer), as a backendNodeId.
+async function uiNode(tab, expression) {
+  const r = await uiEval(tab, expression, false);
+  const objectId = r.result?.objectId;
+  if (!objectId) return null;
+  try { return (await cdp.send("DOM.describeNode", { objectId }, tab.session, 3000)).node.backendNodeId; }
+  finally { cdp.send("Runtime.releaseObject", { objectId }, tab.session).catch(() => {}); }
+}
+
+// The notes in the card, and the badges on the elements of those on this page.
+async function uiNotes(tab) {
+  if (!tab?.ui) return;
+  const list = S.notesUi?.notes ?? [];
+  const at = new Map((S.notesUi?.marks ?? []).map((m) => [m.id, m.backendNodeId]));
+  const items = [], objs = [];
+  for (const n of list) {
+    let objectId = null;
+    if (at.has(n.id)) {
+      try { objectId = (await cdp.send("DOM.resolveNode", { backendNodeId: at.get(n.id), executionContextId: tab.ui }, tab.session, 3000)).object.objectId; } catch {}
+    }
+    items.push({ ...n, el: Boolean(objectId) });
+    if (objectId) objs.push(objectId);
+  }
+  const g = await uiEval(tab, "globalThis", false);
+  await cdp.send("Runtime.callFunctionOn", { objectId: g.result.objectId, functionDeclaration: "function (list, ...els) { __herdr.setNotes(list, ...els); }",
+    arguments: [{ value: items }, ...objs.map((objectId) => ({ objectId }))] }, tab.session, 5000).catch((e) => log("ui notes", e.message));
+  for (const objectId of [...objs, g.result.objectId]) cdp.send("Runtime.releaseObject", { objectId }, tab.session).catch(() => {});
+}
+
+function uiEvent(m) {
+  S.uiEvents.push({ ...m, seq: ++S.uiSeq });
+  if (S.uiEvents.length > 30) S.uiEvents.shift();
+  bump();
+}
+
+// What the person did in the page UI.
+async function uiMessage(payload, session) {
+  let m;
+  try { m = JSON.parse(payload); } catch { return; }
+  const tab = tabFor(session);
+  if (!tab || session !== S.session) return;
+  switch (m.type) {
+    case "pick": {
+      const id = await uiNode(tab, "__herdr.picked()");
+      if (!id) return;
+      const mode = m.mode === "annotate" ? "annotate" : "pick";
+      const info = await elementInfo(id, session);
+      if (!info) return;
+      // annotate: the screenshot that goes with the note, taken now (as the person saw it)
+      const shot = mode === "annotate" ? await elementShot(id, info, session).catch(() => null) : null;
+      S.picked = { seq: ++pickSeq, mode, targetId: S.targetId, url: S.url, title: S.title, backendNodeId: id, ...info, shot, uiPick: m.pickId ?? null };
+      bump();
+      return;
+    }
+    case "copy": case "shot": return pickAction(m.type);
+    case "key": return pickAction(m.key === "s" ? "shot" : "copy");
+    case "escape": return setInspect("off");
+    default: return uiEvent(m); // note-save, note-cancel, note-delete, send, copy-all, clear, collapse
+  }
+}
+
 // Chrome's inspect mode finds the element under the pointer and keeps clicks from the page; it
 // draws nothing itself (all transparent): the panel draws the outline and label natively from
 // state.hover, so it follows the pointer without waiting for a frame.
@@ -1259,6 +1389,12 @@ async function setInspect(mode) {
   if (next === S.inspect) return;
   const was = S.inspect;
   S.inspect = next;
+  if (NATIVE) {
+    const tab = tabs.get(S.targetId);
+    if (tab?.ui) await uiEval(tab, `__herdr.mode(${JSON.stringify(next)})`).catch(() => {});
+    bump();
+    return;
+  }
   if (next === "off") { S.hover = null; S.hoverNode = null; }
   if (S.session) await inspectOn(S.session, next !== "off");
   if (was !== next) bump();
@@ -1279,9 +1415,12 @@ const ELEMENT_INFO = `function () {
     parts.unshift(s);
   }
   const text = (el.innerText || el.textContent || el.getAttribute('aria-label') || el.getAttribute('alt') || '').replace(/\\s+/g, ' ').trim();
+  let html = el.outerHTML;
+  if (el.querySelector('[data-herdr]')) { const c = el.cloneNode(true); c.querySelectorAll('[data-herdr]').forEach((x) => x.remove()); html = c.outerHTML; }
   return { tag: el.localName, selector: parts.join(' > '), text: text.slice(0, 140),
     rect: { x: r.x, y: r.y, w: r.width, h: r.height }, scroll: { x: scrollX, y: scrollY },
-    html: el.outerHTML.slice(0, 600) };
+    vw: document.documentElement.clientWidth || innerWidth, vh: document.documentElement.clientHeight || innerHeight,
+    html: html.slice(0, 600) };
 }`;
 
 async function elementInfo(backendNodeId, session = S.session) {
@@ -1291,9 +1430,87 @@ async function elementInfo(backendNodeId, session = S.session) {
   return r.result?.value;
 }
 
+// PNG in and out, for crops (8-bit RGB/RGBA, not interlaced: what Chrome writes).
+function pngDecode(buf) {
+  let p = 8, w = 0, h = 0, ct = 0;
+  const idat = [];
+  while (p < buf.length) {
+    const len = buf.readUInt32BE(p), type = buf.toString("ascii", p + 4, p + 8), data = buf.subarray(p + 8, p + 8 + len);
+    if (type === "IHDR") {
+      w = data.readUInt32BE(0); h = data.readUInt32BE(4); ct = data[9];
+      if (data[8] !== 8 || data[12] !== 0) throw new Error("unsupported PNG");
+    } else if (type === "IDAT") idat.push(data);
+    else if (type === "IEND") break;
+    p += 12 + len;
+  }
+  const bpp = { 0: 1, 2: 3, 4: 2, 6: 4 }[ct];
+  if (!bpp) throw new Error("unsupported PNG colors");
+  const raw = zlib.inflateSync(Buffer.concat(idat)), stride = w * bpp, out = Buffer.alloc(h * stride);
+  for (let y = 0; y < h; y++) {
+    const f = raw[y * (stride + 1)], line = raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1));
+    const cur = out.subarray(y * stride, (y + 1) * stride), prev = y ? out.subarray((y - 1) * stride, y * stride) : null;
+    for (let x = 0; x < stride; x++) {
+      const a = x >= bpp ? cur[x - bpp] : 0, b = prev ? prev[x] : 0, c = prev && x >= bpp ? prev[x - bpp] : 0;
+      let v = line[x];
+      if (f === 1) v += a; else if (f === 2) v += b; else if (f === 3) v += (a + b) >> 1;
+      else if (f === 4) { const q = a + b - c, pa = Math.abs(q - a), pb = Math.abs(q - b), pc = Math.abs(q - c); v += pa <= pb && pa <= pc ? a : pb <= pc ? b : c; }
+      cur[x] = v & 255;
+    }
+  }
+  return { w, h, ct, bpp, data: out };
+}
+
+function pngCrop(img, x, y, w, h) {
+  const rows = [];
+  for (let j = 0; j < h; j++) rows.push(Buffer.from([0]), img.data.subarray(((y + j) * img.w + x) * img.bpp, ((y + j) * img.w + x + w) * img.bpp));
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+    const td = Buffer.concat([Buffer.from(type, "ascii"), data]);
+    const crc = Buffer.alloc(4); crc.writeUInt32BE(zlib.crc32(td) >>> 0);
+    return Buffer.concat([len, td, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = img.ct; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", ihdr), chunk("IDAT", zlib.deflateSync(Buffer.concat(rows))), chunk("IEND", Buffer.alloc(0))]);
+}
+
+function saveShot(png) {
+  const dir = path.join(BASE, "shots");
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `element-${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 23)}.png`);
+  fs.writeFileSync(file, png);
+  // Keep the newest 300.
+  const all = fs.readdirSync(dir).filter((f) => f.endsWith(".png")).sort();
+  for (const f of all.slice(0, Math.max(0, all.length - 300))) fs.rmSync(path.join(dir, f), { force: true });
+  return file;
+}
+
+// Natively the page is on screen: a clipped capture moves its viewport for a moment (a visible
+// jump), so the whole viewport is captured as it is and the element cut out of it. The page UI's
+// parts over the element step aside for the capture.
+async function elementShotNative(backendNodeId, info, session) {
+  const r = info?.rect;
+  if (!r || !info.vw) return null;
+  const x0 = Math.max(0, r.x), y0 = Math.max(0, r.y), x1 = Math.min(info.vw, r.x + r.w), y1 = Math.min(info.vh, r.y + r.h);
+  if (x1 - x0 < 1 || y1 - y0 < 1) return null;
+  const tab = tabFor(session);
+  let hidden = 0;
+  if (tab?.ui) hidden = (await uiEval(tab, `__herdr.shotHide(${JSON.stringify({ x: x0, y: y0, w: x1 - x0, h: y1 - y0 })})`).catch(() => null))?.result?.value ?? 0;
+  let shot;
+  try { shot = await cdp.send("Page.captureScreenshot", { format: "png", fromSurface: true }, session, 10000); }
+  finally { if (hidden) uiEval(tab, "__herdr.shotShow()").catch(() => {}); }
+  const img = pngDecode(Buffer.from(shot.data, "base64"));
+  const k = img.w / info.vw;
+  const cx = Math.max(0, Math.floor(x0 * k)), cy = Math.max(0, Math.floor(y0 * k));
+  const cw = Math.min(img.w - cx, Math.ceil(x1 * k) - cx), ch = Math.min(img.h - cy, Math.ceil(y1 * k) - cy);
+  if (cw < 1 || ch < 1) return null;
+  return saveShot(pngCrop(img, cx, cy, cw, ch));
+}
+
 // A PNG of the element's visible part, without the highlight or note markers on it.
 async function elementShot(backendNodeId, info, session = S.session) {
   info = info ?? await elementInfo(backendNodeId, session);
+  if (NATIVE) return elementShotNative(backendNodeId, info, session);
   const r = info?.rect;
   if (!r) return null;
   const x0 = Math.max(0, r.x), y0 = Math.max(0, r.y), x1 = Math.min(S.width, r.x + r.w), y1 = Math.min(S.height, r.y + r.h);
@@ -1317,7 +1534,15 @@ async function elementShot(backendNodeId, info, session = S.session) {
 }
 
 async function outerHtml(backendNodeId, session = S.session, max = 1_000_000) {
-  const { outerHTML } = await cdp.send("DOM.getOuterHTML", { backendNodeId }, session);
+  let { outerHTML } = await cdp.send("DOM.getOuterHTML", { backendNodeId }, session);
+  if (outerHTML.includes("data-herdr")) {
+    // the panel's own page UI (or note badges) inside it: copied without them
+    const { object } = await cdp.send("DOM.resolveNode", { backendNodeId }, session);
+    const r = await cdp.send("Runtime.callFunctionOn", { objectId: object.objectId, returnByValue: true,
+      functionDeclaration: "function () { const c = this.cloneNode(true); if (c.querySelectorAll) c.querySelectorAll('[data-herdr]').forEach((x) => x.remove()); return c.outerHTML; }" }, session);
+    cdp.send("Runtime.releaseObject", { objectId: object.objectId }, session).catch(() => {});
+    if (typeof r.result?.value === "string") outerHTML = r.result.value;
+  }
   return outerHTML.length > max ? `${outerHTML.slice(0, max)}\n<!-- … cut at ${max} characters -->` : outerHTML;
 }
 
@@ -1339,11 +1564,21 @@ async function inspected(backendNodeId) {
   bump();
 }
 
+// An image on the clipboard (bitmap and PNG on Windows): pasted as a picture, not a path.
+function writeClipboardImage(file) {
+  if (opt["no-clipboard"] === "true") return fsp.writeFile(path.join(BASE, `clipboard-test${SUFFIX}.txt`), `[image] ${file}`);
+  if (WIN) return powershell("Add-Type -AssemblyName System.Windows.Forms, System.Drawing; $p = $env:HERDR_PNG; $img = [System.Drawing.Image]::FromFile($p); $ms = New-Object System.IO.MemoryStream(,[System.IO.File]::ReadAllBytes($p)); $d = New-Object System.Windows.Forms.DataObject; $d.SetImage($img); $d.SetData('PNG', $false, $ms); [System.Windows.Forms.Clipboard]::SetDataObject($d, $true); $img.Dispose()", undefined, { HERDR_PNG: file });
+  if (MAC) return pipe("osascript", ["-e", `set the clipboard to (read (POSIX file "${file.replace(/"/g, '\\"')}") as «class PNGf»)`]);
+  return wayland() ? pipe("sh", ["-c", 'wl-copy --type image/png < "$1"', "sh", file]) : pipe("xclip", ["-selection", "clipboard", "-t", "image/png", "-i", file]);
+}
+
 // Pick mode keys: C copies, S saves a screenshot of the hovered (else the last picked) element.
 async function pickAction(action) {
   const s = S.session;
   let backendNodeId = null;
-  if (S.hoverNode) {
+  const tab = tabs.get(S.targetId);
+  if (NATIVE && tab?.ui) backendNodeId = await uiNode(tab, "__herdr.target()").catch(() => null);
+  if (!backendNodeId && S.hoverNode && !NATIVE) {
     try { backendNodeId = (await cdp.send("DOM.describeNode", { nodeId: S.hoverNode }, s)).node.backendNodeId; } catch {}
   }
   backendNodeId = backendNodeId ?? (S.picked?.targetId === S.targetId ? S.picked.backendNodeId : null);
@@ -1352,6 +1587,13 @@ async function pickAction(action) {
   if (action === "shot") {
     const file = await elementShot(backendNodeId, info, s);
     if (!file) { toast("That element isn't on screen"); return { ok: false }; }
+    if (NATIVE) {
+      // the picture itself, ready to paste into an agent's prompt (the file stays in shots/)
+      await writeClipboardImage(file);
+      toast("Screenshot copied");
+      if (tab?.ui) uiEval(tab, "__herdr.flash('shot', 'Copied')").catch(() => {});
+      return { ok: true, file };
+    }
     await writeClipboard(file);
     toast(`Saved a screenshot of <${info.tag}>; its path is copied`);
     if (S.inspect !== "off") inspectOn(s, true);
@@ -1360,6 +1602,7 @@ async function pickAction(action) {
   const html = await outerHtml(backendNodeId, s);
   await writeClipboard(html);
   toast(`Copied <${info.tag}> HTML (${html.length.toLocaleString("en-US")} characters)`);
+  if (NATIVE && tab?.ui) uiEval(tab, "__herdr.flash('copy', 'Copied')").catch(() => {});
   return { ok: true };
 }
 
@@ -1526,7 +1769,25 @@ async function route(method, pathname, q, b) {
     case "/clipboard": await writeClipboard(String(b.text ?? "")); return { ok: true };
     case "/inspect": await setInspect(b.mode); return { ok: true, inspect: S.inspect };
     case "/pick-action": return pickAction(b.action);
-    case "/marks": return setMarks(b.marks);
+    case "/marks":
+      if (NATIVE) {
+        S.notesUi = { notes: b.notes ?? [], marks: b.marks ?? [], collapsed: Boolean(b.collapsed) };
+        await uiNotes(tabs.get(S.targetId)).catch((e) => log("ui notes", e.message));
+        return { ok: true };
+      }
+      return setMarks(b.marks);
+    case "/ui-eval": { // debugging: an expression in the shown page's UI world
+      const tab = tabs.get(S.targetId);
+      if (!tab?.ui) return { ok: false, error: "no page UI world" };
+      const r = await uiEval(tab, String(b.expr ?? ""));
+      return { ok: true, ctx: tab.ui, value: r.result?.value ?? null, error: r.exceptionDetails?.exception?.description ?? null };
+    }
+    case "/ui-theme": {
+      S.uiTheme = b.theme ?? null;
+      const tab = tabs.get(S.targetId);
+      if (tab?.ui) await uiEval(tab, `__herdr.init(${JSON.stringify({ theme: S.uiTheme })})`).catch(() => {});
+      return { ok: true };
+    }
     case "/element-shot": return { ok: true, file: await elementShot(b.backendNodeId) };
     case "/debug-clear": {
       const tab = tabs.get(S.targetId);
@@ -1597,6 +1858,7 @@ async function main() {
     server.listen(API_PORT, "127.0.0.1", resolve);
   });
   log(`api http://127.0.0.1:${API_PORT}  cdp http://127.0.0.1:${CDP_PORT}  frames ${FRAMES_DIR}`);
+  loadUi();
   clearFrames();
   makeBuckets();
 

@@ -281,6 +281,11 @@ export default class Browser extends View {
   onHost(hs, cx) {
     const prev = this.host;
     this.host = hs;
+    if (hs.shown && !prev?.shown) {
+      // the page window is back: the still stays under it a moment longer, until it's surely on screen
+      this.hostShownAt = Date.now();
+      cx.timer.after(200, (cx) => cx.notify());
+    }
     if (this.hostEventSeq === undefined || hs.pid !== prev?.pid) this.hostEventSeq = hs.eventSeq ?? 0; // a new host counts from 0
     for (const e of hs.events ?? []) {
       if (e.seq <= this.hostEventSeq) continue;
@@ -456,7 +461,21 @@ export default class Browser extends View {
     });
   }
 
+  // The page UI (native) wears the panel's colors.
+  uiTheme() {
+    const t = theme(), ok = (v) => (typeof v === "string" && /^(#[0-9a-f]{3,8}|rgba?\(|hsla?\()/i.test(v) ? v : undefined);
+    const map = { bg: t.popover, raised: t.raised, border: t.border, fg: t.foreground, muted: t.muted, dim: t.dim, accent: t.accent,
+      solid: t.solid, solidFg: t.solid_foreground, hover: t.hover, input: t.input, danger: t.blocked };
+    const out = {};
+    for (const [k, v] of Object.entries(map)) if (ok(v)) out[k] = v;
+    return out;
+  }
+
   onConnect(cx) {
+    if (this.isNative()) {
+      this.call("/ui-theme", { theme: this.uiTheme() }, cx);
+      if (this.notes.length) this.syncMarks(cx);
+    }
     const url = this.pendingUrl;
     this.pendingUrl = null;
     if (url) this.call("/navigate", { url }, cx);
@@ -490,6 +509,7 @@ export default class Browser extends View {
         if (this.herdrPid) args.push("--herdr-pid", String(this.herdrPid));
         if (props()?.hostArgs) args.push(`--host-args=${props().hostArgs}`);
       }
+      if (props()?.helperArgs) args.push(...String(props().helperArgs).split(" ").filter(Boolean)); // tests: e.g. --no-clipboard true
       const r = await hc(args);
       if (r.code !== 0) this.status = `Couldn't start the browser helper: ${(r.stderr || r.stdout).trim()}`;
     } catch (e) {
@@ -941,7 +961,10 @@ export default class Browser extends View {
       // Under the native view: the markers it's found by, and its still while it's away.
       view = view.child(div().absolute().top(0).left(0).size(MARK).bg(MARK_A))
         .child(div().absolute().bottom(0).right(0).size(MARK).bg(MARK_B));
-      const away = !this.host?.shown;
+      // The still goes under the native view as soon as the host steps aside for something
+      // (frozen, an overlay): the host hides the view only once herdr's frame shows it there.
+      // (Drawing it only after the view hid left ~80 ms of bare page area: the annotate flicker.)
+      const away = !this.host?.shown || this.host?.frozen || this.host?.overlayBlock || Date.now() - (this.hostShownAt ?? 0) < 180;
       if (away && this.stillShown && this.area) {
         view = view.child(image(this.stillShown.path).id("bp-still").absolute().top(0).left(0).w(this.area.width).h(this.area.height));
       }
@@ -1081,7 +1104,7 @@ export default class Browser extends View {
       })
       .when(this.connected && (this.st?.targets?.length ?? 0) > 0, (el) => el.child(this.tabStrip(t)))
       .child(this.header(t))
-      .when(this.connected && this.inspectMode() !== "off", (el) => el.child(this.hintBar(t)))
+      .when(this.connected && this.inspectMode() !== "off" && !this.isNative(), (el) => el.child(this.hintBar(t)))
       .when(Boolean(this.errorBar(t)), (el) => el.child(this.errorBar(t)))
       .child(this.viewport(t))
       .when(this.connected && this.dbg.open, (el) => el.child(this.drawer(t)))

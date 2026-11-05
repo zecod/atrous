@@ -7,7 +7,8 @@
 //
 // What it touches:
 // - layouts/fedra.json + fedra.svg, mods/<each Fedra mod>/ (replaced whole: they're Fedra's files),
-//   accounts/*.sh|*.ps1|profile.mjs (never accounts/state.json or account folders).
+//   accounts/*.sh|*.ps1|profile.mjs (never accounts/state.json or account folders),
+//   skills/<name>/ (agent skills, e.g. herdr-browser), linked into ~/.claude/skills and ~/.codex/skills.
 // - keys.json: adds two bindings (quick terminal; Settings opens Fedra's settings), keeps yours.
 // - programs.json: Claude Code / Codex start through the account launchers; agents start in
 //   "yolo" mode (skip permission prompts). Edit programs.json afterwards if you don't want that.
@@ -17,7 +18,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -91,6 +92,26 @@ for (const f of fs.readdirSync(acc)) {
     if (f.endsWith(".sh") && !win) fs.chmodSync(path.join(home, "accounts", f), 0o755);
   }
   log(`  accounts/${f}`);
+}
+
+// 2b. Agent skills (skills/<name>/): copied whole, then linked into ~/.claude/skills and
+// ~/.codex/skills by each skill's own install.mjs (a link, so later syncs reach the agents).
+const skills = path.join(src, "skills");
+if (fs.existsSync(skills)) {
+  for (const s of fs.readdirSync(skills)) {
+    const to = path.join(home, "skills", s);
+    saveBackup(path.join("skills", s));
+    if (!dry) {
+      fs.rmSync(to, { recursive: true, force: true });
+      fs.cpSync(path.join(skills, s), to, { recursive: true });
+      const inst = path.join(to, "install.mjs");
+      if (fs.existsSync(inst)) {
+        const r = spawnSync(process.execPath, [inst], { encoding: "utf8" });
+        for (const line of `${r.stdout ?? ""}${r.stderr ?? ""}`.trim().split("\n").filter(Boolean)) log(`    ${line}`);
+      }
+    }
+    log(`  skills/${s}/`);
+  }
 }
 
 // 3. keys.json: two bindings, added only where you haven't bound the key yourself.

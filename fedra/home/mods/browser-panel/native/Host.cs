@@ -123,6 +123,7 @@ sealed class Host : ApplicationContext
     readonly Http http;
     readonly string run = DateTime.UtcNow.Ticks.ToString("x")[^7..];
     readonly string tmpDir;
+    readonly string tabsFile;
     CoreWebView2Environment env;
     readonly List<Tab> tabs = new();
     Tab active;
@@ -158,7 +159,7 @@ sealed class Host : ApplicationContext
     bool focused;
 
     // a still of the page, shown by the panel while something of herdr's must draw over the page
-    enum Freeze { None, Capturing, WaitingAck, Done }
+    enum Freeze { None, Capturing, WaitingAck, Verifying, Done }
     Freeze freeze;
     long freezeAt;
     string stillPath;
@@ -191,6 +192,7 @@ sealed class Host : ApplicationContext
         Directory.CreateDirectory(baseDir);
         string suffix = o.Port == 9335 ? "" : $"-{o.Port}";
         tmpDir = Path.Combine(baseDir, $"tmp-host{suffix}");
+        tabsFile = Path.Combine(baseDir, $"host-tabs{suffix}.json");
         Directory.CreateDirectory(tmpDir);
         Log($"start pid {Environment.ProcessId} api {o.Port} cdp {o.Cdp} home {o.Home} data {o.Data}");
 
@@ -247,8 +249,20 @@ sealed class Host : ApplicationContext
             if (o.NoOcclusion) args += " --disable-features=CalculateNativeWinOcclusion";
             env = await CoreWebView2Environment.CreateAsync(null, o.Data, new CoreWebView2EnvironmentOptions(args));
             env.BrowserProcessExited += (_, e) => { Log($"browser process exited: {e.BrowserProcessExitKind}"); Quit(); };
-            await NewTab(string.IsNullOrEmpty(o.Url) ? "https://www.google.com" : o.Url, true);
+            // the tabs open when the host last ran come back (a restart reloads them, nothing is lost)
+            string[] urls = Array.Empty<string>();
+            int activeAt = 0;
+            try
+            {
+                var saved = JsonNode.Parse(File.ReadAllText(tabsFile));
+                urls = (saved?["tabs"] as JsonArray)?.Select(x => (string)x).Where(u => !string.IsNullOrEmpty(u) && u != "about:blank").ToArray() ?? urls;
+                activeAt = (int?)saved?["active"] ?? 0;
+            }
+            catch { }
+            if (urls.Length == 0) await NewTab(string.IsNullOrEmpty(o.Url) ? "https://www.google.com" : o.Url, true);
+            else for (int i = 0; i < urls.Length; i++) await NewTab(urls[i], i == Math.Clamp(activeAt, 0, urls.Length - 1));
             ready = true;
+            SaveTabs();
             Log($"ready, browser {env.BrowserVersionString}");
         }
         catch (Exception e)
@@ -261,6 +275,7 @@ sealed class Host : ApplicationContext
 
     void Quit()
     {
+        quitting = true;
         try { timer.Stop(); } catch { }
         try { if (winHook != IntPtr.Zero) NI.UnhookWinEvent(winHook); } catch { }
         try { if (mouseHook != IntPtr.Zero) N.UnhookWindowsHookEx(mouseHook); } catch { }
@@ -600,9 +615,13 @@ sealed class Host : ApplicationContext
         Bump();
     }
 
+    // The QPC clock in 100 ns ticks (what Windows.Graphics.Capture stamps frames with).
+    static long Qpc() => (long)(Stopwatch.GetTimestamp() * (10_000_000.0 / Stopwatch.Frequency));
+
     void SetShown(bool v)
     {
         if (v == shown) return;
+        Log($"view {(v ? "shown" : "hidden")} qpc {Qpc()}");
         if (!v && ViewHasFocus()) GiveBackFocus();
         shown = v;
         if (v)
@@ -777,7 +796,7 @@ sealed class Host : ApplicationContext
         {
             var dir = Path.Combine(o.Home, o.Frames.Replace('/', Path.DirectorySeparatorChar), "still");
             if (Directory.Exists(dir))
-                foreach (var f in Directory.GetFiles(dir, "*.jpg", SearchOption.AllDirectories)) File.Delete(f);
+                foreach (var f in Directory.GetFiles(dir, "st*.*", SearchOption.AllDirectories)) File.Delete(f);
         }
         catch { }
     }
@@ -789,15 +808,15 @@ sealed class Host : ApplicationContext
         var t = active;
         if (t == null) return;
         var ms = new MemoryStream();
-        await t.W.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Jpeg, ms);
+        await t.W.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, ms); // lossless: the swap back is pixel exact
         var bytes = ms.ToArray();
         if (bytes.Length < 100) return;
         stillSeq++;
-        string bucket = $"s{stillSeq % 4:00}", name = $"st{run}-{stillSeq}.jpg";
+        string bucket = $"s{stillSeq % 4:00}", name = $"st{run}-{stillSeq}.png";
         var rel = $"{o.Frames}/still/{bucket}";
         var dir = Path.Combine(o.Home, rel.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(dir);
-        foreach (var f in Directory.GetFiles(dir, "*.jpg")) { try { File.Delete(f); } catch { } }
+        foreach (var f in Directory.GetFiles(dir, "st*.*")) { try { File.Delete(f); } catch { } }
         var tmp = Path.Combine(tmpDir, name + ".part");
         await File.WriteAllBytesAsync(tmp, bytes);
         File.Move(tmp, Path.Combine(dir, name), true);
@@ -821,15 +840,61 @@ sealed class Host : ApplicationContext
                 if (freeze == Freeze.Capturing) { freeze = Freeze.WaitingAck; freezeAt = Environment.TickCount64; }
                 break;
             case Freeze.WaitingAck:
-                // hide the view once the panel shows the still under it (or after half a second)
+                // the panel says the still is drawn (or half a second went by): look for it in herdr's frame
                 if ((stillPath != null && stillAck == stillPath) || now - freezeAt > 500)
                 {
-                    SetShown(false);
-                    freeze = Freeze.Done;
+                    freeze = Freeze.Verifying;
                     freezeAt = now;
+                    _ = HideOverStill();
                 }
                 break;
         }
+    }
+
+    // The view hides only once herdr's own frame shows the still where the page is: the marker
+    // squares under it are covered then. (Hiding on the panel's word alone showed herdr's bare
+    // page area for ~80 ms while the picture was still being decoded: the annotate flicker.)
+    async Task HideOverStill()
+    {
+        long start = Environment.TickCount64;
+        int looks = 0;
+        bool seen = false;
+        while (freeze == Freeze.Verifying && Environment.TickCount64 - start < 700)
+        {
+            looks++;
+            try
+            {
+                using var shot = await Shot();
+                if (shot != null && !MarkersShowing(shot, cur)) { seen = true; await Task.Delay(20); break; } // and one more frame to reach the screen
+            }
+            catch { }
+            await Task.Delay(15);
+        }
+        if (freeze != Freeze.Verifying) return; // unfrozen meanwhile
+        Log($"still {(seen ? "on screen" : "not seen")} after {looks} look(s), {Environment.TickCount64 - start} ms");
+        SetShown(false);
+        freeze = Freeze.Done;
+        freezeAt = Environment.TickCount64;
+    }
+
+    // Is either marker square (top left magenta, bottom right cyan) visible in herdr's frame? By hue:
+    // a dialog's dimming backdrop darkens them but keeps them magenta and cyan.
+    static bool MarkersShowing(Bitmap bmp, Rectangle r)
+    {
+        bool Magenta(int x, int y)
+        {
+            if (x < 0 || y < 0 || x >= bmp.Width || y >= bmp.Height) return false;
+            var c = bmp.GetPixel(x, y);
+            return c.R - c.G > 35 && c.B - c.G > 35 && Math.Abs(c.R - c.B) < 30;
+        }
+        bool Cyan(int x, int y)
+        {
+            if (x < 0 || y < 0 || x >= bmp.Width || y >= bmp.Height) return false;
+            var c = bmp.GetPixel(x, y);
+            return c.G - c.R > 35 && c.B - c.R > 35 && Math.Abs(c.G - c.B) < 30;
+        }
+        return (Magenta(r.X + 2, r.Y + 2) && Magenta(r.X + 1, r.Y + 3))
+            || (Cyan(r.Right - 3, r.Bottom - 3) && Cyan(r.Right - 2, r.Bottom - 4));
     }
 
     // ---- overlays ----
@@ -961,6 +1026,7 @@ sealed class Host : ApplicationContext
             }
         };
         w.WindowCloseRequested += (_, _) => CloseTab(t);
+        w.SourceChanged += (_, _) => SaveTabs();
         c.AcceleratorKeyPressed += (_, e) => OnKey(t, e);
         c.GotFocus += (_, _) => { focused = true; Bump(); };
         c.LostFocus += (_, _) => { focused = false; Bump(); };
@@ -989,6 +1055,25 @@ sealed class Host : ApplicationContext
         catch (Exception e) { Log("target id: " + e.Message); }
     }
 
+    bool quitting;
+
+    void SaveTabs()
+    {
+        if (!ready || quitting) return; // closing the tabs on the way out isn't a change to remember
+        try
+        {
+            var json = new JsonObject
+            {
+                ["tabs"] = new JsonArray(tabs.Select(t => (JsonNode)(t.W?.Source ?? "")).ToArray()),
+                ["active"] = Math.Max(0, tabs.IndexOf(active)),
+            };
+            var tmp = tabsFile + ".tmp";
+            File.WriteAllText(tmp, json.ToJsonString());
+            File.Move(tmp, tabsFile, true);
+        }
+        catch { }
+    }
+
     void Activate(Tab t)
     {
         if (active == t) return;
@@ -1002,6 +1087,7 @@ sealed class Host : ApplicationContext
             if (old != null && ViewHasFocus()) t.C.MoveFocus(CoreWebView2MoveFocusReason.Programmatic);
         }
         catch (Exception e) { Log("activate " + e.Message); }
+        SaveTabs();
         Bump();
     }
 
@@ -1017,6 +1103,7 @@ sealed class Host : ApplicationContext
         }
         try { t.C.Close(); } catch { }
         Log($"closed tab {t.Id}");
+        SaveTabs();
         if (tabs.Count == 0 && ready) _ = NewTab("about:blank", true);
         Bump();
     }
