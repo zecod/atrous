@@ -2,7 +2,7 @@
 
 ## Mods have your access
 
-A mod is trusted JavaScript running inside Herdr. It can run programs with your environment, fetch URLs and read files.
+A mod is trusted JavaScript running inside Atrous. It can run programs with your environment, fetch URLs and read files.
 The built-in file API limits writes to the app home, but a mod can run a program to write elsewhere. That is not a security boundary.
 Mods can also run programs on connected machines.
 
@@ -11,16 +11,16 @@ Layouts can load mods. Check those references too.
 
 ## What stays on disk
 
-The default app home is `~/.config/herdr-app`, including on macOS and Windows (under your user home).
-`XDG_CONFIG_HOME` changes the config root. `HERDR_APP_HOME` selects an app home directly and takes precedence.
+The default app home is `~/.config/atrous`, including on macOS and Windows (under your user home).
+`XDG_CONFIG_HOME` changes the config root. `ATROUS_HOME` selects an app home directly and takes precedence.
 
 This folder holds your settings, keys, layouts, mods, generated agent guide and API types.
-It also holds mod data, shared state, window positions, this screen's focus and zoom, update notes and cached media, and telemetry while enabled.
-Mods may store sensitive data here. Herdr does not encrypt this folder.
+It also holds mod data, shared state, window positions, this screen's focus and zoom, update notes and cached media.
+Mods may store sensitive data here. Atrous does not encrypt this folder.
 The [installed guide's file map](../defaults/AGENTS.md#the-files) explains the files.
 
 Spaces, tabs and splits are stored in each machine's core document, not in the app home.
-Terminals and their output belong to [herdr-core](https://github.com/herdrdev/herdr-core).
+Terminals and their output belong to [atrous-core](https://github.com/zecod/atrous-core).
 Removing the app home does not stop the core or erase its data.
 
 The app exposes a local control socket in its home so agents can inspect and drive the window.
@@ -29,11 +29,11 @@ Remote connections use SSH through the core.
 
 ## Updates and signing
 
-Installed releases check the Herdr release service, download an update, and check its SHA-256 checksum against the release manifest before unpacking it.
+Installed releases check the latest GitHub release of zecod/atrous (its `latest.json`), download an update, and check its SHA-256 checksum against that manifest before unpacking it. Until zecod/atrous has published a release, a check finds nothing.
 The app switches to the downloaded version on quit. Source builds do not update themselves.
 Core updates are handled separately by the core's updater.
 
-A checksum from the same service detects a damaged download; it is not an independent signature on the manifest.
+A checksum from the same release detects a damaged download; it is not an independent signature on the manifest.
 The app does not verify a separate cryptographic signature on update manifests.
 
 The release pipeline supports Apple Developer ID signing on macOS and Azure artifact signing on Windows when their credentials are configured.
@@ -42,27 +42,14 @@ On macOS the installer and updater verify certificate-signed bundles and preserv
 Apple notarization is tested separately; it is not required for publishing a release.
 Do not assume every download is notarized or signed.
 
-## Telemetry
+## Usage data and feedback
 
-Usage telemetry is **on by default**. Release builds send a small daily report to `https://telemetry.herdr.dev/v1/report` with a random install ID.
-Reports include app and core versions, OS and architecture, bucketed usage time and counts, known agent names, built-in layout names, mod counts, app command names, and fixed event counters.
-Custom layout names become `custom`; custom mod names are not sent.
-Terminal text, prompts, file contents, folder paths and free-text names are not included.
+Atrous sends no usage data. herdr-app had daily anonymous usage reports; Atrous removed them: nothing is collected, nothing is stored for it, and there is no setting to turn it on. **Settings → Privacy** says so. A `telemetry` key left in a `settings.json` brought over from herdr-app is ignored.
 
-Turn it off in **Settings → Privacy**. That page also lets you inspect the report.
-Or set this field in your existing `settings.json`:
+What does reach the network on its own: update checks of an installed release (GitHub releases of zecod/atrous and zecod/atrous-core), and the core's own connections to machines you add. Mods can use the network like any program you run.
 
-```json
-{
-  "telemetry": false
-}
-```
+Feedback is never sent by the app. **Send feedback** (or `atrous feedback "<text>"` from an agent) opens a new GitHub issue on zecod/atrous in your browser, filled in with your message, the app and core versions, your OS and the name of a built-in layout. You read it and post it yourself.
 
-Turning it off deletes the local install ID and unsent reports. It cannot recall reports already sent.
-For one run, set `DO_NOT_TRACK=1` or `HERDR_TELEMETRY=0`. CI environments disable collection too.
-Ordinary source builds collect locally while enabled but do not send, unless pointed at a test endpoint with `HERDR_TELEMETRY_URL`.
+Atrous makes no requests to herdr's servers.
 
-Telemetry being off does not stop update checks, mod network requests or feedback you choose to send.
-Feedback is drafted for you to review and send, not sent silently.
-
-[Back to Herdr](../README.md)
+[Back to Atrous](../README.md)

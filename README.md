@@ -1,143 +1,119 @@
-# Herdr
+# Atrous: a fork of herdr-app
 
-Herdr is a desktop app for terminals and coding agents. Keep work in spaces, see which agents need you, and leave terminals running when you close the window.
+Atrous is a desktop app for terminals and coding agents. Keep work in spaces, see which agents need you, and leave terminals running when you close the window.
+
+Atrous is a rebranded fork of [herdr-app](https://github.com/herdrdev/herdr-app) and [herdr-core](https://github.com/herdrdev/herdr-core) by herdrdev, both under the Apache License 2.0, the way Cursor forked VS Code. It starts from herdr-app 0.1.13. See [NOTICE](NOTICE) for the attribution and the list of changes, and [LICENSE](LICENSE).
+
+## What changed from herdr-app
+
+- **New names, side by side with herdr.** The app is `atrous` (`atrous.exe`), its core is [atrous-core](https://github.com/zecod/atrous-core) with the short CLI `atc`, its home is `~/.config/atrous` (`ATROUS_HOME`), and every `HERDR_*` / `HC_*` variable is `ATROUS_*` / `ATC_*`. Atrous never looks at herdr's core, home, sockets or install folder, so both apps can be installed and open at the same time.
+- **Your herdr-app setup comes along once.** The first time Atrous starts and `~/.config/atrous` doesn't exist, it copies your settings, keys, programs, themes, own layouts with their clicks, own mods, shared state and mod data from `~/.config/herdr-app`, rewrites `.config/herdr-app` paths in them, and says what came in a note. herdr-app's folder is only read.
+- **Mods import from `"atrous"`.** `"herdr"` stays as another name for the same module, and `core()` is the new name for `hc()`, so herdr-app's mods load unchanged. The types are in `atrous.d.ts`.
+- **Layouts:** Classic (herdr's main layout), Terminals and Atrous 98.
+- **No telemetry.** Atrous collects and sends no usage data, and Settings → Privacy says so.
+- **Feedback** opens a new, prefilled [GitHub issue](https://github.com/zecod/atrous/issues/new) that you post yourself.
+- **Updates** come from GitHub releases of zecod/atrous and zecod/atrous-core. Until a release exists, a check simply finds nothing. Atrous sends no requests to herdr's servers.
+- **Brand:** the Atrous mark replaces the herdr ram everywhere: app icon, setup screen, welcome, Atrous 98, macOS bundle and disk image.
+
+Everything else works as in herdr-app: spaces, tabs and panes, the agents list, peek, remote machines over SSH, layouts and mods.
 
 ## Install
 
-### Linux and macOS
+Atrous has no published release yet, so build it from source (below). Once [zecod/atrous releases](https://github.com/zecod/atrous/releases) exist, the installers are:
 
-```sh
-curl -fsSL https://releases.herdr.dev/app/install.sh | sh
+```powershell
+# Windows (x64), in PowerShell
+irm https://github.com/zecod/atrous/releases/latest/download/install.ps1 | iex
 ```
 
-Linux needs a desktop session and a working Vulkan driver. macOS builds are available for Apple Silicon; Intel Mac users can [build from source](#build-from-source). Linux builds are x86-64 and ARM64.
+```sh
+# macOS (Apple Silicon) and Linux
+curl -fsSL https://github.com/zecod/atrous/releases/latest/download/install.sh | sh
+```
 
-The installer adds Herdr to your apps and puts the command in `~/.local/bin`.
-Add that folder to your PATH if the installer asks.
-On macOS the app lives in `~/Applications/Herdr.app`.
-For drag-and-drop installation on Apple Silicon, download [Herdr.dmg](https://releases.herdr.dev/app/Herdr.dmg) and drag Herdr to Applications.
+They also install atrous-core if it's missing, and Atrous offers to install or update a core it can't use.
 
-On macOS (Apple Silicon), you can also install with [Homebrew](https://brew.sh/):
+## Build and install from source
+
+Clone with submodules. You need Rust 1.95 or newer, [Zig 0.16.0](https://ziglang.org/download/), libclang (for bindgen) and [just](https://github.com/casey/just) (optional).
 
 ```sh
-brew install --cask herdr-app
+git clone --recurse-submodules https://github.com/zecod/atrous.git
+cd atrous
 ```
 
 ### Windows
 
-Run in PowerShell on x64 Windows with curl and tar installed (Windows 10 1803 or newer):
+Also needed: the Visual Studio 2022 Build Tools (C++ workload) and LLVM (`LIBCLANG_PATH` pointing at the folder with `libclang.dll`, for example `C:\Program Files\LLVM\bin`). Put `zig` on `PATH` or set `ZIG` to `zig.exe`.
 
 ```powershell
-irm https://releases.herdr.dev/app/install.ps1 | iex
+cargo build --release --locked
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install-windows.ps1   # or: just install
 ```
 
-Herdr appears in the Start menu. The installer adds `%LOCALAPPDATA%\Programs\herdr-app` to your user PATH. Open a new terminal to pick it up.
+This installs `%LOCALAPPDATA%\Programs\atrous\atrous.exe`, adds an **Atrous** Start menu shortcut, and adds that folder to your user `PATH` (open a new terminal to use `atrous`). It never touches an installed herdr-app (`%LOCALAPPDATA%\Programs\herdr-app`).
 
-The shell and PowerShell installers download and run code. Read the [shell installer](distribution/install.sh) or [PowerShell installer](distribution/install.ps1) first if you prefer.
-They also install [herdr-core](https://github.com/herdrdev/herdr-core) if it is missing.
-The app can help install or update a core it cannot use.
+Atrous needs atrous-core: build and install [zecod/atrous-core](https://github.com/zecod/atrous-core), which puts `atrous-core.exe` and `atc.exe` in `%LOCALAPPDATA%\Programs\atrous-core`. Without one, Atrous opens a screen that installs it or lets you pick one.
+
+### macOS
+
+Also needed: the Xcode Command Line Tools.
+
+```sh
+cargo build --release --locked
+scripts/install-macos          # or: just install
+```
+
+This makes `~/Applications/Atrous.app` (bundle id `io.github.zecod.atrous`, the Atrous icon) and links `~/.local/bin/atrous`. Install atrous-core into `~/.local/bin` (`atrous-core` and `atc`). Release builds are signed and packed by `scripts/package`; `scripts/mac-dmg` makes the drag-to-Applications `Atrous.dmg` (needs a Developer ID certificate).
+
+### Linux
+
+```sh
+cargo build --release --locked
+scripts/install-linux          # or: just install
+```
+
+Linux needs a desktop session, a working Vulkan driver and the development packages listed in [CI](.github/workflows/ci.yml).
+
+### Tests
+
+```sh
+just test        # bun tests of the shipped mods, then cargo test --locked
+```
+
+Never run a bare `atrous` from `target/` on a machine where you also use the app without `ATROUS_HOME` pointing at a scratch home: it opens a second window on your real setup.
 
 ## Find your work
 
 A **space** holds work on one machine, usually in one repo. Each space has **tabs**. Split a tab into **panes** to put terminals or mod panels beside each other.
 
-An unnamed space follows its first terminal's folder. Name a space or tab when you want a label that stays.
-New tabs start in the focused terminal's folder.
+The agents sidebar brings agents from your spaces into one list, including workers started by another agent. Agents that report status show as **Working**, **Blocked** (waiting for you), **Done** (finished while you were looking elsewhere) or **Idle**.
 
-The agents sidebar brings agents from your spaces into one list, including workers started by another agent.
-Agents that report status show as:
+The window arranges terminals; the core runs them. Closing the window leaves them running; closing a pane or tab ends its terminals.
 
-- **Working:** still busy.
-- **Blocked:** waiting for you.
-- **Done:** finished while you were looking elsewhere.
-- **Idle:** not working, or a finished agent you have looked at.
-
-Click an agent to see it. A worker without a pane opens in **peek**, over your tab. Keep it as a tab if you want it beside your other work.
-Ctrl-click a live terminal address in terminal text to peek at it; use Cmd-click on macOS.
-An address such as `t7` means a terminal on the same machine as the terminal showing it. `vps/t7` names one on another machine.
-
-The window arranges terminals. The core runs them.
-Closing the window leaves them running; closing a pane or tab ends its terminals.
-After a reboot or core crash, kept panes get fresh shells in their last folders, not their old programs.
-
-## Work on another machine
-
-Add an SSH machine from Settings → Machines or the sidebar's Add machine action.
-Pick a host from your SSH config or type how SSH reaches it.
-Spaces on that machine run their terminals there, not on your computer.
-
-Each machine keeps its spaces, tabs and splits in its core. Connected screens share that structure and the live terminals, but keep their own focus and zoom.
-Remote work keeps running when your local window closes or your laptop sleeps, as long as the remote machine and core stay up.
+Add an SSH machine from Settings → Machines; spaces on that machine run their terminals there, in that machine's own atrous-core.
 
 ## Make it yours
 
-Open the command palette to find an action by name, or open Settings to change fonts, colors, sounds and other preferences.
-The built-in layouts include Herdr, Terminals and Herdr 98.
-A **layout** arranges the window. **Mods** are small JavaScript programs that draw its panels, menus and dialogs.
+Open the command palette to find an action by name, or open Settings to change fonts, colors, sounds and other preferences. A **layout** arranges the window. **Mods** are small JavaScript programs that draw its panels, menus and dialogs. Duplicate a shipped layout or mod before changing its structure or code; Atrous updates the shipped ones on start.
 
-Duplicate a shipped layout or mod before changing its structure or code. Your copies stay yours; Herdr updates the shipped ones on start.
-Save a personal layout, mod or key file and the window reloads it.
-A broken edit keeps the last good version and reports the error.
+Ctrl+Shift+P shows every command and its key (Cmd+Shift+P on macOS). Change any key in `keys.json`.
 
-Ctrl+Shift+P shows every command and its key (Cmd+Shift+P on macOS). Change any key in `keys.json`; see [the keys section](defaults/AGENTS.md#keys-keysjson) of the mod guide for the format, including JSON objects for named, typed command arguments.
+[Layouts and mods](docs/mods.md) · [Commands](docs/commands.md) · [Security and privacy](docs/security.md)
 
-[Layouts and mods](docs/mods.md) · [Commands](docs/commands.md)
-
-## Updates and privacy
-
-Installed releases check for updates in the background and download a new app beside the running one. It takes over when you quit and reopen, or choose the update action. Your terminals keep running in the core.
-Settings → Updates shows what is available. What's New opens after an update; you can open it again from the command palette.
-Builds from source do not update themselves.
-
-Usage telemetry is on by default in releases. Turn it off in Settings → Privacy.
-Mods are trusted code, not sandboxed extensions. Read [security and privacy](docs/security.md) before installing someone else's mod.
+Mods are trusted code, not sandboxed extensions. Read a mod before installing it.
 
 ## For agents
 
 ```sh
-herdr-app --skill
+atrous --skill      # the agent guide for driving the window
+atrous ls
+atrous status
+atrous commands
 ```
 
-This prints the agent guide for driving the window. The herdr-core skill points agents here.
-Use herdr-core for running and coordinating programs; use the app to change what you see.
+Use atrous-core (`atc --skill`) for running and coordinating programs; use the app to change what you see.
 
-```sh
-herdr-app ls
-herdr-app status
-herdr-app commands
-```
+## License
 
-The first two inspect the open window. The command list also works without one.
-See the [command reference](docs/commands.md) for arguments.
-
-## Build from source
-
-For bugs, mod API requests and code contributions, see [Contributing](CONTRIBUTING.md).
-
-Clone this repo with its submodules. Use Rust 1.95.0 and Zig 0.16.0, the versions used in [CI](.github/workflows/ci.yml).
-Linux needs the development packages listed in that workflow.
-
-```sh
-git clone --recurse-submodules https://github.com/herdrdev/herdr-app.git
-cd herdr-app
-just build
-just test
-just install
-```
-
-Install [just](https://github.com/casey/just) to use these recipes.
-The platform installer builds a release and adds the app to your desktop.
-On Linux it links to this checkout, so keep the checkout in place.
-Quit and reopen Herdr to use the new build.
-
-Documentation checks also need [Bun](https://bun.sh): `just docs-check` checks generated pages and CLI examples; `just docs-generate` refreshes the reference pages.
-
-To compare drawing changes on Windows, Linux or macOS, run the same fixed workloads against each build:
-
-```sh
-python scripts/bench.py --bin <app executable> --set spinners --seconds 20
-```
-
-The runner requires `hc` on PATH and uses the Python executable running the script. It prints a unique artifact folder with the run settings, counters and results, then stops its private app, terminals and core. Both sets use Python fixture programs; the default set’s TUI workload replaces historical `btop` measurements. `--only spinners` measures just the quiet native spinner scenario. Keep the window visible and the display awake, and compare the same window activity and display settings; inactive windows may draw at a lower rate. Windows records visibility, foreground activity and display Hz at each measurement boundary; other platforms mark these observations unavailable. Visibility does not establish occlusion. Draws are window render calls. Render-to-paint elapsed time stops before scene finalization, backend drawing, uploads and presentation; it is separate from OS process CPU time. Neither measures physical presentation or the FPS HUD’s derived MAX FPS.
-
-`python scripts/bench_compare.py ghostty --root <artifact folder>` reuses a run’s fake agent for the macOS comparison. Benchmark checks: `python -m unittest discover -s scripts -p test_bench.py`.
+Apache License 2.0. Atrous is a modified fork of herdr-app and herdr-core by herdrdev; see [NOTICE](NOTICE). Third-party components are listed in [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES). "herdr" and its logo belong to their owners; Atrous uses neither as its own brand.

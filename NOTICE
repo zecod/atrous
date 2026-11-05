@@ -1,0 +1,32 @@
+Atrous
+Copyright 2026 the Atrous authors
+
+Atrous is a modified fork of herdr-app / herdr-core by herdrdev
+(https://github.com/herdrdev/herdr-app, https://github.com/herdrdev/herdr-core),
+licensed under the Apache License 2.0 (see LICENSE). This repository is the
+app (herdr-app); the core lives at https://github.com/zecod/atrous-core.
+
+Changes from herdr-app 0.1.13, made by the Atrous authors:
+- Rebranded: the app, its CLI and Cargo package are `atrous`; the window and
+  bundle id is io.github.zecod.atrous; its home is ~/.config/atrous
+  (ATROUS_HOME); every HERDR_* environment variable is ATROUS_*, and the core
+  it uses is atrous-core / `atc` (ATC_* variables), so it runs side by side
+  with herdr-app without sharing anything.
+- The herdr logo (the ram) and sheep artwork are removed and replaced by the
+  Atrous mark, including the Atrous 98 (formerly Herdr 98) pixel art and the
+  macOS disk image background. Apache-2.0 grants no trademark rights; Atrous
+  uses no herdr marks as its own.
+- First-start migration of the person's own files from ~/.config/herdr-app
+  (read only) into ~/.config/atrous.
+- The mod module is "atrous", with "herdr" kept as an alias; core() is the new
+  name for hc().
+- Usage telemetry removed; feedback opens a GitHub issue instead of posting to
+  herdr's service; updates come from GitHub releases of zecod/atrous and
+  zecod/atrous-core. No requests go to herdr's servers.
+- Installers, packaging, release workflow and documentation adapted to the
+  new names and endpoints.
+
+Files changed for the fork carry no per-file notice beyond this one. Original
+copyright and attribution notices from herdr-app are kept, and third-party
+notices are in THIRD-PARTY-NOTICES. Patches in vendor/ marked HERDR: are
+herdr-app's; patches marked ATROUS: are Atrous's.

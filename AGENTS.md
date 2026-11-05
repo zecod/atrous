@@ -1,22 +1,42 @@
-# Herdr app
+# Atrous app
 
-The Herdr 2 desktop app (`herdr-app`): a native GPUI client of
-[herdr-core](https://github.com/herdrdev/herdr-core). Can (`ogulcancelik`)
-maintains it.
+The Atrous desktop app (`atrous`): a native GPUI client of
+[atrous-core](https://github.com/zecod/atrous-core). Atrous is a rebranded
+fork of herdr-app 0.1.13 (Apache-2.0, see NOTICE); its core is a fork of
+herdr-core.
 
 If AGENTS.local.md exists, read it too: the maintainer's local rules.
+
+## Names (the fork's contract)
+
+Keep these exact, so the app, the core and the built-in UI connect:
+
+- App, CLI and Cargo package `atrous`; display name Atrous; window and bundle
+  id `io.github.zecod.atrous` (`src/brand.rs` holds the names and addresses).
+- Home `~/.config/atrous`, `ATROUS_HOME`; every app env var is `ATROUS_*`.
+- Core `atrous-core` and `atc`; core env vars `ATC_*`, never `HC_*`; the
+  app's core document is `atrous`; labels the app sets are `atrous.*`.
+- Mods import `"atrous"`; `"herdr"` stays an alias, and `hc()` an alias of
+  `core()`, so herdr-app mods keep loading.
+- Updates: GitHub releases of zecod/atrous and zecod/atrous-core. No request
+  ever goes to herdr's servers, and there is no telemetry.
+- No herdr logo or ram/sheep art anywhere (`assets/brand/` has the Atrous mark).
+- Fedra (`fedra/`) becomes the built-in UI; it has its own owner while that
+  work is in progress.
+
+Atrous must run side by side with an installed herdr-app: never read or
+write herdr's core, sockets or install folder. The only herdr path the app
+reads is `~/.config/herdr-app`, once, in `src/migrate.rs`.
 
 ## Compatibility
 
 Preserve compatibility with released versions and installed user data.
-Discuss breaking changes and removal of compatibility code with the maintainer
-before changing documented behavior.
+Keep the `herdr` module alias and `hc()` working for mods written for herdr-app.
 
-## Before you grow the app's core: ask Can
+## Before you grow the app's core
 
 The app's core (the model, machine layout documents, commands, and shared mod APIs)
-stays small; everything else is mods. Before adding anything to it, answer
-these three, then discuss with Can and wait for his go:
+stays small; everything else is mods. Before adding anything to it, answer:
 
 1. Does the app itself act on it (it changes what the app does, not only
    how something looks)?
@@ -25,21 +45,21 @@ these three, then discuss with Can and wait for his go:
 3. Can mods not do it correctly, even with care?
 
 If all three are no, it belongs in mods (their shared storage, their own
-code), even at the price of some repetition. Same for herdr-core: what the
-app asks of it goes through Can too.
+code), even at the price of some repetition.
 
-`herdr-app --skill` prints the window manual in `src/SKILL.md`.
+`atrous --skill` prints the window manual in `src/SKILL.md`.
 Keep it current when changing agent-facing behavior.
 
 ## The guide users' agents read
 
-`defaults/AGENTS.md` is written into every user's `~/.config/herdr-app` on
+`defaults/AGENTS.md` is written into every user's `~/.config/atrous` on
 every start: it's how their agents learn what the app can do. A change to
 what users or agents can do (a command, a setting, a layout or mod
 feature, a file) updates it in the same commit. `cargo test` checks that it
 names every command and settings.json key; the rest is on you. Keep it a
 map with rules and short examples: the `.d.ts` files are generated and are
-the full API.
+the full API (`defaults/atrous.d.ts`; the app also writes a `herdr.d.ts`
+that re-exports it for the alias).
 
 ## What ships in the box
 
@@ -64,44 +84,45 @@ checked on those systems, not only by cross-compiling.
 
 `just build`, `just test` (what CI runs, on Linux), `just check` (the tests).
 `just install` builds and installs the desktop app using the platform installer.
-On Windows it updates `%LOCALAPPDATA%\Programs\herdr-app` and the Start menu;
-quit and reopen Herdr to use the new build. Windows recipes use PowerShell by default;
+On Windows it updates `%LOCALAPPDATA%\Programs\atrous` and the Start menu;
+quit and reopen Atrous to use the new build. Windows recipes use PowerShell by default;
 `just --shell pwsh --shell-arg -Command <recipe>` uses pwsh.
 
-Never run a bare `target/*/herdr-app` (no arguments) on a machine where you
-also use the app without `HERDR_APP_HOME` pointing at a scratch home: it
+Never run a bare `target/*/atrous` (no arguments) on a machine where you
+also use the app without `ATROUS_HOME` pointing at a scratch home: it
 opens a second window on your real setup. Subcommands and `--help` only
-talk.
+talk. A scratch home starts empty: set `ATROUS_MIGRATE_FROM` to a copy of a
+herdr-app home to try the first-start migration, never the real one.
 
 On Linux, test UI changes in the sandbox: `scripts/sandbox up`, then `do
 <command> [json]`, `status`, `shot` (screenshot), `move|click|drag`
-(pointer input, window px), `type`, `key <keysym> [Control_L ...]`, `hc
+(pointer input, window px), `type`, `key <keysym> [Control_L ...]`, `atc
 ...`, `restart`, `down`. It has its own core, home and a headless display
-(Weston + Xwayland) under `/var/tmp/herdr-app-sandbox`, so nothing pops up
+(Weston + Xwayland) under `/var/tmp/atrous-sandbox`, so nothing pops up
 on your screen. Never fake input on a real display. Run `scripts/sandbox
 down` when done.
 
 ## Contributing
 
-Work on a branch and open a pull request to `master`. CI must pass and Can
-approves; merges are squashed. Commit messages: lowercase conventional
-commits, single line, no AI co-author lines. Only Can releases (a `v*` tag).
+Work on a branch and open a pull request. CI must pass. Commit messages:
+lowercase conventional commits, single line.
 
-CHANGELOG.md: every release gets a `## [x.y.z] - YYYY-MM-DD` section
-(`### New` / `### Fixed`), written at release time from the commits since the
-last tag; Herdr shows it as the update notes. One line per change, in user
-words (what a person notices, not code), with the issue or PR number and
-`thanks @name` for contributors. Leave out internal changes and fixes for bugs
-that never shipped.
+CHANGELOG.md: every Atrous release gets a `## [x.y.z] - YYYY-MM-DD` section
+(`### New` / `### Fixed`) at the top, written at release time from the
+commits since the last tag; Atrous shows it as the update notes. The
+sections below 0.2.0 are herdr-app's history: leave them as they are. One
+line per change, in user words (what a person notices, not code).
 
 Add `<!-- spotlight -->` below a version heading to open What's New once
 when users update to it (including skipped versions). Use `<!-- spotlight macos -->`
 or a space-separated list such as `<!-- spotlight macos linux -->` to open it
-only on those platforms: `macos`, `linux`, `windows`. Other platforms keep the
-normal corner update note and can still read the full notes manually. Without
-platforms, a spotlight applies everywhere. Keep the marker in CHANGELOG.md:
-the release uploads the file unchanged to `releases.herdr.dev/app/<v>/changelog.md`,
-and `scripts/notes-media.ts check <v>` checks images without rewriting notes.
+only on those platforms: `macos`, `linux`, `windows`. Release media are assets
+of that version's GitHub release (`scripts/notes-media.ts`); the app fetches
+no other notes media.
+
+A release is a `v*` tag matching Cargo.toml; `.github/workflows/release.yml`
+builds every platform and publishes the GitHub release with `latest.json`,
+the tarballs, `changelog.md` and the installers.
 
 Never stop, signal, or restart someone else's app or core. Use an isolated
 app home and core session for testing.

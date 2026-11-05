@@ -1,16 +1,16 @@
 # Contributing
 
-Herdr is built to be changed by your agent. If what you want can be done with a mod or a layout, build it, there is no need to wait for us.
+Atrous is built to be changed by your agent. If what you want can be done with a mod or a layout, build it, there is no need to wait for us.
 
 Issues that ask for a custom mod, or for a feature a mod can already do, get closed.
 
-The same goes for pull requests: the layouts and mods Herdr ships take fixes only. Build the features you want as your own mod.
+The same goes for pull requests: the layouts and mods Atrous ships take fixes only. Build the features you want as your own mod.
 
 Please open an issue for:
-- bugs in Herdr itself or in the layouts and mods it ships with;
+- bugs in Atrous itself or in the layouts and mods it ships with;
 - things a mod cannot do yet (a missing API, an event, a setting).
 
-Show what you built in [Discord](https://discord.gg/PsgRfzmUDg) or share it as a layout ([GitHub topic `herdr-layout`](https://github.com/topics/herdr-layout), see [herdr.dev/layouts](https://herdr.dev/layouts)).
+Share what you built as a public GitHub repo with your layout or mod folder (see "Layouts and mods other people made" in [the mod guide](defaults/AGENTS.md)).
 
 ## Code contributions
 
