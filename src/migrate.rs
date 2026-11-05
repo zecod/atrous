@@ -89,8 +89,8 @@ pub fn take_note() -> Option<serde_json::Value> {
     }
     let what = if parts.is_empty() { "nothing of yours yet".to_owned() } else { parts.join(", ") };
     Some(serde_json::json!({
-        "title": "Brought over from herdr-app",
-        "body": format!("{what}. Your herdr-app folder is unchanged; herdr's own layouts and mods stay there."),
+        "title": "Brought over from your previous setup",
+        "body": format!("{what}. Your previous folder is unchanged; its own layouts and mods stay there."),
         "level": "info",
         "timeout": 20000,
     }))
@@ -226,7 +226,9 @@ fn write_summary(from: &Path, stage: &Path, report: &Report) -> std::io::Result<
     let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let summary = serde_json::json!({
         "version": 1,
-        "from": "herdr-app",
+        // What people read ("Brought over from your previous setup"); `app` names it for code.
+        "from": "your previous setup",
+        "app": "herdr-app",
         "home": from.to_string_lossy(),
         "at": at,
         "files": report.files,
@@ -478,7 +480,8 @@ mod tests {
         }
         assert_eq!(keys["global"]["ctrl-`"], "terminal.search", "a key the person bound stays theirs");
         let summary: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(to.join("data/migration.json")).unwrap()).unwrap();
-        assert_eq!(summary["from"], "herdr-app");
+        assert_eq!(summary["from"], "your previous setup");
+        assert_eq!(summary["app"], "herdr-app");
         assert_eq!(summary["layouts"], serde_json::json!(["mine"]));
         assert_eq!(summary["mods"], serde_json::json!(["own"]));
         for gone in ["AGENTS.md", "window.json", "installed.json", "layouts/main.json", "layouts/fedra.json", "layouts/fedra.svg",

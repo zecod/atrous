@@ -71,6 +71,9 @@ export default class AddProject extends View {
     this.handle = cx.focus_handle();
     this.handle.focus();
     cx.timer.after(300, () => { if (this.view === "home") this.handle.focus(); });
+    // props { view: "clone" | "create" }: open straight on that form (the onboarding's Clone from Git).
+    const start = props()?.view;
+    if (start === "clone" || start === "create") this.go(start, cx);
     cx.spawn(async (cx) => {
       try {
         const r = await core(["machine", "ls", "--json"]);
