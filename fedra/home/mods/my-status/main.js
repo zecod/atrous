@@ -25,7 +25,8 @@
 
 import { View, div, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { spaces, agents, panes, terminals, focused, theme, run, window, keys, layout, core, shared, setShared, props, nextCommand } from "atrous";
+import { spaces, agents, panes, terminals, focused, theme, run, window, keys, layout, core, shared, setShared, props, nextCommand, knownAgents } from "atrous";
+import * as T from "./trust.js"; // which terminals are agents that haven't reported (yet): counted like Flow and the sidebar show them
 
 // shared: space id -> { list: [address…], active: address, at: { address: started ms } }
 // (an older version stored a bare address string).
@@ -64,12 +65,23 @@ function save(spaceId, e) {
 }
 
 const same = (a, b) => a.active === b.active && a.list.length === b.list.length && a.list.every((x, i) => x === b.list[i]);
+
+// Tab id -> its name, for named tabs (an agent's tab is named after it: older builds' only clue).
+function tabNames() {
+  const m = new Map();
+  for (const s of spaces()) for (const c of s.tabs ?? []) if (c.named) m.set(c.id, c.name);
+  return (id) => m.get(id) ?? null;
+}
 const activeSpace = () => spaces().find((s) => s.active);
 
 export default class WorkspaceStatus extends View {
   init(_props, cx) {
     this.pending = 0;
     if (props()?.part) return;
+    // The agents Atrous can start (what a terminal that hasn't reported is): the cached list at once,
+    // then knownAgents() (the app asks the shell at most once a minute).
+    this.known = shared("new-menu.agents")?.[""] ?? [];
+    cx.spawn(async (cx) => { try { this.known = await knownAgents(); cx.notify(); } catch {} });
     // The panel follows the active space and its shells: the status bar redraws when
     // spaces, terminals or the layout change, and looks after each redraw (render). The
     // timer only covers what time alone changes (a fresh shell's grace, our own edits
@@ -330,7 +342,14 @@ export default class WorkspaceStatus extends View {
     if (part === "terminal-empty") return div().size_full().bg(t.background).p(12).text_size(12).text_color(t.dim).child("Starting a shell…");
     const space = activeSpace();
     const list = agents();
-    const needs = list.filter(a => a.status === "blocked").length;
+    // Agents with no status report count too: starting (at a trust prompt), or never reporting
+    // (OpenCode): atrous.agent label, launcher, argv or tab name (trust.js), as Flow and the sidebar.
+    const known = [...(this.known ?? []), ...(shared("new-menu.agents")?.[""] ?? [])];
+    const tab = tabNames();
+    const quiet = terminals().filter((k) => !T.reported(k) && T.launchOf(k, known, tab) && !list.some((a) => a.address === k.address));
+    const asks = shared("agents.prompts") ?? {};
+    const total = list.length + quiet.length;
+    const needs = list.filter(a => a.status === "blocked").length + quiet.filter((k) => asks[k.address]).length;
     const open = this.visible();
     const speed = this.speedLine(list);
     const qt = find(layout(), "quick-terminal");
@@ -340,7 +359,7 @@ export default class WorkspaceStatus extends View {
     return h_flex().size_full().px(14).gap(16).items_center().bg(t.chrome).border_t(1).border_color(t.border).text_size(11.8).text_color(t.muted)
       .child(label(space?.machine ? "server" : "monitor", space?.machine ?? "This computer"))
       .when(Boolean(space?.branch), el => el.child(label("branch", space.branch)))
-      .child(h_flex().gap(6).items_center().child(div().size(6).rounded(3).bg(t.dim)).child(`${list.length} agents`)
+      .child(h_flex().gap(6).items_center().child(div().size(6).rounded(3).bg(t.dim)).child(`${total} agent${total === 1 ? "" : "s"}`)
         .when(needs > 0, el => el.child(div().text_color(t.blocked).child(`· ${needs} needs you`))))
       .when(Boolean(speed), el => el.child(h_flex().id("agent-speed").gap(5).items_center().text_color(t.muted)
         .tooltip(speed.tip).child(svg(I("zap")).size(12).text_color(t.ansi3)).child(speed.label)))

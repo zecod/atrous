@@ -18,9 +18,9 @@
 function Update-AtrousAccount([string]$Tool, [string]$Dir, [string]$Here) {
   try {
     $markerPath = Join-Path $Dir '.atrous-account.json'
-    $markerTime = (Get-Item -LiteralPath $markerPath).LastWriteTimeUtc
-    $marker = Get-Content -Raw -Encoding UTF8 -LiteralPath $markerPath | ConvertFrom-Json
-    $newer = @($marker.sources) | Where-Object { $_ -and (Test-Path -LiteralPath $_) -and (Get-Item -LiteralPath $_).LastWriteTimeUtc -gt $markerTime }
+    $markerTime = (Get-Item -LiteralPath $markerPath -ErrorAction Stop).LastWriteTimeUtc
+    $marker = Get-Content -Raw -Encoding UTF8 -LiteralPath $markerPath -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    $newer = @($marker.sources) | Where-Object { $_ -and (Test-Path -LiteralPath $_) -and (Get-Item -LiteralPath $_ -ErrorAction Stop).LastWriteTimeUtc -gt $markerTime }
     if ($newer) { & node (Join-Path $Here 'profile.mjs') sync $Tool $Dir *> $null }
   } catch { }
 }
@@ -35,13 +35,19 @@ function Start-AtrousAccount([string]$Tool, $Rest) {
   $var = @{ claude = 'CLAUDE_CONFIG_DIR'; codex = 'CODEX_HOME' }[$Tool]
   $here = $PSScriptRoot
   $acc = $null
-  try {
-    $state = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $here 'state.json') | ConvertFrom-Json
-    $id = $state.active.$Tool
-    if ($id -and $id -ne 'default') {
-      $acc = @($state.accounts) | Where-Object { $_.tool -eq $Tool -and $_.id -eq $id } | Select-Object -First 1
-    }
-  } catch { }
+  # No state.json yet (nobody opened Settings > Accounts) or an unreadable one: the main account,
+  # silently. (-ErrorAction Stop: a missing file is otherwise a non-terminating error that prints
+  # in red at the top of the agent's terminal, try/catch or not.)
+  $statePath = Join-Path $here 'state.json'
+  if (Test-Path -LiteralPath $statePath) {
+    try {
+      $state = Get-Content -Raw -Encoding UTF8 -LiteralPath $statePath -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+      $id = $state.active.$Tool
+      if ($id -and $id -ne 'default') {
+        $acc = @($state.accounts) | Where-Object { $_.tool -eq $Tool -and $_.id -eq $id } | Select-Object -First 1
+      }
+    } catch { }
+  }
   $before = [Environment]::GetEnvironmentVariable($var)
   $label = "${Tool}:default"
   if ($acc) {
