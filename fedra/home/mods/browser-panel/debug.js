@@ -3,7 +3,7 @@
 // (devtools-net.mjs: console with stacks, a network log with bodies, Edit and resend, Intercept);
 // the drawer polls the shown tab once a second while it is open and on screen, and draws long
 // lists with virtual lists, so a busy page costs only the rows on screen. Agents' intercept rules
-// (the herdr-browser skill: bp net rule) show in the Intercept tab; while rules or held requests
+// (the atrous-browser skill: bp net rule) show in the Intercept tab; while rules or held requests
 // are active a red badge shows in the drawer's strip, or in the panel's toolbar when the drawer is
 // closed (main.js hook). Files: devtools-ui.js (shared builders), devtools-network.js and
 // devtools-intercept.js (tabs), devtools-net.mjs (the helper side, wired into helper.mjs by lines
@@ -39,7 +39,7 @@
 //   dt.view            the Browser view (dt.view.st: the helper's state: url, targetId, targets...;
 //                      dt.view.connected; dt.view.toast(text, null, cx))
 //   dt.state           per-tab state: dt.state[tab.id] (made in init)
-//   dt.base()          the helper's API, "http://127.0.0.1:<apiPort>" (panel props apiPort, default 9334)
+//   dt.base()          the helper's API, "http://127.0.0.1:<apiPort>" (panel props apiPort, default 9734)
 //   dt.get(path), dt.post(path, body)   JSON from the helper (they throw on HTTP errors; .status)
 //                      (the helper owns CDP: give a tab new data with routes in devtools-net.mjs, or
 //                      a helper module of your own wired like it, and call them with dt.get/post)
@@ -53,12 +53,12 @@
 //   dt.codeView(key)   that view's element, for render (null until filled)
 //   dt.ui(t)           builders in the drawer's look: chip, icon, button, toggle, segmented, tabs,
 //                      empty, section, kv, tag (devtools-ui.js)
-// Text the panel injects into pages should end with `//# sourceURL=herdr://<name>` (or run in an
-// isolated world named "herdr..."): the Console then tags what it logs "herdr", not the site's.
+// Text the panel injects into pages should end with `//# sourceURL=atrous://<name>` (or run in an
+// isolated world named "atrous..."): the Console then tags what it logs "atrous", not the site's.
 
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Editor, EditorState, v_virtual_list, Scrollbar, VirtualListScrollHandle } from "gpui-base";
-import { settings, theme, props } from "herdr";
+import { settings, theme, props } from "atrous";
 import { ui, ICON, stop, wrap, mergeList } from "./devtools-ui.js";
 import { NetworkTab } from "./devtools-network.js";
 import { InterceptTab, releaseIntercept } from "./devtools-intercept.js";
@@ -77,7 +77,7 @@ export function registerTab(...list) {
 }
 export const devtoolsTabs = () => TABS;
 
-const apiBase = () => `http://127.0.0.1:${Number(props()?.apiPort) || 9334}`;
+const apiBase = () => `http://127.0.0.1:${Number(props()?.apiPort) || 9734}`;
 const CODE_LANG = { json: "json", html: "html", xml: "html", css: "css", javascript: "js", js: "js", text: "txt", txt: "txt" };
 
 // ---- Console ----------------------------------------------------------------------------------
@@ -93,7 +93,7 @@ function consoleLines(e, cols) {
   const st = ownStack ? [] : e.stack ?? [];
   if (st.length) for (const f of st) out.push(...wrap(`    at ${f.fn || "(anonymous)"} (${f.url || "<anonymous>"}:${f.line}:${f.col})`, cols, 4));
   else if (e.url && !ownStack) out.push(...wrap(`    at ${e.url}${e.line ? `:${e.line}${e.col ? `:${e.col}` : ""}` : ""}`, cols, 4));
-  if (e.herdr) out.push("    (from the panel's own code in the page, not the site's)");
+  if (e.atrous) out.push("    (from the panel's own code in the page, not the site's)");
   e._wrap = { cols, lines: out };
   return out;
 }
@@ -180,7 +180,7 @@ const ConsoleTab = {
         .child(open
           ? div().flex_1().min_w(0).truncate().text_color(t.dim).text_size(10.5).child(`${clock(e.t)}${e.kind ? ` · ${e.kind}` : ""}${e.url ? ` · ${e.url}${e.line ? `:${e.line}` : ""}` : ""}`)
           : div().flex_1().min_w(0).truncate().text_color(color).child(e.text.split("\n")[0]))
-        .when(Boolean(e.herdr), (el) => el.child(U.tag("herdr")))
+        .when(Boolean(e.atrous), (el) => el.child(U.tag("atrous")))
         .child(div().max_w(170).flex_none().truncate().text_color(t.dim).child(e.source ?? ""));
       let el = v_flex().border_b(1).border_color(t.border).text_size(11.5).font_family(mono)
         .bg(e.level === "error" ? `${t.blocked}14` : e.level === "warn" ? `${t.ansi3}10` : open ? t.surface : t.background).child(head);

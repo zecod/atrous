@@ -7,7 +7,7 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { props, closeOverlay, theme, exec, appHome, readTextFile, shared, setShared, notify } from "herdr";
+import { props, closeOverlay, theme, exec, appHome, readTextFile, shared, setShared, notify } from "atrous";
 
 const I = (name) => `mods/open-in/${name}.svg`;
 export const scriptOf = (name) => `${appHome().replace(/\\/g, "/")}/mods/open-in/${name}`;

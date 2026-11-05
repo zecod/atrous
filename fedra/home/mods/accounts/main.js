@@ -1,16 +1,16 @@
 // Accounts: the sign-in dialog of Settings > Accounts, and the `mod.open accounts` launcher.
 // (The Accounts page is mods/my-settings/accounts.js; launchers and account folders live in
-// ~/.config/herdr-app/accounts/. accounts-core.js here is the same file as in my-settings and
+// ~/.config/atrous/accounts/. accounts-core.js here is the same file as in my-settings and
 // usage-card.)
 //
 // - `mod.open accounts` (the palette, a key, the usage card's toast): opens Settings on its
 //   Accounts section and closes its own invisible popup (mod.json: 2x2 px, no frame).
 // - props { role: "signin", tool, id, fresh }: the sign-in dialog. It runs the tool's own login in a
-//   background herdr-core terminal named login-<tool>-<id> (accounts/login.ps1, login.sh on
+//   background atrous-core terminal named login-<tool>-<id> (accounts/login.ps1, login.sh on
 //   macOS / Linux) and never shows that terminal unless asked ("Show details"):
 //     waiting  "Sign in to <tool> in your browser": Copy link / Open again (the link read from the
-//              terminal with `hc read`) / Cancel; Claude Code also takes a pasted code, typed into
-//              the terminal with `hc send`;
+//              terminal with `atc read`) / Cancel; Claude Code also takes a pasted code, typed into
+//              the terminal with `atc send`;
 //     success  credentials appeared in the account's folder: "Signed in as <email> · <plan>",
 //              Use for new agents / Done (the account stops being pending);
 //     failure  the terminal ended without them: one plain line, Try again / Close.
@@ -22,7 +22,7 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { props, openOverlay, closeOverlay, theme, hc, home, exec, window, run } from "herdr";
+import { props, openOverlay, closeOverlay, theme, core, home, exec, window, run } from "atrous";
 import { TOOLS, keyOf, currentState, updateState, setActive, readLogin, readEmail, displayName, accountsDir } from "./accounts-core.js";
 
 const I = (name) => `mods/accounts/${name}.svg`;
@@ -39,7 +39,7 @@ function reasonFrom(screen, tool) {
   if (/timed? ?out/i.test(s)) return "The sign-in timed out.";
   if (/invalid[_ ]?(code|grant)|code.*(invalid|expired)/i.test(s)) return "That code didn't work. Try again and paste the new one.";
   if (/ENOTFOUND|ECONNREFUSED|network|could not connect|failed to connect/i.test(s)) return "Couldn't reach the sign-in service. Check your connection.";
-  const lines = s.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !/^herdr-login:/.test(l) && !/^https?:\/\//.test(l));
+  const lines = s.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !/^atrous-login:/.test(l) && !/^https?:\/\//.test(l));
   return lines.length ? `It stopped with: ${lines[lines.length - 1].slice(0, 120)}` : "The sign-in didn't finish.";
 }
 
@@ -83,7 +83,7 @@ export default class Accounts extends View {
 
   async liveTerminals() {
     try {
-      const r = await hc(["ls", "--json"]);
+      const r = await core(["ls", "--json"]);
       return r.code === 0 ? (JSON.parse(r.stdout).terminals ?? []).filter((t) => t.state === "live") : null;
     } catch {
       return null;
@@ -110,7 +110,7 @@ export default class Accounts extends View {
     this.url = null;
     this.screen = "";
     const live = await this.liveTerminals();
-    if (live === null) return this.fail("herdr-core didn't answer. Try again in a moment.");
+    if (live === null) return this.fail("atrous-core didn't answer. Try again in a moment.");
     const mine = live.find((t) => t.name === loginName(a.tool, a.id));
     if (mine) {
       this.address = mine.address;
@@ -124,7 +124,7 @@ export default class Accounts extends View {
       ? ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", `${accountsDir()}/login.ps1`]
       : ["sh", `${accountsDir()}/login.sh`];
     try {
-      const r = await hc(["run", "--bg", "--json", "--no-parent", "--no-notify", "--name", loginName(a.tool, a.id), "--cwd", home(), "--", ...script, a.tool, a.dir]);
+      const r = await core(["run", "--bg", "--json", "--no-parent", "--no-notify", "--name", loginName(a.tool, a.id), "--cwd", home(), "--", ...script, a.tool, a.dir]);
       if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim());
       this.address = JSON.parse(r.stdout).address;
       this.phase = "waiting";
@@ -144,8 +144,8 @@ export default class Accounts extends View {
         const a = this.account();
         if (!a) return this.fail("This account isn't there anymore.");
         const login = this.phase === "waiting" ? await readLogin(a).catch(() => ({ state: "out" })) : null;
-        const g = await hc(["get", this.address, "--json"]).then((r) => (r.code === 0 ? JSON.parse(r.stdout) : null)).catch(() => null);
-        const text = await hc(["read", this.address, "--lines", "80"]).then((r) => (r.code === 0 ? r.stdout : null)).catch(() => null);
+        const g = await core(["get", this.address, "--json"]).then((r) => (r.code === 0 ? JSON.parse(r.stdout) : null)).catch(() => null);
+        const text = await core(["read", this.address, "--lines", "80"]).then((r) => (r.code === 0 ? r.stdout : null)).catch(() => null);
         if (text != null) {
           this.screen = text;
           const m = URL_RE.exec(text);
@@ -191,9 +191,9 @@ export default class Accounts extends View {
   async removeTerminal() {
     if (!this.address) return;
     const address = this.address;
-    const g = await hc(["get", address, "--json"]).then((r) => JSON.parse(r.stdout)).catch(() => null);
-    if (g?.state === "live") await hc(["kill", address]).catch(() => null);
-    await hc(["rm", address]).catch(() => null);
+    const g = await core(["get", address, "--json"]).then((r) => JSON.parse(r.stdout)).catch(() => null);
+    if (g?.state === "live") await core(["kill", address]).catch(() => null);
+    await core(["rm", address]).catch(() => null);
     this.address = null;
   }
 
@@ -260,7 +260,7 @@ export default class Accounts extends View {
     this.code.set_value("");
     this.sent = Date.now();
     cx.spawn(async (cx) => {
-      await hc(["send", this.address, code]).catch(() => null);
+      await core(["send", this.address, code]).catch(() => null);
       cx.notify();
     });
     cx.notify();

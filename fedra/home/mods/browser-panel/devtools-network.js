@@ -197,7 +197,7 @@ function row(t, dt, e, compact, mono) {
     .when(!compact, (el) => el.child(two(e.method, "", 48)))
     .child(v_flex().flex_1().min_w(0).justify_center()
       .child(h_flex().gap(5).min_w(0).child(div().flex_1().min_w(0).truncate().text_color(fg).child(nameOf(e.url)))
-        .when(Boolean(e.herdr), (el) => el.child(div().flex_none().text_size(10).text_color(t.dim).child("herdr")))
+        .when(Boolean(e.atrous), (el) => el.child(div().flex_none().text_size(10).text_color(t.dim).child("atrous")))
         .when(Boolean(e.edited), (el) => el.child(div().flex_none().text_size(10).text_color(t.ansi3).child("edited"))))
       .child(div().truncate().text_size(10.5).text_color(t.dim).child(e.host || e.url.split(":")[0])))
     .when(!compact, (el) => el
@@ -239,7 +239,7 @@ function headersView(t, dt, d) {
   if (e.cache) general.push(["Served from", e.cache]);
   if (e.edited) general.push(["Intercept", `edited at the ${e.edited} stage`]);
   if (e.dropped) general.push(["Intercept", "dropped"]);
-  if (e.herdr) general.push(["Sent by", "the panel (Edit and resend)"]);
+  if (e.atrous) general.push(["Sent by", "the panel (Edit and resend)"]);
   const res = e.resolvedResHeaders ?? [], req = (e.resolvedReqHeaders ?? []), keyW = dt.width() >= 1000 ? 230 : 170;
   return v_flex().id("bp-net-headers").flex_1().min_h(0).overflow_y_scrollbar().px(10).py(6).gap(2)
     .child(U.section("General")).child(U.kv(general, mono, keyW))

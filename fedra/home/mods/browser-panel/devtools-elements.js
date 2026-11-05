@@ -10,7 +10,7 @@
 
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState, h_resizable, v_resizable, resizable_panel } from "gpui-base";
-import { theme } from "herdr";
+import { theme } from "atrous";
 import { apiGet, apiPost, iconBtn, textBtn, notice, windowed, scrollInto, mono, syntax, mixin } from "./devtools-dom-ui.js";
 
 const RH = 20; // tree row height

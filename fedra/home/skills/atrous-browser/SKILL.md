@@ -1,11 +1,11 @@
 ---
-name: herdr-browser
-description: Inspect and drive the Browser panel inside herdr (the same browser the person sees): open pages, read the console, list and inspect network requests with their bodies, intercept and rewrite requests or responses (headers, body, status), replay edited requests, read and edit the live page HTML, cookies, localStorage, sessionStorage and IndexedDB, take screenshots and run JS in the page. Use it when a task involves a web page or web app open in herdr's Browser panel, debugging API calls, or testing a site by changing its traffic, DOM or storage.
+name: atrous-browser
+description: Inspect and drive the Browser panel inside Atrous (the same browser the person sees): open pages, read the console, list and inspect network requests with their bodies, intercept and rewrite requests or responses (headers, body, status), replay edited requests, read and edit the live page HTML, cookies, localStorage, sessionStorage and IndexedDB, take screenshots and run JS in the page. Use it when a task involves a web page or web app open in Atrous's Browser panel, debugging API calls, or testing a site by changing its traffic, DOM or storage.
 ---
 
-# herdr Browser panel
+# Atrous Browser panel
 
-herdr's Browser panel is a real Chromium browser shown beside the terminals. The person sees
+Atrous's Browser panel is a real Chromium browser shown beside the terminals. The person sees
 every page you open and every change you make there, live. Drive it with the `bp` command:
 
 ```sh
@@ -14,14 +14,14 @@ node "<this skill's folder>/bp.mjs" <command> [args]
 
 Below, `bp` stands for that whole `node ".../bp.mjs"` call.
 Every command prints compact JSON on stdout (errors on stderr, exit code 1). Start with
-`bp status`. If it says the panel isn't running, run `bp start`: that opens the panel in herdr.
+`bp status`. If it says the panel isn't running, run `bp start`: that opens the panel in Atrous.
 
 ## Pages, console, HTML, screenshots
 
 | Command | What it does |
 |---|---|
 | `bp status` | url, title, tabs, and the element the person picked in the panel (if any) |
-| `bp start` | opens the Browser panel in herdr and waits for it |
+| `bp start` | opens the Browser panel in Atrous and waits for it |
 | `bp open <url> [--new] [--no-wait]` | navigates (a new tab with `--new`) and waits for the load |
 | `bp back` / `forward` / `reload [--hard]` | history and reload |
 | `bp tabs`, `bp tab <id>`, `bp close [<id>]` | list, switch to, close tabs |
@@ -56,4 +56,4 @@ and worked examples.
   `bp open <url> --new` when you need to look around without moving them.
 - DOM edits are live and temporary: a reload brings the site's own HTML back. Change the
   source code for lasting fixes.
-- A different port than 9334: set `HERDR_BROWSER_API=<port>`.
+- A different port than 9734: set `ATROUS_BROWSER_API=<port>`.

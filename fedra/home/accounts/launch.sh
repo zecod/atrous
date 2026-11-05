@@ -1,5 +1,5 @@
 #!/bin/sh
-# herdr accounts (macOS / Linux): starts Claude Code or Codex under the account picked in
+# Atrous accounts (macOS / Linux): starts Claude Code or Codex under the account picked in
 # Settings > Accounts. The PowerShell twin is launch.ps1; both read state.json beside them.
 #
 #   launch.sh <claude|codex> [arguments for the tool...]
@@ -7,7 +7,7 @@
 # - The main account ("default") runs exactly as before: nothing set.
 # - Another account: CLAUDE_CONFIG_DIR / CODEX_HOME points at its folder for this launch only.
 #   Its copies of your main settings are refreshed first (node profile.mjs sync).
-# - While it runs, the terminal carries the label herdr-account=<tool>:<id>.
+# - While it runs, the terminal carries the label atrous-account=<tool>:<id>.
 
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 tool=$1
@@ -15,11 +15,11 @@ shift
 case "$tool" in
   claude) var=CLAUDE_CONFIG_DIR ;;
   codex) var=CODEX_HOME ;;
-  *) echo "herdr: unknown tool '$tool'" >&2; exit 2 ;;
+  *) echo "Atrous: unknown tool '$tool'" >&2; exit 2 ;;
 esac
 
 label() {
-  [ -n "$HC_TERMINAL_ID" ] && command -v hc >/dev/null 2>&1 && hc label "$HC_TERMINAL_ID" "herdr-account=$1" >/dev/null 2>&1
+  [ -n "$ATC_TERMINAL_ID" ] && command -v atc >/dev/null 2>&1 && atc label "$ATC_TERMINAL_ID" "atrous-account=$1" >/dev/null 2>&1
   return 0
 }
 
@@ -45,14 +45,14 @@ if [ -n "$pick" ]; then
   id=$(printf '%s' "$pick" | cut -f3)
   pending=$(printf '%s' "$pick" | cut -f4)
   if [ -n "$pending" ]; then
-    printf "herdr: account '%s' hasn't finished logging in; starting with your main account.\n" "$name" >&2
-  elif [ -n "$dir" ] && [ -f "$dir/.herdr-account.json" ]; then
+    printf "Atrous: account '%s' hasn't finished logging in; starting with your main account.\n" "$name" >&2
+  elif [ -n "$dir" ] && [ -f "$dir/.atrous-account.json" ]; then
     node "$here/profile.mjs" sync "$tool" "$dir" >/dev/null 2>&1
     export "$var=$dir"
     tag="$tool:$id"
-    printf "herdr account: %s\n" "$name"
+    printf "Atrous account: %s\n" "$name"
   else
-    printf "herdr: the folder of account '%s' is missing; starting with your main account.\n" "$name" >&2
+    printf "Atrous: the folder of account '%s' is missing; starting with your main account.\n" "$name" >&2
   fi
 fi
 

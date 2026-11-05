@@ -24,7 +24,7 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
-import { props, closeOverlay, run, notify, theme, agents, terminals, panes, focused, spaces, layout, appHome, readTextFile, writeTextFile } from "herdr";
+import { props, closeOverlay, run, notify, theme, agents, terminals, panes, focused, spaces, layout, appHome, readTextFile, writeTextFile } from "atrous";
 import { tabArea, paneRects, readTabTree, zoneAt, zoneFor, zoneWords, snapBar, insideRect } from "./geometry.js";
 
 const clean = (s) => (s ?? "").replace(/^[^\p{L}\p{N}]+/u, "").trim();
@@ -50,7 +50,7 @@ const SIDE_WORDS = { left: "to the left", right: "to the right", top: "above", b
 // One line per step, newest last. Each line is its own read-append-write, retried
 // when another line got there first (the write checks the text it read).
 // Never under mods/: on Windows a write in a mod's folder reports the folder as
-// changed, and herdr reloads every copy of that mod (killing a move in progress).
+// changed, and Atrous reloads every copy of that mod (killing a move in progress).
 const TRACE_FILE = "data/snap-split-trace.log";
 const pendingTraces = new Set();
 function trace(line) {
@@ -239,12 +239,12 @@ export default class SnapSplit extends View {
       return test();
     };
     // 1. Out of where it is (a sub-agent without a pane is out already). Park
-    //    drops its herdr.space/tab labels and core keep; an emptied tab closes.
+    //    drops its atrous.space/tab labels and core keep; an emptied tab closes.
     this.inFlight = { addr, parked: false, keepSent: false };
     if (shown()) {
       run("terminal.park", { terminal: addr });
       this.inFlight.parked = true;
-      const parked = await until(() => !shown() && !term()?.labels?.["herdr.tab"] && term()?.keep === false, 3000);
+      const parked = await until(() => !shown() && !term()?.labels?.["atrous.tab"] && term()?.keep === false, 3000);
       trace(`park ${addr}: ${parked ? "done" : "not confirmed"} +${Date.now() - t0}ms`);
       await cx.sleep(150);
     }
@@ -256,7 +256,7 @@ export default class SnapSplit extends View {
     };
     place();
     let ok = await until(shown, 2500);
-    if (!ok && term()?.state === "live" && !term()?.labels?.["herdr.tab"]) {
+    if (!ok && term()?.state === "live" && !term()?.labels?.["atrous.tab"]) {
       trace(`keep ${addr}: no pane yet, retrying`);
       place();
       ok = await until(shown, 2500);

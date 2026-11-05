@@ -8,7 +8,7 @@
 
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, TextareaState, Textarea, Editor, EditorState } from "gpui-base";
-import { theme } from "herdr";
+import { theme } from "atrous";
 import { I, apiGet, apiPost, iconBtn, textBtn, notice, windowed, mono, clip, bytes, syntax, mixin } from "./devtools-dom-ui.js";
 
 const RH = 22;

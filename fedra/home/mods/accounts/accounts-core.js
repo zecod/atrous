@@ -3,7 +3,7 @@
 // A mod can't import from another mod's folder: this file is kept identical in
 // mods/usage-card/, mods/my-settings/ and mods/accounts/ (the sign-in dialog). Change all three.
 //
-// ONE SOURCE OF TRUTH: ~/.config/herdr-app/accounts/state.json, also read by accounts/launch.ps1
+// ONE SOURCE OF TRUTH: ~/.config/atrous/accounts/state.json, also read by accounts/launch.ps1
 // at every agent launch:
 //   { v: 1,
 //     active: { claude: "<id>", codex: "<id>" },          the account new agents start on
@@ -25,7 +25,7 @@
 // Tokens are read only to send them to the service that issued them (the card) and never leave
 // the credential files otherwise; nothing here writes a credential file.
 
-import { readTextFile, writeTextFile, appHome, home, shared, setShared, run, exec, window } from "herdr";
+import { readTextFile, writeTextFile, appHome, home, shared, setShared, run, exec, window } from "atrous";
 
 export const TOOLS = {
   claude: { name: "Claude Code", short: "Claude", icon: "icons/claude.svg", main: ".claude" },
@@ -67,8 +67,22 @@ export function currentState() {
   return normalize(shared("accounts.state"));
 }
 
+// First use in Atrous: this home has no state.json yet. `profile.mjs migrate` copies herdr-app's
+// accounts (the app Atrous forked) over when it has some, junction-safe, leaving herdr's own as
+// they are; it does nothing when there are none or this home has a state.json by then. Asked
+// once per mod copy, before the first read or write of the state, so an edit never lands first.
+let migration = null;
+function migrateOnce() {
+  migration ??= exec("node", [`${accountsDir()}/profile.mjs`, "migrate"]).catch(() => null);
+  return migration;
+}
+
 export async function readState() {
-  const raw = await readTextFile(stateFile()).catch(() => null);
+  let raw = await readTextFile(stateFile()).catch(() => null);
+  if (!raw) {
+    await migrateOnce();
+    raw = await readTextFile(stateFile()).catch(() => null);
+  }
   let parsed = null;
   try { parsed = raw ? JSON.parse(raw) : null; } catch {}
   return { st: normalize(parsed), raw };

@@ -1,17 +1,17 @@
 // Runner for Settings > Skills (skills.js). Plain Node, not a mod module: skills.js starts it as a
-// background herdr-core terminal, since installing a skill (npx fetching the CLI, cloning the repo)
+// background atrous-core terminal, since installing a skill (npx fetching the CLI, cloning the repo)
 // can take longer than exec's 30 s:
 //
-//   hc run --bg --rm --json --no-parent --no-notify -- node skills-run.mjs <job.json> --home <dir> [--no-telemetry] -- <skills args...>
+//   atc run --bg --rm --json --no-parent --no-notify -- node skills-run.mjs <job.json> --home <dir> [--no-telemetry] -- <skills args...>
 //
 // Runs `npx -y skills <args>` with its output piped (so the CLI never waits for a prompt), writes
 // everything it prints to <job>.log, and keeps <job.json> up to date for the page to poll:
 //   { state: "running", line }                       line: the CLI's latest step ("Cloning repository")
 //   { state: "done" | "error", code, result?, error?, ms }   result: the CLI's --json output, parsed
-// --home: the user folder the page lists skills from (Herdr's home()). The CLI puts global skills
-// under os.homedir(), which comes from USERPROFILE (Windows) / HOME; herdr-core starts terminals
+// --home: the user folder the page lists skills from (Atrous's home()). The CLI puts global skills
+// under os.homedir(), which comes from USERPROFILE (Windows) / HOME; atrous-core starts terminals
 // with its own idea of those, so they are set here and the install lands where the page looks.
-// --no-telemetry sets DISABLE_TELEMETRY=1 (herdr's own telemetry is off); otherwise the CLI reports
+// --no-telemetry sets DISABLE_TELEMETRY=1 (Settings always passes it: Atrous has no telemetry); otherwise the CLI reports
 // the install to skills.sh, which is where its install counts come from.
 
 import { spawn, spawnSync } from "node:child_process";

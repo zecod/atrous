@@ -1,14 +1,14 @@
 // Import from Chrome: copies the person's own Chrome profile data into the browser panel's
-// profile. The panel's profile: Windows %LOCALAPPDATA%\herdr-browser\profile (or, with --dest,
-// the native view's WebView2 profile), macOS ~/Library/Application Support/herdr-browser/profile,
-// Linux $XDG_DATA_HOME/herdr-browser/profile. Chrome's: %LOCALAPPDATA%\Google\Chrome\User Data,
+// profile. The panel's profile: Windows %LOCALAPPDATA%\atrous-browser\profile (or, with --dest,
+// the native view's WebView2 profile), macOS ~/Library/Application Support/atrous-browser/profile,
+// Linux $XDG_DATA_HOME/atrous-browser/profile. Chrome's: %LOCALAPPDATA%\Google\Chrome\User Data,
 // ~/Library/Application Support/Google/Chrome, ~/.config/google-chrome. Run it while the panel's
 // browser is stopped.
 //
 // The source is only ever read: files are opened read-only and copied into a temp folder;
 // nothing in Chrome's own "User Data" folder is written, renamed or deleted. Databases are
 // checked (and a half-written transaction rolled back) on the temp copy before they replace
-// the panel profile's files; the files they replace are kept in herdr-browser\backup-<time>.
+// the panel profile's files; the files they replace are kept in atrous-browser\backup-<time>.
 //
 // Writes a JSON report (counts only: never cookie values, passwords or URLs).
 //
@@ -34,9 +34,9 @@ const opt = {};
 const WIN = process.platform === "win32", MAC = process.platform === "darwin";
 const LOCAL = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"); // Windows
 // The panel's browser data, and Chrome's, where each OS keeps them.
-const BASE = WIN ? path.join(LOCAL, "herdr-browser")
-  : MAC ? path.join(os.homedir(), "Library", "Application Support", "herdr-browser")
-  : path.join(process.env.XDG_DATA_HOME || path.join(os.homedir(), ".local", "share"), "herdr-browser");
+const BASE = WIN ? path.join(LOCAL, "atrous-browser")
+  : MAC ? path.join(os.homedir(), "Library", "Application Support", "atrous-browser")
+  : path.join(process.env.XDG_DATA_HOME || path.join(os.homedir(), ".local", "share"), "atrous-browser");
 const SOURCE = opt.source || (WIN ? path.join(LOCAL, "Google", "Chrome", "User Data")
   : MAC ? path.join(os.homedir(), "Library", "Application Support", "Google", "Chrome")
   : path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "google-chrome"));
@@ -81,8 +81,8 @@ function dpapiKey(localState) {
   if (raw.subarray(0, 5).toString() !== "DPAPI") return Promise.resolve(null);
   return new Promise((resolve) => {
     const ps = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
-      "Add-Type -AssemblyName System.Security; $b = [Convert]::FromBase64String($env:HERDR_BLOB); [Console]::Out.Write([Convert]::ToBase64String([Security.Cryptography.ProtectedData]::Unprotect($b, $null, 'CurrentUser')))"],
-      { windowsHide: true, env: { ...process.env, HERDR_BLOB: raw.subarray(5).toString("base64") } });
+      "Add-Type -AssemblyName System.Security; $b = [Convert]::FromBase64String($env:ATROUS_BLOB); [Console]::Out.Write([Convert]::ToBase64String([Security.Cryptography.ProtectedData]::Unprotect($b, $null, 'CurrentUser')))"],
+      { windowsHide: true, env: { ...process.env, ATROUS_BLOB: raw.subarray(5).toString("base64") } });
     let out = "";
     ps.stdout.on("data", (d) => (out += d));
     ps.on("error", () => resolve(null));
@@ -183,8 +183,8 @@ async function portClosed(port) {
 async function main() {
   if (same(SOURCE, DEST) || same(SOURCE, BASE)) throw new Error("Source and destination are the same folder");
   // The panel's Chrome must be closed: its files are locked while it runs.
-  for (let i = 0; i < 20 && !(await portClosed(Number(opt["cdp-port"] ?? 9333))); i++) await new Promise((r) => setTimeout(r, 500));
-  if (!(await portClosed(Number(opt["cdp-port"] ?? 9333)))) throw new Error("The panel's Chrome is still running; stop it first");
+  for (let i = 0; i < 20 && !(await portClosed(Number(opt["cdp-port"] ?? 9733))); i++) await new Promise((r) => setTimeout(r, 500));
+  if (!(await portClosed(Number(opt["cdp-port"] ?? 9733)))) throw new Error("The panel's Chrome is still running; stop it first");
 
   const localState = JSON.parse(await fsp.readFile(path.join(SOURCE, "Local State"), { encoding: "utf8", flag: "r" }));
   let profile = opt.profile || localState?.profile?.last_used || "Default";

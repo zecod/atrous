@@ -3,9 +3,9 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Scrollbar } from "gpui-base";
-import { run, props, closeOverlay, theme, spaces, panes, exec, hc, home, appHome, readTextFile, writeTextFile } from "herdr";
+import { run, props, closeOverlay, theme, spaces, panes, exec, core, home, appHome, readTextFile, writeTextFile } from "atrous";
 
-// What each dialog did, newest last (data/: herdr doesn't reload mods for writes there).
+// What each dialog did, newest last (data/: Atrous doesn't reload mods for writes there).
 function trace(line) {
   const file = `${appHome()}/data/my-worktree-trace.log`;
   return (async () => {
@@ -29,7 +29,7 @@ function place(s) {
 }
 
 // Checkouts go to <ROOT>/<repo>/<branch, slashes as dashes>.
-const ROOT = (home) => `${home}/.herdr/worktrees`;
+const ROOT = (home) => `${home}/.atrous/worktrees`;
 // Home as ~ (git says C:/Users/x where Windows says C:\Users\x).
 const tilde = (path, userHome) => {
   const [p, h] = [path, userHome].map((s) => s.replace(/\\/g, "/"));
@@ -219,7 +219,7 @@ export default class Worktree extends View {
     cx.notify();
   }
 
-  // `git worktree add` runs in a background herdr-core terminal: checking out a big repo on a
+  // `git worktree add` runs in a background atrous-core terminal: checking out a big repo on a
   // slow disk can take longer than exec's 30 s (xgestAI.Cowork: 4,195 files, ~9 s idle, far
   // more while agents build), and the dialog shows git's progress meanwhile.
   async create(cx) {
@@ -230,7 +230,7 @@ export default class Worktree extends View {
     const add = exists ? ["worktree", "add", path, branch] : ["worktree", "add", "-b", branch, path, "HEAD"];
     const args = ["run", "--bg", "--json", "--no-parent", "--no-notify", "--cwd", this.repo.top];
     if (this.on) args.push("--on", this.on);
-    const started = await hc([...args, "--", "git", ...add]);
+    const started = await core([...args, "--", "git", ...add]);
     if (started.code !== 0) return (started.stderr || started.stdout || "Couldn't start git.").trim();
     const job = JSON.parse(started.stdout).address;
     this.progress = "Preparing the checkout…";
@@ -239,9 +239,9 @@ export default class Worktree extends View {
     let lines = [];
     for (;;) {
       await wait(400);
-      const g = await hc(["get", job, "--json"]).catch(() => null);
+      const g = await core(["get", job, "--json"]).catch(() => null);
       const info = g?.code === 0 ? JSON.parse(g.stdout) : null;
-      const screen = info ? await hc(["read", job]).catch(() => null) : null;
+      const screen = info ? await core(["read", job]).catch(() => null) : null;
       if (screen) lines = screen.stdout.split(/\r?\n/).map((l) => l.trimEnd()).filter(Boolean);
       const last = (lines[lines.length - 1] ?? "").split("\r").pop().trim();
       if (info && info.state !== "finished") {
@@ -249,7 +249,7 @@ export default class Worktree extends View {
         cx.notify();
         continue;
       }
-      await hc(["rm", job]).catch(() => {});
+      await core(["rm", job]).catch(() => {});
       this.progress = null;
       if (info?.exit_code !== 0) return lines.filter((l) => /fatal|error|already/i.test(l)).slice(-2).join("\n") || lines.slice(-2).join("\n") || "git worktree add failed.";
       break;

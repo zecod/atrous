@@ -12,17 +12,17 @@
 //
 // WHICH TRANSCRIPT BELONGS TO WHICH TERMINAL (Claude Code)
 // Two agents can share a folder (and even a session id), so "newest file in the folder" is wrong.
-//   terminal.pid (the shell herdr-core started)
+//   terminal.pid (the shell atrous-core started)
 //     -> a descendant process with a ~/.claude/sessions/<pid>.json file (claude.exe; found with one
 //        process listing: Get-CimInstance on Windows, ps elsewhere; cached per terminal pid)
 //     -> that file's sessionId and cwd -> ~/.claude/projects/<cwd, non-alphanumerics as "-">/<sessionId>.jsonl
 //   The same file has the process's own status ("idle"/"busy") and statusUpdatedAt, which is the very
-//   timestamp Claude Code reports to herdr (it equals hc's status_ms). It anchors the turn: when idle,
+//   timestamp Claude Code reports to Atrous (it equals atc's status_ms). It anchors the turn: when idle,
 //   the turn ended at statusUpdatedAt (the system/turn_duration entry within 10 s before it); when busy,
 //   the current prompt is at statusUpdatedAt and the last finished turn is the one before it on the
 //   same parentUuid chain. This keeps the right turn even when another process (a /resume of the same
 //   session elsewhere) appends to the same transcript afterwards. Without a process listing it falls
-//   back to session files with the terminal's cwd, then the one whose statusUpdatedAt equals hc's
+//   back to session files with the terminal's cwd, then the one whose statusUpdatedAt equals atc's
 //   status_ms for the terminal, then the session title (ai-title/custom-title).
 //
 // Codex: no per-process record exists (no pid file; ~/.codex/state_5.sqlite threads have no pid), so
@@ -56,7 +56,7 @@
 // projects/ (Codex: sessions/) to ~/.claude and ~/.codex (accounts/profile.mjs);
 // Codex link is a guarded heuristic; a turn split by auto-compaction is reported with partial: true.
 
-import { exec, hc, home } from "herdr";
+import { exec, core, home } from "atrous";
 import * as fs from "fs/promises";
 
 const HOME = home().replace(/\\/g, "/").replace(/\/$/, "");
@@ -90,7 +90,7 @@ export function lastTurnSpeed(agent, terminal, { force = false } = {}) {
     (r) => {
       entry.result = r.result ?? null;
       entry.reason = r.reason ?? null;
-      // herdr said done before Claude's status file did, or the helper failed: ask again a bit later.
+      // Atrous said done before Claude's status file did, or the helper failed: ask again a bit later.
       if (r.unsettled || r.retry) { entry.key = null; entry.retryAfter = Date.now() + (r.retry ? 30000 : 1500); }
       return entry.result;
     },
@@ -164,7 +164,7 @@ async function claude(agent, terminal, force) {
   if (!link.info) return fail(link.reason);
   const info = link.info;
   const anchor = { t: info.statusUpdatedAt ?? info.updatedAt ?? null, state: info.status === "idle" ? "idle" : "busy" };
-  // herdr may show "done" a moment before Claude rewrites its status file; don't cache that answer.
+  // Atrous may show "done" a moment before Claude rewrites its status file; don't cache that answer.
   const unsettled = (agent.status === "done" || agent.status === "idle") && anchor.state !== "idle";
   const file = `${CLAUDE}/projects/${slug(info.cwd)}/${info.sessionId}.jsonl`;
   const anchorKey = `${info.sessionId}|${anchor.state}|${anchor.t}`;
@@ -211,9 +211,9 @@ async function claudeLink(agent, terminal) {
   }
   if (cands.length === 1) return { info: cands[0], how: "cwd" };
   if (!cands.length) return { reason: "no Claude Code session file for this folder" };
-  // Claude reports its status to herdr with the same timestamp it writes to its session file.
+  // Claude reports its status to Atrous with the same timestamp it writes to its session file.
   try {
-    const ms = JSON.parse((await hc(["get", String(terminal.address), "--json"])).stdout).status_ms;
+    const ms = JSON.parse((await core(["get", String(terminal.address), "--json"])).stdout).status_ms;
     const same = ms ? cands.filter((c) => Math.abs((c.statusUpdatedAt ?? 0) - ms) <= 1000) : [];
     if (same.length === 1) return { info: same[0], how: "status-time" };
   } catch {}

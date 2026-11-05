@@ -23,7 +23,7 @@
 //   POST intercept {on, pattern, types, response, scope}, intercept/forward {id, edits?},
 //        intercept/drop {id}, intercept/forward-all, rules {...} (a rule by "you"), rules/remove {id | all} (any rule)
 //
-// Agents' network API (under /net/; the herdr-browser skill's `bp net` uses it). The same log and
+// Agents' network API (under /net/; the atrous-browser skill's `bp net` uses it). The same log and
 // the same Fetch engine as the drawer, so the person sees agents' rules and holds there.
 //   GET  /net/requests?type=&q=&domain=&status=&method=&since=<seq>&limit=50&tab=all|current|<id>
 //        -> {last, current, count, requests: [{id, seq, tab, method, url, domain, status, type, mime, size,
@@ -60,8 +60,8 @@ const MAX_NET = 1000, MAX_CONSOLE = 1000, MAX_FRAMES = 300;
 const NET_BUFFER = { maxTotalBufferSize: 20_000_000, maxResourceBufferSize: 5_000_000, maxPostDataSize: 65536 };
 const SHOW_MAX = 1_000_000; // characters of a body sent to the drawer
 const WATCHDOG_MS = 20000; // Intercept turns itself off when nobody looked at the queue this long
-const WORLD = "herdr-devtools";
-const OUR_SOURCE = /^herdr|__herdr|herdr-devtools/i; // frames of code the panel injects (sourceURL herdr://...)
+const WORLD = "atrous-devtools";
+const OUR_SOURCE = /^atrous|__atrous|atrous-devtools/i; // frames of code the panel injects (sourceURL atrous://...)
 // What a page's fetch() can't set: the browser writes these itself.
 const FORBIDDEN = new Set(["accept-charset", "accept-encoding", "access-control-request-headers", "access-control-request-method",
   "connection", "content-length", "cookie", "cookie2", "date", "dnt", "expect", "host", "keep-alive", "origin", "referer",
@@ -192,7 +192,7 @@ export function devtoolsNet({ current = () => null, log = () => {} } = {}) {
     let t = tabs.get(id);
     if (!t) {
       t = { id, session: null, attaching: null, gen: 1, net: [], byRid: new Map(), nseq: 0, nver: 0, cgen: 1, console: [], cseq: 0, cver: 0,
-        herdrCtx: new Set(), pendingExtra: new Map(), fetchOn: false, url: "" };
+        atrousCtx: new Set(), pendingExtra: new Map(), fetchOn: false, url: "" };
       tabs.set(id, t);
     }
     return t;
@@ -246,7 +246,7 @@ export function devtoolsNet({ current = () => null, log = () => {} } = {}) {
       cache: "", reqHeaders: req.headers ?? {}, resHeaders: {}, postData: req.postData, hasPostData: Boolean(req.hasPostData),
       initiator: p.initiator ? { type: p.initiator.type, url: p.initiator.url ?? p.initiator.stack?.callFrames?.[0]?.url ?? "",
         line: p.initiator.lineNumber ?? p.initiator.stack?.callFrames?.[0]?.lineNumber } : null,
-      herdr: Boolean(p.initiator?.stack?.callFrames?.some((f) => OUR_SOURCE.test(f.url ?? ""))),
+      atrous: Boolean(p.initiator?.stack?.callFrames?.some((f) => OUR_SOURCE.test(f.url ?? ""))),
       priority: req.initialPriority ?? "", referrerPolicy: req.referrerPolicy ?? "", frameId: p.frameId };
     if (e.postData === undefined && req.postDataEntries?.length) {
       try { e.postData = req.postDataEntries.map((x) => Buffer.from(x.bytes ?? "", "base64").toString("utf8")).join(""); } catch {}
@@ -273,7 +273,7 @@ export function devtoolsNet({ current = () => null, log = () => {} } = {}) {
     while (t.console.length > MAX_CONSOLE) t.console.shift();
   }
   const frames = (st) => (st?.callFrames ?? []).slice(0, 40).map((f) => ({ fn: f.functionName || "", url: f.url || "", line: (f.lineNumber ?? 0) + 1, col: (f.columnNumber ?? 0) + 1 }));
-  const ours = (t, ctxId, stack) => (ctxId != null && t.herdrCtx.has(ctxId)) || stack.some((f) => OUR_SOURCE.test(f.url) || /__herdr/.test(f.fn));
+  const ours = (t, ctxId, stack) => (ctxId != null && t.atrousCtx.has(ctxId)) || stack.some((f) => OUR_SOURCE.test(f.url) || /__atrous/.test(f.fn));
   const where = (url, line, col) => (url ? `${url}${line ? `:${line}${col ? `:${col}` : ""}` : ""}` : "");
 
   function onEvent(method, p, session) {
@@ -402,17 +402,17 @@ export function devtoolsNet({ current = () => null, log = () => {} } = {}) {
       }
       case "Runtime.executionContextCreated": {
         const c = p.context ?? {};
-        if (c.auxData && c.auxData.isDefault === false && /^herdr/i.test(c.name ?? "")) t.herdrCtx.add(c.id);
+        if (c.auxData && c.auxData.isDefault === false && /^atrous/i.test(c.name ?? "")) t.atrousCtx.add(c.id);
         break;
       }
-      case "Runtime.executionContextDestroyed": t.herdrCtx.delete(p.executionContextId); break;
-      case "Runtime.executionContextsCleared": t.herdrCtx.clear(); break;
+      case "Runtime.executionContextDestroyed": t.atrousCtx.delete(p.executionContextId); break;
+      case "Runtime.executionContextsCleared": t.atrousCtx.clear(); break;
       case "Runtime.consoleAPICalled": {
         const level = { warning: "warn", error: "error", assert: "error", debug: "debug", info: "info", trace: "log" }[p.type] ?? "log";
         const stack = frames(p.stackTrace), top = stack[0];
         const text = p.type === "clear" ? "console.clear()" : (p.args ?? []).map(remoteText).join(" ");
         pushConsole(t, { level, text, url: top?.url ?? "", line: top?.line ?? 0, col: top?.col ?? 0, source: top ? short(top.url, top.line) : "",
-          stack: p.type === "trace" || level === "error" || level === "warn" ? stack : stack.slice(0, 1), herdr: ours(t, p.executionContextId, stack),
+          stack: p.type === "trace" || level === "error" || level === "warn" ? stack : stack.slice(0, 1), atrous: ours(t, p.executionContextId, stack),
           t: p.timestamp ? Math.round(p.timestamp) : Date.now() });
         break;
       }
@@ -422,7 +422,7 @@ export function devtoolsNet({ current = () => null, log = () => {} } = {}) {
         const line = d.lineNumber !== undefined ? d.lineNumber + 1 : stack[0]?.line ?? 0, col = d.columnNumber !== undefined ? d.columnNumber + 1 : stack[0]?.col ?? 0;
         const what = d.exception?.description ?? d.exception?.value ?? "";
         pushConsole(t, { level: "error", text: what ? `${d.text || "Uncaught"} ${what}` : d.text ?? "Uncaught exception", url, line, col, source: url ? short(url, line) : "",
-          stack, herdr: ours(t, d.executionContextId, stack) });
+          stack, atrous: ours(t, d.executionContextId, stack) });
         break;
       }
       case "Log.entryAdded": {
@@ -430,11 +430,11 @@ export function devtoolsNet({ current = () => null, log = () => {} } = {}) {
         const level = e.level === "warning" ? "warn" : e.level === "verbose" ? "debug" : e.level ?? "log";
         const line = e.lineNumber !== undefined ? e.lineNumber + 1 : stack[0]?.line ?? 0;
         pushConsole(t, { level, text: e.text ?? "", url: e.url ?? stack[0]?.url ?? "", line, col: 0, source: e.url ? short(e.url, line) : e.source ?? "",
-          kind: e.source ?? "", stack, herdr: ours(t, null, stack), t: e.timestamp ? Math.round(e.timestamp) : Date.now() });
+          kind: e.source ?? "", stack, atrous: ours(t, null, stack), t: e.timestamp ? Math.round(e.timestamp) : Date.now() });
         break;
       }
       case "Page.frameNavigated":
-        if (!p.frame?.parentId) { t.url = p.frame.url; pushConsole(t, { level: "nav", text: `Navigated to ${p.frame.url}`, url: "", line: 0, col: 0, source: "", stack: [], herdr: false }); }
+        if (!p.frame?.parentId) { t.url = p.frame.url; pushConsole(t, { level: "nav", text: `Navigated to ${p.frame.url}`, url: "", line: 0, col: 0, source: "", stack: [], atrous: false }); }
         break;
       case "Fetch.requestPaused": onPaused(t, p); break;
     }
@@ -455,7 +455,7 @@ export function devtoolsNet({ current = () => null, log = () => {} } = {}) {
     return { ...head, reset: false, entries: items.filter((x) => x.v > since).map(kind === "net" ? lite : (c) => c) };
   }
   const lite = (e) => ({ n: e.n, v: e.v, method: e.method, url: e.url, host: e.host, type: e.type, status: e.status, statusText: e.statusText,
-    mime: e.mime, size: e.size, time: e.time, done: e.done, failed: e.failed, error: e.error, cache: e.cache, herdr: e.herdr || undefined,
+    mime: e.mime, size: e.size, time: e.time, done: e.done, failed: e.failed, error: e.error, cache: e.cache, atrous: e.atrous || undefined,
     edited: e.edited, nframes: e.nframes, redirect: e.redirect || undefined, paused: e.paused || undefined });
 
   const byKey = (t, key) => t.net.find((x) => String(x.n) === String(key)) ?? null;
@@ -523,7 +523,7 @@ export function devtoolsNet({ current = () => null, log = () => {} } = {}) {
       return { ok: true, status: r.status, statusText: r.statusText, headers: [...r.headers], url: r.url, redirected: r.redirected, type: r.type,
         size: buf.length, time: performance.now() - t0, base64: btoa(bin), origin: location.origin };
     } catch (e) { return { ok: false, error: String(e && e.message || e), time: performance.now() - t0, origin: location.origin }; }
-    //# sourceURL=herdr-devtools/repeater.js
+    //# sourceURL=atrous-devtools/repeater.js
   }`;
 
   async function resend(t, b) {
@@ -921,7 +921,7 @@ export function devtoolsNet({ current = () => null, log = () => {} } = {}) {
   }
   const agentItem = (t, e) => ({ id: String(e.seq), seq: e.seq, tab: t.id, method: e.method, url: e.url, domain: e.host, status: e.status, type: e.type,
     mime: e.mime || undefined, size: e.size, time: e.time, pending: !e.done, failed: e.failed || undefined, error: e.error || undefined,
-    cache: e.cache || undefined, edited: e.edited || undefined, paused: e.paused || undefined, herdr: e.herdr || undefined });
+    cache: e.cache || undefined, edited: e.edited || undefined, paused: e.paused || undefined, atrous: e.atrous || undefined });
   function tabsFor(sel) {
     if (!sel || sel === "all") return [...tabs.values()];
     const id = sel === "current" ? current() : sel;

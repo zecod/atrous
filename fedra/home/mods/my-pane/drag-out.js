@@ -3,7 +3,7 @@
 // The same file sits in each mod that starts such drags (my-tabs, my-pane): a mod
 // can't import from another mod's folder.
 
-import { openOverlay, panes } from "herdr";
+import { openOverlay, panes } from "atrous";
 
 // The terminal a tab stands for: its agent, else its focused pane, else its first.
 export function tabTerminal(tabId) {

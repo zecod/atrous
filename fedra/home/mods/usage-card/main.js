@@ -2,7 +2,7 @@
 // Claude: <account>/.credentials.json's OAuth token -> api.anthropic.com/api/oauth/usage (what
 // Claude Code's /usage shows). Codex: <account>/auth.json's ChatGPT login ->
 // chatgpt.com/backend-api/wham/usage (what Codex's /status shows). <account> is ~/.claude /
-// ~/.codex for the main account, else its folder under ~/.config/herdr-app/accounts (see
+// ~/.codex for the main account, else its folder under ~/.config/atrous/accounts (see
 // accounts-core.js and Settings > Accounts). Tokens are only read, never refreshed or written,
 // and only sent to the service that issued them.
 //
@@ -36,7 +36,7 @@
 
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { readTextFile, writeTextFile, appHome, theme, layout, run, openOverlay, shared, setShared, notify, nextCommand } from "herdr";
+import { readTextFile, writeTextFile, appHome, theme, layout, run, openOverlay, shared, setShared, notify, nextCommand } from "atrous";
 import * as fs from "fs/promises";
 import { TOOLS, TOOL_KEYS, keyOf, cap, readState, updateState, publish, currentState, setActive, accountsOf, activeOf, homeOf, readLogin, readEmail, binding, limitName, pairRows, displayName, shortName } from "./accounts-core.js";
 
@@ -95,7 +95,7 @@ const retryAfter = (r) => {
 // -> { rows, plan?, blocked? } or { http, error, retry? }
 async function fetchClaude(o) {
   const r = await fetch("https://api.anthropic.com/api/oauth/usage", {
-    headers: { Authorization: `Bearer ${o.accessToken}`, "anthropic-beta": "oauth-2025-04-20", "Content-Type": "application/json", "User-Agent": "herdr-usage-card" },
+    headers: { Authorization: `Bearer ${o.accessToken}`, "anthropic-beta": "oauth-2025-04-20", "Content-Type": "application/json", "User-Agent": "atrous-usage-card" },
   });
   if (r.status === 401) return { http: 401, error: "Login expired" };
   if (r.status === 429) return { http: 429, error: "Rate limited · retrying in a few minutes", retry: Math.max(EVERY, retryAfter(r)) };
@@ -116,7 +116,7 @@ async function fetchClaude(o) {
 
 async function fetchCodex(tokens) {
   const r = await fetch("https://chatgpt.com/backend-api/wham/usage", {
-    headers: { Authorization: `Bearer ${tokens.access_token}`, "ChatGPT-Account-Id": tokens.account_id ?? "", Accept: "application/json", "User-Agent": "herdr-usage-card" },
+    headers: { Authorization: `Bearer ${tokens.access_token}`, "ChatGPT-Account-Id": tokens.account_id ?? "", Accept: "application/json", "User-Agent": "atrous-usage-card" },
   });
   if (r.status === 401) return { http: 401, error: "Login expired" };
   if (r.status === 429) return { http: 429, error: "Rate limited · retrying in a few minutes", retry: Math.max(SOON * 4, retryAfter(r)) };

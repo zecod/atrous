@@ -1,6 +1,8 @@
 #!/usr/bin/env node
-// Installs Fedra into herdr-app's home (~/.config/herdr-app, or $HERDR_APP_HOME):
-// the Fedra layout, its mods, the account launchers, and the few keys/programs entries it needs.
+// Installs Fedra into Atrous's home (~/.config/atrous, or $ATROUS_HOME): the Fedra layout, its
+// mods, the account launchers, the agent skills, and the few keys/programs entries it needs.
+// Fedra ships built into Atrous, so this is for development: it puts this working tree's files
+// in a home by hand (a dev home with ATROUS_HOME, or a build that doesn't ship them yet).
 //
 //   node install.mjs            install or update
 //   node install.mjs --dry-run  show what would change
@@ -8,7 +10,7 @@
 // What it touches:
 // - layouts/fedra.json + fedra.svg, mods/<each Fedra mod>/ (replaced whole: they're Fedra's files),
 //   accounts/*.sh|*.ps1|profile.mjs (never accounts/state.json or account folders),
-//   skills/<name>/ (agent skills, e.g. herdr-browser), linked into ~/.claude/skills and ~/.codex/skills.
+//   skills/<name>/ (agent skills, e.g. atrous-browser), linked into ~/.claude/skills and ~/.codex/skills.
 // - keys.json: adds two bindings (quick terminal; Settings opens Fedra's settings), keeps yours.
 // - programs.json: Claude Code / Codex start through the account launchers; agents start in
 //   "yolo" mode (skip permission prompts). Edit programs.json afterwards if you don't want that.
@@ -23,7 +25,7 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const src = path.join(here, "home");
-const home = process.env.HERDR_APP_HOME || path.join(os.homedir(), ".config", "herdr-app");
+const home = process.env.ATROUS_HOME || path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "atrous");
 const dry = process.argv.includes("--dry-run");
 const win = process.platform === "win32";
 const mac = process.platform === "darwin";
@@ -40,7 +42,7 @@ function saveBackup(rel) {
   fs.cpSync(from, to, { recursive: true });
 }
 
-// Atomic write: herdr watches these files and must never read half of one.
+// Atomic write: Atrous watches these files and must never read half of one.
 function writeAtomic(rel, text) {
   const file = path.join(home, rel);
   if (dry) return log(`  would write ${rel}`);
@@ -73,7 +75,7 @@ for (const m of fs.readdirSync(path.join(src, "mods"))) {
   const to = path.join(home, "mods", m);
   saveBackup(path.join("mods", m));
   if (!dry) {
-    // mod.json first: herdr docks a mod folder it sees without one into the shown layout.
+    // mod.json first: Atrous docks a mod folder it sees without one into the shown layout.
     fs.rmSync(to, { recursive: true, force: true });
     fs.mkdirSync(to, { recursive: true });
     const modJson = path.join(src, "mods", m, "mod.json");
@@ -147,7 +149,7 @@ log("  programs.json: Claude Code / Codex through the account launchers, yolo fl
 let switched = false;
 if (!dry) {
   try {
-    execFileSync("herdr-app", ["do", "layout.switch", "--name", "fedra"], { stdio: "ignore", timeout: 8000 });
+    execFileSync("atrous", ["do", "layout.switch", "--name", "fedra"], { stdio: "ignore", timeout: 8000 });
     switched = true;
   } catch {}
 }
@@ -160,4 +162,4 @@ log(`  layout: Fedra ${switched ? "(switched the running app)" : "(shown at the 
 
 if (!dry && fs.existsSync(backup)) log(`\nBackup of what was replaced: ${backup}`);
 log("\nDone. Needs Node.js on PATH (folder listing, tokens/s, usage stats, browser helper).");
-if (!switched) log("Start herdr-app; Fedra shows. Ctrl+Shift+L cycles layouts.");
+if (!switched) log("Start Atrous; Fedra shows. Ctrl+Shift+L cycles layouts.");

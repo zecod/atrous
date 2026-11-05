@@ -1,8 +1,8 @@
-// herdr browser helper (Node 22+, no dependencies).
+// Atrous browser helper (Node 22+, no dependencies).
 //
-// Native mode (--native, Windows): the page is drawn natively by herdr-browser-host (native/,
+// Native mode (--native, Windows): the page is drawn natively by atrous-browser-host (native/,
 // a WebView2 in a popup kept over the panel's page area, built with dotnet on first use into
-// %LOCALAPPDATA%\herdr-browser\host). The helper starts it, drives it over the same DevTools
+// %LOCALAPPDATA%\atrous-browser\host). The helper starts it, drives it over the same DevTools
 // Protocol (WebView2's, on <cdp-port>) for everything but drawing: tabs go through the host,
 // there is no screencast, and the pick/annotate hover outline is drawn in the page itself.
 // If the host can't be built or started, the helper falls back to the screencast below.
@@ -12,14 +12,14 @@
 // into JPEG files the browser-panel mod shows with image(), and answers a tiny HTTP API
 // on 127.0.0.1:<port> (navigate, back/forward/reload, mouse, wheel, keys, text, resize, state).
 //
-// The same Chrome stays open to agents: Playwright connectOverCDP("http://127.0.0.1:9333")
-// or Playwright MCP --cdp-endpoint http://127.0.0.1:9333. A page an agent opens is followed.
+// The same Chrome stays open to agents: Playwright connectOverCDP("http://127.0.0.1:9733")
+// or Playwright MCP --cdp-endpoint http://127.0.0.1:9733. A page an agent opens is followed.
 //
-// Chrome is started through WMI, so it belongs to no herdr-core terminal and outlives this
+// Chrome is started through WMI, so it belongs to no atrous-core terminal and outlives this
 // helper (agents keep their session; a new helper reattaches); the helper exits when Chrome goes.
 // A newly started Chrome opens https://www.google.com unless --url says otherwise.
 //
-// Where frames go matters (measured on herdr-app 0.1.12): the app caches every decoded image
+// Where frames go matters (measured on the app at 0.1.12): the app caches every decoded image
 // by path, and only drops one when its file changes or goes away under a folder it watches
 // (mods/<name>/, except hidden ones and node_modules), and then it reloads every image in that
 // folder, which blanks them for a moment. So:
@@ -31,10 +31,10 @@
 // - a picture identical to one still on disk (a blinking caret) reuses that file;
 // - after a new document commits, the last good frame stays until the page paints.
 //
-//   node helper.mjs [--port 9334] [--cdp-port 9333] [--home ~/.config/herdr-app]
+//   node helper.mjs [--port 9734] [--cdp-port 9733] [--home ~/.config/atrous]
 //                   [--frames mods/browser-panel-frames] [--profile <dir>] [--browser <exe>]
 //                   [--width 800 --height 600 --scale 1.25] [--url https://...] [--headed] [--log-frames]
-//                   [--native [--host-port 9335] [--herdr-pid <pid>]]
+//                   [--native [--host-port 9735] [--atrous-pid <pid>]]
 //
 // API (JSON, 127.0.0.1 only): GET /state[?since=<ver>&wait=<ms>] (long poll; ?peek=1 doesn't
 // count as watching), GET /cookie-stats (cookie counts per site, never values);
@@ -79,23 +79,23 @@ const opt = {};
   }
 }
 
-const CDP_PORT = Number(opt["cdp-port"] ?? 9333);
-const API_PORT = Number(opt.port ?? 9334);
+const CDP_PORT = Number(opt["cdp-port"] ?? 9733);
+const API_PORT = Number(opt.port ?? 9734);
 const WIN = process.platform === "win32", MAC = process.platform === "darwin";
 const LOCAL = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"); // Windows
 // Where the browser's own data lives (profile, logs, shots): per-user app data on each OS.
-const BASE = WIN ? path.join(LOCAL, "herdr-browser")
-  : MAC ? path.join(os.homedir(), "Library", "Application Support", "herdr-browser")
-  : path.join(process.env.XDG_DATA_HOME || path.join(os.homedir(), ".local", "share"), "herdr-browser");
+const BASE = WIN ? path.join(LOCAL, "atrous-browser")
+  : MAC ? path.join(os.homedir(), "Library", "Application Support", "atrous-browser")
+  : path.join(process.env.XDG_DATA_HOME || path.join(os.homedir(), ".local", "share"), "atrous-browser");
 // One profile per helper port: a second Chrome on the same profile would only hand off to the first.
-const PROFILE = opt.profile || path.join(BASE, API_PORT === 9334 ? "profile" : `profile-${API_PORT}`);
-const HOME = opt.home || path.join(os.homedir(), ".config", "herdr-app");
+const PROFILE = opt.profile || path.join(BASE, API_PORT === 9734 ? "profile" : `profile-${API_PORT}`);
+const HOME = opt.home || path.join(os.homedir(), ".config", "atrous");
 const FRAMES_REL = (opt.frames || "mods/browser-panel-frames").replace(/\\/g, "/").replace(/\/+$/, "");
 const FRAMES_DIR = path.resolve(HOME, FRAMES_REL);
 const LOG_FRAMES = opt["log-frames"] === "true"; // debugging: log every frame and page lifecycle event
 const ARCHIVE = opt.archive || null; // debugging: keep a copy of every frame written (<seq>-<ms>.jpg)
 // Every frame the panel shows costs the app about two whole-window redraws (~60-75 ms of its
-// main thread, measured on herdr-app 0.1.12: 3.4 fps ~32% of a core, 9.5 fps ~78%, 24 fps a full
+// main thread, measured on the app at 0.1.12: 3.4 fps ~32% of a core, 9.5 fps ~78%, 24 fps a full
 // core, whatever the frame's pixel size). So the frame rate follows the person: 15 a second while
 // they use the page (and 1.5 s after), 3 a second when the page only moves on its own (animations,
 // video). Faster would starve the app's own input handling, which is what feels like lag.
@@ -105,19 +105,19 @@ let lastInputAt = 0;
 const frameGap = () => MIN_FRAME_MS || (Date.now() - lastInputAt < ACTIVE_FOR_MS ? ACTIVE_GAP_MS : IDLE_GAP_MS);
 const IDLE_MS = 5000; // nobody asked for state this long: stop the screencast
 const RUN = Date.now().toString(36); // frame names never repeat, across runs too
-const TMP_DIR = path.join(BASE, `tmp${API_PORT === 9334 ? "" : `-${API_PORT}`}`); // frames are written here, then moved in
+const TMP_DIR = path.join(BASE, `tmp${API_PORT === 9734 ? "" : `-${API_PORT}`}`); // frames are written here, then moved in
 // Native mode (Windows): the WebView2 host draws the page; see the top of this file.
 let NATIVE = opt.native === "true" && WIN;
-const HOST_PORT = Number(opt["host-port"] ?? 9335);
+const HOST_PORT = Number(opt["host-port"] ?? 9735);
 const HOST = `http://127.0.0.1:${HOST_PORT}`;
 // One host build per helper port too: a running host locks its exe, so a second panel (tests)
 // builds and runs its own copy.
-const HOST_DIR = path.join(BASE, API_PORT === 9334 ? "host" : `host-${API_PORT}`);
-const HOST_EXE = path.join(HOST_DIR, "herdr-browser-host.exe");
+const HOST_DIR = path.join(BASE, API_PORT === 9734 ? "host" : `host-${API_PORT}`);
+const HOST_EXE = path.join(HOST_DIR, "atrous-browser-host.exe");
 const MOD_DIR = path.dirname(fileURLToPath(import.meta.url));
 const NATIVE_SRC = path.join(MOD_DIR, "native");
 // Natively the pick/annotate UI is drawn by the page itself (page-ui.js, in an isolated world
-// named "herdr"): read once, with the panel's icons it uses.
+// named "atrous"): read once, with the panel's icons it uses.
 let UI_SOURCE = "";
 const UI_ICONS = {};
 function loadUi() {
@@ -137,7 +137,7 @@ const DEFAULT_URL = "https://www.google.com"; // a newly started Chrome opens th
 fs.mkdirSync(BASE, { recursive: true });
 fs.mkdirSync(FRAMES_DIR, { recursive: true });
 // A helper on another port (a test) keeps its own log and last page.
-const SUFFIX = API_PORT === 9334 ? "" : `-${API_PORT}`;
+const SUFFIX = API_PORT === 9734 ? "" : `-${API_PORT}`;
 const LOG = path.join(BASE, `helper${SUFFIX}.log`);
 try { fs.writeFileSync(LOG, ""); } catch {}
 function log(...parts) {
@@ -259,7 +259,7 @@ async function launchOnce() {
   throw new Error(`Browser did not open its DevTools port ${CDP_PORT}`);
 }
 
-// herdr-core ends a terminal's whole process tree when the terminal ends, so a browser this
+// atrous-core ends a terminal's whole process tree when the terminal ends, so a browser this
 // helper spawns would die with the helper. On Windows it's started through WMI, so it belongs to
 // no terminal and outlives the helper (agents keep their session; a new helper reattaches);
 // elsewhere a detached spawn in its own process group does the same.
@@ -268,8 +268,8 @@ async function launchDetached(exe, args) {
   if (WIN) {
     try {
       const out = await powershell(
-        "$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $env:HERDR_BROWSER_CMD }; \"$($r.ReturnValue) $($r.ProcessId)\"",
-        undefined, { HERDR_BROWSER_CMD: [exe, ...args].map(winQuote).join(" ") });
+        "$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $env:ATROUS_BROWSER_CMD }; \"$($r.ReturnValue) $($r.ProcessId)\"",
+        undefined, { ATROUS_BROWSER_CMD: [exe, ...args].map(winQuote).join(" ") });
       independent = out.trim().startsWith("0 ");
       if (!independent) log("WMI launch failed:", out.trim());
     } catch (e) { log("WMI launch failed:", e.message); }
@@ -320,7 +320,7 @@ async function ensureHostBuilt() {
   let built = 0;
   try { built = fs.statSync(HOST_EXE).mtimeMs; } catch {}
   if (built && built >= newest) return;
-  const work = path.join(BASE, API_PORT === 9334 ? "host-build" : `host-build-${API_PORT}`);
+  const work = path.join(BASE, API_PORT === 9734 ? "host-build" : `host-build-${API_PORT}`);
   fs.mkdirSync(work, { recursive: true });
   for (const f of srcs) fs.copyFileSync(path.join(NATIVE_SRC, f), path.join(work, f));
   S.phase = "Building the native browser view (first run, about a minute)…";
@@ -338,7 +338,7 @@ async function ensureHostBuilt() {
 // The first native start brings the panel's sign-ins, history and bookmarks over from the
 // screencast's Chrome profile (import-chrome.mjs with that profile as the source), once.
 async function migrateProfile() {
-  const data = path.join(BASE, HOST_PORT === 9335 ? "webview2" : `webview2-${HOST_PORT}`, "EBWebView");
+  const data = path.join(BASE, HOST_PORT === 9735 ? "webview2" : `webview2-${HOST_PORT}`, "EBWebView");
   const marker = path.join(BASE, `migrated${SUFFIX}`);
   if (fs.existsSync(marker) || fs.existsSync(path.join(data, "Default")) || !fs.existsSync(path.join(PROFILE, "Default"))) return;
   S.phase = "Bringing this browser's sign-ins over…";
@@ -356,7 +356,7 @@ async function launchHost() {
   await migrateProfile().catch((e) => log("profile migration:", e.message));
   const args = ["--home", HOME, "--port", String(HOST_PORT), "--cdp-port", String(CDP_PORT), "--frames", FRAMES_REL,
     "--url", opt.url || DEFAULT_URL];
-  if (opt["herdr-pid"]) args.push("--herdr-pid", String(opt["herdr-pid"]));
+  if (opt["atrous-pid"]) args.push("--atrous-pid", String(opt["atrous-pid"]));
   if (opt["host-args"]) args.push(...String(opt["host-args"]).split(" ").filter(Boolean));
   log("launching", HOST_EXE, args.join(" "));
   await launchDetached(HOST_EXE, args);
@@ -513,13 +513,13 @@ async function attach(targetId) {
       cdp.send("Log.enable", {}, sessionId).catch(() => {}),
       cdp.send("Network.enable", { maxTotalBufferSize: 0, maxResourceBufferSize: 0 }, sessionId).catch(() => {}),
       NATIVE ? Promise.resolve() : cdp.send("Emulation.setFocusEmulationEnabled", { enabled: true }, sessionId).catch(() => {}),
-      NATIVE ? cdp.send("Runtime.addBinding", { name: "__herdrUi", executionContextName: "herdr" }, sessionId).catch((e) => log("binding", e.message)) : Promise.resolve(),
-      NATIVE && UI_SOURCE ? cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: UI_SOURCE, worldName: "herdr" }, sessionId).catch((e) => log("ui script", e.message)) : Promise.resolve(),
+      NATIVE ? cdp.send("Runtime.addBinding", { name: "__atrousUi", executionContextName: "atrous" }, sessionId).catch((e) => log("binding", e.message)) : Promise.resolve(),
+      NATIVE && UI_SOURCE ? cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: UI_SOURCE, worldName: "atrous" }, sessionId).catch((e) => log("ui script", e.message)) : Promise.resolve(),
       NATIVE ? cdp.send("DOM.enable", {}, sessionId).catch(() => {}) : Promise.resolve(),
     ]);
     // the document already there gets its world now (later ones get it from the script above)
     if (NATIVE && UI_SOURCE && !tab.ui) {
-      cdp.send("Page.createIsolatedWorld", { frameId: targetId, worldName: "herdr" }, sessionId)
+      cdp.send("Page.createIsolatedWorld", { frameId: targetId, worldName: "atrous" }, sessionId)
         .then(({ executionContextId }) => { if (!tab.ui) { tab.ui = executionContextId; uiReady(tab).catch(() => {}); } })
         .catch((e) => log("ui world", e.message));
     }
@@ -547,7 +547,7 @@ async function follow(targetId) {
   await refreshHistory();
   if (NATIVE) {
     const was = old ? tabFor(old) : null;
-    if (was?.ui) uiEval(was, "__herdr.mode('off')").catch(() => {});
+    if (was?.ui) uiEval(was, "__atrous.mode('off')").catch(() => {});
     const tab = tabs.get(targetId);
     if (tab?.ui) uiReady(tab).catch(() => {});
   } else if (S.inspect !== "off") await inspectOn(sessionId, true);
@@ -935,7 +935,7 @@ function onEvent(method, p, session) {
       break;
     case "Runtime.executionContextCreated": {
       const c = p.context, tab = tabFor(session);
-      if (NATIVE && tab && c.name === "herdr" && c.auxData?.frameId === tab.id && c.id !== tab.ui) { tab.ui = c.id; uiReady(tab).catch(() => {}); }
+      if (NATIVE && tab && c.name === "atrous" && c.auxData?.frameId === tab.id && c.id !== tab.ui) { tab.ui = c.id; uiReady(tab).catch(() => {}); }
       break;
     }
     case "Runtime.executionContextDestroyed": {
@@ -949,9 +949,9 @@ function onEvent(method, p, session) {
       break;
     }
     case "Runtime.bindingCalled":
-      if (p.name === "__herdrUi" && NATIVE) { uiMessage(p.payload, session).catch((e) => log("page ui", e.message)); break; }
+      if (p.name === "__atrousUi" && NATIVE) { uiMessage(p.payload, session).catch((e) => log("page ui", e.message)); break; }
       // pick/annotate keys pressed in the page itself (native mode: the page has the keyboard)
-      if (p.name === "__herdrKey" && session === S.session && S.inspect !== "off") {
+      if (p.name === "__atrousKey" && session === S.session && S.inspect !== "off") {
         if (p.payload === "escape") setInspect("off").catch(() => {});
         else if (S.inspect === "pick" && (p.payload === "c" || p.payload === "s")) pickAction(p.payload === "c" ? "copy" : "shot").catch((e) => log("pick", e.message));
       }
@@ -1211,7 +1211,7 @@ async function uiReady(tab) {
   if (!tab?.ui) return;
   await uiEval(tab, UI_SOURCE).catch(() => {});
   const shown = tab.id === S.targetId;
-  await uiEval(tab, `__herdr.init(${JSON.stringify({ theme: S.uiTheme ?? undefined, icons: UI_ICONS, mode: shown ? S.inspect : "off", collapsed: S.notesUi?.collapsed ?? false })})`);
+  await uiEval(tab, `__atrous.init(${JSON.stringify({ theme: S.uiTheme ?? undefined, icons: UI_ICONS, mode: shown ? S.inspect : "off", collapsed: S.notesUi?.collapsed ?? false })})`);
   if (shown) await uiNotes(tab);
 }
 
@@ -1239,7 +1239,7 @@ async function uiNotes(tab) {
     if (objectId) objs.push(objectId);
   }
   const g = await uiEval(tab, "globalThis", false);
-  await cdp.send("Runtime.callFunctionOn", { objectId: g.result.objectId, functionDeclaration: "function (list, ...els) { __herdr.setNotes(list, ...els); }",
+  await cdp.send("Runtime.callFunctionOn", { objectId: g.result.objectId, functionDeclaration: "function (list, ...els) { __atrous.setNotes(list, ...els); }",
     arguments: [{ value: items }, ...objs.map((objectId) => ({ objectId }))] }, tab.session, 5000).catch((e) => log("ui notes", e.message));
   for (const objectId of [...objs, g.result.objectId]) cdp.send("Runtime.releaseObject", { objectId }, tab.session).catch(() => {});
 }
@@ -1258,7 +1258,7 @@ async function uiMessage(payload, session) {
   if (!tab || session !== S.session) return;
   switch (m.type) {
     case "pick": {
-      const id = await uiNode(tab, "__herdr.picked()");
+      const id = await uiNode(tab, "__atrous.picked()");
       if (!id) return;
       const mode = m.mode === "annotate" ? "annotate" : "pick";
       const info = await elementInfo(id, session);
@@ -1299,10 +1299,10 @@ const HOVER_INFO = `function () {
 // panel draws over frames in screencast mode.
 const OUTLINE = `function (label) {
   const el = this.nodeType === 1 ? this : this.parentElement;
-  let o = window.__herdrOutline;
+  let o = window.__atrousOutline;
   if (!o) {
     const host = document.createElement('div');
-    host.setAttribute('data-herdr', 'outline');
+    host.setAttribute('data-atrous', 'outline');
     host.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;z-index:2147483647;pointer-events:none';
     const root = host.attachShadow({ mode: 'open' });
     const box = document.createElement('div');
@@ -1324,7 +1324,7 @@ const OUTLINE = `function (label) {
       chip.style.left = Math.max(4, Math.min(r.left - 3, W - 120)) + 'px'; chip.style.maxWidth = Math.max(100, W - Math.max(4, Math.min(r.left - 3, W - 120)) - 6) + 'px';
       raf = requestAnimationFrame(place);
     };
-    o = window.__herdrOutline = {
+    o = window.__atrousOutline = {
       show(el, label) { cur = el; text = label; if (!raf) raf = requestAnimationFrame(place); },
       hide() { cur = null; box.style.display = 'none'; chip.style.display = 'none'; },
     };
@@ -1334,13 +1334,13 @@ const OUTLINE = `function (label) {
 // The page's own keys while picking (the page has the keyboard natively): Esc leaves the mode,
 // C and S copy or screenshot in pick mode.
 const KEYS_INSTALL = `(() => {
-  if (window.__herdrKeysOn !== undefined) { window.__herdrKeysOn = true; return; }
-  window.__herdrKeysOn = true;
+  if (window.__atrousKeysOn !== undefined) { window.__atrousKeysOn = true; return; }
+  window.__atrousKeysOn = true;
   addEventListener('keydown', (e) => {
-    if (!window.__herdrKeysOn || typeof __herdrKey !== 'function') return;
+    if (!window.__atrousKeysOn || typeof __atrousKey !== 'function') return;
     const k = (e.key || '').toLowerCase();
     if (k === 'escape' || (!e.ctrlKey && !e.altKey && !e.metaKey && (k === 'c' || k === 's'))) {
-      e.preventDefault(); e.stopImmediatePropagation(); __herdrKey(k);
+      e.preventDefault(); e.stopImmediatePropagation(); __atrousKey(k);
     }
   }, true);
 })()`;
@@ -1382,7 +1382,7 @@ async function inspectOn(session, on) {
     } else {
       await cdp.send("Overlay.setInspectMode", { mode: "none", highlightConfig: HIGHLIGHT }, session);
       await cdp.send("Overlay.hideHighlight", {}, session);
-      if (NATIVE) await cdp.send("Runtime.evaluate", { expression: "window.__herdrOutline && window.__herdrOutline.hide(); window.__herdrKeysOn = false" }, session).catch(() => {});
+      if (NATIVE) await cdp.send("Runtime.evaluate", { expression: "window.__atrousOutline && window.__atrousOutline.hide(); window.__atrousKeysOn = false" }, session).catch(() => {});
     }
   } catch (e) { log("inspect mode", e.message); }
 }
@@ -1394,7 +1394,7 @@ async function setInspect(mode) {
   S.inspect = next;
   if (NATIVE) {
     const tab = tabs.get(S.targetId);
-    if (tab?.ui) await uiEval(tab, `__herdr.mode(${JSON.stringify(next)})`).catch(() => {});
+    if (tab?.ui) await uiEval(tab, `__atrous.mode(${JSON.stringify(next)})`).catch(() => {});
     bump();
     return;
   }
@@ -1419,7 +1419,7 @@ const ELEMENT_INFO = `function () {
   }
   const text = (el.innerText || el.textContent || el.getAttribute('aria-label') || el.getAttribute('alt') || '').replace(/\\s+/g, ' ').trim();
   let html = el.outerHTML;
-  if (el.querySelector('[data-herdr]')) { const c = el.cloneNode(true); c.querySelectorAll('[data-herdr]').forEach((x) => x.remove()); html = c.outerHTML; }
+  if (el.querySelector('[data-atrous]')) { const c = el.cloneNode(true); c.querySelectorAll('[data-atrous]').forEach((x) => x.remove()); html = c.outerHTML; }
   return { tag: el.localName, selector: parts.join(' > '), text: text.slice(0, 140),
     rect: { x: r.x, y: r.y, w: r.width, h: r.height }, scroll: { x: scrollX, y: scrollY },
     vw: document.documentElement.clientWidth || innerWidth, vh: document.documentElement.clientHeight || innerHeight,
@@ -1498,10 +1498,10 @@ async function elementShotNative(backendNodeId, info, session) {
   if (x1 - x0 < 1 || y1 - y0 < 1) return null;
   const tab = tabFor(session);
   let hidden = 0;
-  if (tab?.ui) hidden = (await uiEval(tab, `__herdr.shotHide(${JSON.stringify({ x: x0, y: y0, w: x1 - x0, h: y1 - y0 })})`).catch(() => null))?.result?.value ?? 0;
+  if (tab?.ui) hidden = (await uiEval(tab, `__atrous.shotHide(${JSON.stringify({ x: x0, y: y0, w: x1 - x0, h: y1 - y0 })})`).catch(() => null))?.result?.value ?? 0;
   let shot;
   try { shot = await cdp.send("Page.captureScreenshot", { format: "png", fromSurface: true }, session, 10000); }
-  finally { if (hidden) uiEval(tab, "__herdr.shotShow()").catch(() => {}); }
+  finally { if (hidden) uiEval(tab, "__atrous.shotShow()").catch(() => {}); }
   const img = pngDecode(Buffer.from(shot.data, "base64"));
   const k = img.w / info.vw;
   const cx = Math.max(0, Math.floor(x0 * k)), cy = Math.max(0, Math.floor(y0 * k));
@@ -1519,7 +1519,7 @@ async function elementShot(backendNodeId, info, session = S.session) {
   const x0 = Math.max(0, r.x), y0 = Math.max(0, r.y), x1 = Math.min(S.width, r.x + r.w), y1 = Math.min(S.height, r.y + r.h);
   if (x1 - x0 < 1 || y1 - y0 < 1) return null;
   await cdp.send("Overlay.hideHighlight", {}, session).catch(() => {});
-  await cdp.send("Runtime.evaluate", { expression: "window.__herdrMarks && window.__herdrMarks.hide(true); window.__herdrOutline && window.__herdrOutline.hide()" }, session).catch(() => {});
+  await cdp.send("Runtime.evaluate", { expression: "window.__atrousMarks && window.__atrousMarks.hide(true); window.__atrousOutline && window.__atrousOutline.hide()" }, session).catch(() => {});
   try {
     const shot = await cdp.send("Page.captureScreenshot", { format: "png",
       clip: { x: x0 + info.scroll.x, y: y0 + info.scroll.y, width: x1 - x0, height: y1 - y0, scale: 1 } }, session, 10000);
@@ -1532,17 +1532,17 @@ async function elementShot(backendNodeId, info, session = S.session) {
     for (const f of all.slice(0, Math.max(0, all.length - 300))) fs.rmSync(path.join(dir, f), { force: true });
     return file;
   } finally {
-    cdp.send("Runtime.evaluate", { expression: "window.__herdrMarks && window.__herdrMarks.hide(false)" }, session).catch(() => {});
+    cdp.send("Runtime.evaluate", { expression: "window.__atrousMarks && window.__atrousMarks.hide(false)" }, session).catch(() => {});
   }
 }
 
 async function outerHtml(backendNodeId, session = S.session, max = 1_000_000) {
   let { outerHTML } = await cdp.send("DOM.getOuterHTML", { backendNodeId }, session);
-  if (outerHTML.includes("data-herdr")) {
+  if (outerHTML.includes("data-atrous")) {
     // the panel's own page UI (or note badges) inside it: copied without them
     const { object } = await cdp.send("DOM.resolveNode", { backendNodeId }, session);
     const r = await cdp.send("Runtime.callFunctionOn", { objectId: object.objectId, returnByValue: true,
-      functionDeclaration: "function () { const c = this.cloneNode(true); if (c.querySelectorAll) c.querySelectorAll('[data-herdr]').forEach((x) => x.remove()); return c.outerHTML; }" }, session);
+      functionDeclaration: "function () { const c = this.cloneNode(true); if (c.querySelectorAll) c.querySelectorAll('[data-atrous]').forEach((x) => x.remove()); return c.outerHTML; }" }, session);
     cdp.send("Runtime.releaseObject", { objectId: object.objectId }, session).catch(() => {});
     if (typeof r.result?.value === "string") outerHTML = r.result.value;
   }
@@ -1554,7 +1554,7 @@ async function outerHtml(backendNodeId, session = S.session, max = 1_000_000) {
 async function inspected(backendNodeId) {
   const mode = S.inspect, session = S.session;
   // natively the panel freezes the page for the note popover: no hover outline in that still
-  if (NATIVE) cdp.send("Runtime.evaluate", { expression: "window.__herdrOutline && window.__herdrOutline.hide()" }, session).catch(() => {});
+  if (NATIVE) cdp.send("Runtime.evaluate", { expression: "window.__atrousOutline && window.__atrousOutline.hide()" }, session).catch(() => {});
   const info = await elementInfo(backendNodeId, session);
   if (!info) return;
   const shot = mode === "annotate" ? await elementShot(backendNodeId, info, session).catch(() => null) : null;
@@ -1570,7 +1570,7 @@ async function inspected(backendNodeId) {
 // An image on the clipboard (bitmap and PNG on Windows): pasted as a picture, not a path.
 function writeClipboardImage(file) {
   if (opt["no-clipboard"] === "true") return fsp.writeFile(path.join(BASE, `clipboard-test${SUFFIX}.txt`), `[image] ${file}`);
-  if (WIN) return powershell("Add-Type -AssemblyName System.Windows.Forms, System.Drawing; $p = $env:HERDR_PNG; $img = [System.Drawing.Image]::FromFile($p); $ms = New-Object System.IO.MemoryStream(,[System.IO.File]::ReadAllBytes($p)); $d = New-Object System.Windows.Forms.DataObject; $d.SetImage($img); $d.SetData('PNG', $false, $ms); [System.Windows.Forms.Clipboard]::SetDataObject($d, $true); $img.Dispose()", undefined, { HERDR_PNG: file });
+  if (WIN) return powershell("Add-Type -AssemblyName System.Windows.Forms, System.Drawing; $p = $env:ATROUS_PNG; $img = [System.Drawing.Image]::FromFile($p); $ms = New-Object System.IO.MemoryStream(,[System.IO.File]::ReadAllBytes($p)); $d = New-Object System.Windows.Forms.DataObject; $d.SetImage($img); $d.SetData('PNG', $false, $ms); [System.Windows.Forms.Clipboard]::SetDataObject($d, $true); $img.Dispose()", undefined, { ATROUS_PNG: file });
   if (MAC) return pipe("osascript", ["-e", `set the clipboard to (read (POSIX file "${file.replace(/"/g, '\\"')}") as «class PNGf»)`]);
   return wayland() ? pipe("sh", ["-c", 'wl-copy --type image/png < "$1"', "sh", file]) : pipe("xclip", ["-selection", "clipboard", "-t", "image/png", "-i", file]);
 }
@@ -1580,7 +1580,7 @@ async function pickAction(action) {
   const s = S.session;
   let backendNodeId = null;
   const tab = tabs.get(S.targetId);
-  if (NATIVE && tab?.ui) backendNodeId = await uiNode(tab, "__herdr.target()").catch(() => null);
+  if (NATIVE && tab?.ui) backendNodeId = await uiNode(tab, "__atrous.target()").catch(() => null);
   if (!backendNodeId && S.hoverNode && !NATIVE) {
     try { backendNodeId = (await cdp.send("DOM.describeNode", { nodeId: S.hoverNode }, s)).node.backendNodeId; } catch {}
   }
@@ -1594,7 +1594,7 @@ async function pickAction(action) {
       // the picture itself, ready to paste into an agent's prompt (the file stays in shots/)
       await writeClipboardImage(file);
       toast("Screenshot copied");
-      if (tab?.ui) uiEval(tab, "__herdr.flash('shot', 'Copied')").catch(() => {});
+      if (tab?.ui) uiEval(tab, "__atrous.flash('shot', 'Copied')").catch(() => {});
       return { ok: true, file };
     }
     await writeClipboard(file);
@@ -1605,16 +1605,16 @@ async function pickAction(action) {
   const html = await outerHtml(backendNodeId, s);
   await writeClipboard(html);
   toast(`Copied <${info.tag}> HTML (${html.length.toLocaleString("en-US")} characters)`);
-  if (NATIVE && tab?.ui) uiEval(tab, "__herdr.flash('copy', 'Copied')").catch(() => {});
+  if (NATIVE && tab?.ui) uiEval(tab, "__atrous.flash('copy', 'Copied')").catch(() => {});
   return { ok: true };
 }
 
 // Numbered note markers on the page (annotate): a shadow-root layer in the page that follows
 // the elements; hidden while element screenshots are taken.
 const MARKS_INSTALL = `(() => {
-  if (window.__herdrMarks) return;
+  if (window.__atrousMarks) return;
   const host = document.createElement('div');
-  host.setAttribute('data-herdr', 'marks');
+  host.setAttribute('data-atrous', 'marks');
   host.style.cssText = 'position:absolute;left:0;top:0;width:0;height:0;z-index:2147483647;pointer-events:none';
   const root = host.attachShadow({ mode: 'open' });
   const marks = [];
@@ -1628,7 +1628,7 @@ const MARKS_INSTALL = `(() => {
       m.dot.style.display = '';
     }
   };
-  window.__herdrMarks = {
+  window.__atrousMarks = {
     set(list) {
       for (const m of marks) m.dot.remove();
       marks.length = 0;
@@ -1660,7 +1660,7 @@ async function setMarks(list) {
   const args = [{ value: objs.map((o) => o.n) }, ...objs.map((o) => ({ objectId: o.id }))];
   const { result } = await cdp.send("Runtime.evaluate", { expression: "window" }, s);
   await cdp.send("Runtime.callFunctionOn", { objectId: result.objectId, arguments: args,
-    functionDeclaration: "function (nums, ...els) { window.__herdrMarks.set(els.map((el, i) => ({ el, n: nums[i] }))); }" }, s);
+    functionDeclaration: "function (nums, ...els) { window.__atrousMarks.set(els.map((el, i) => ({ el, n: nums[i] }))); }" }, s);
   for (const o of objs) cdp.send("Runtime.releaseObject", { objectId: o.id }, s).catch(() => {});
   return { ok: true, placed: objs.length };
 }
@@ -1669,7 +1669,7 @@ async function pageHtml(what) {
   const s = S.session;
   if (what === "picked" && S.picked?.targetId === S.targetId) return outerHtml(S.picked.backendNodeId, s, 400_000);
   const r = await cdp.send("Runtime.evaluate", { returnByValue: true,
-    expression: "(() => { const d = document.documentElement.cloneNode(true); d.querySelectorAll('[data-herdr]').forEach((e) => e.remove()); return '<!DOCTYPE html>\\n' + d.outerHTML; })()" }, s);
+    expression: "(() => { const d = document.documentElement.cloneNode(true); d.querySelectorAll('[data-atrous]').forEach((e) => e.remove()); return '<!DOCTYPE html>\\n' + d.outerHTML; })()" }, s);
   const html = r.result?.value ?? "";
   return html.length > 400_000 ? `${html.slice(0, 400_000)}\n<!-- … cut at 400,000 characters -->` : html;
 }
@@ -1793,7 +1793,7 @@ async function route(method, pathname, q, b) {
     case "/ui-theme": {
       S.uiTheme = b.theme ?? null;
       const tab = tabs.get(S.targetId);
-      if (tab?.ui) await uiEval(tab, `__herdr.init(${JSON.stringify({ theme: S.uiTheme })})`).catch(() => {});
+      if (tab?.ui) await uiEval(tab, `__atrous.init(${JSON.stringify({ theme: S.uiTheme })})`).catch(() => {});
       return { ok: true };
     }
     case "/element-shot": return { ok: true, file: await elementShot(b.backendNodeId) };

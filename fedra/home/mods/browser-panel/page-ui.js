@@ -1,18 +1,18 @@
 // The browser panel's UI inside the page (native view): the pick and annotate outlines, the pick
 // action buttons, the note editor, the numbered badges and the annotations card.
 //
-// The helper (helper.mjs) runs this in an isolated world named "herdr" of every page it shows:
-// the page's own scripts can't see these globals or the __herdrUi binding (it exists only in this
-// world). Everything is drawn in one closed shadow root under a [data-herdr] element, which element
+// The helper (helper.mjs) runs this in an isolated world named "atrous" of every page it shows:
+// the page's own scripts can't see these globals or the __atrousUi binding (it exists only in this
+// world). Everything is drawn in one closed shadow root under a [data-atrous] element, which element
 // screenshots, copied HTML and the page HTML sent to agents leave out. Drawn by the page itself,
 // it moves with the page at its own frame rate: the panel never swaps the page for a still.
 //
-// Helper -> page: globalThis.__herdr.{init, mode, setNotes, picked, target, shotHide, shotShow, flash}
-// Page -> helper: __herdrUi(JSON): {type: "pick" | "key" | "escape" | "copy" | "shot" | "note-save" |
+// Helper -> page: globalThis.__atrous.{init, mode, setNotes, picked, target, shotHide, shotShow, flash}
+// Page -> helper: __atrousUi(JSON): {type: "pick" | "key" | "escape" | "copy" | "shot" | "note-save" |
 //   "note-cancel" | "note-delete" | "send" | "copy-all" | "clear" | "collapse", ...}
 (() => {
-  if (globalThis.__herdr) return;
-  const send = (o) => { try { globalThis.__herdrUi(JSON.stringify(o)); } catch {} };
+  if (globalThis.__atrous) return;
+  const send = (o) => { try { globalThis.__atrousUi(JSON.stringify(o)); } catch {} };
   const NS = "http://www.w3.org/2000/svg";
 
   let theme = {
@@ -131,7 +131,7 @@
   let host = null, root = null, el = {};
   function build() {
     host = document.createElement("div");
-    host.setAttribute("data-herdr", "ui");
+    host.setAttribute("data-atrous", "ui");
     host.style.cssText = "position:fixed;left:0;top:0;width:0;height:0;z-index:2147483647;pointer-events:none;display:block;";
     root = host.attachShadow({ mode: "closed" });
     try { const sheet = new CSSStyleSheet(); sheet.replaceSync(CSS); root.adoptedStyleSheets = [sheet]; }
@@ -428,7 +428,7 @@
   }, { capture: true });
 
   // ---- the helper's side ----
-  globalThis.__herdr = {
+  globalThis.__atrous = {
     init(o) {
       if (o.theme) theme = { ...theme, ...o.theme };
       if (o.icons) icons = o.icons;

@@ -1,9 +1,12 @@
 #!/usr/bin/env node
-// Makes the herdr-browser skill visible to Claude Code (~/.claude/skills) and Codex
+// Makes the atrous-browser skill visible to Claude Code (~/.claude/skills) and Codex
 // (~/.codex/skills) as a link to this folder, so updates here reach both at once.
 // A junction on Windows (no admin rights needed), a symlink elsewhere. Never replaces a real
 // folder of the same name; an existing link is pointed here again. Account profiles made by
-// herdr's Settings > Accounts share these skills folders, so they see it too.
+// Atrous's Settings > Accounts share these skills folders, so they see it too.
+// Only the atrous-browser entry is touched: herdr-app's herdr-browser link (herdr stays
+// installed beside Atrous) and any other skill are left alone. Fedra's brand mod (my-chrome)
+// runs this when Atrous starts and a link is missing.
 //
 //   node install.mjs [--remove]
 
@@ -13,7 +16,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const NAME = "herdr-browser";
+const NAME = "atrous-browser";
 const remove = process.argv.includes("--remove");
 const roots = [
   path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude"), "skills"),

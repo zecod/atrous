@@ -1,10 +1,11 @@
-// herdr accounts: makes, refreshes and removes the folders behind extra Claude Code / Codex
+// Atrous accounts: makes, refreshes and removes the folders behind extra Claude Code / Codex
 // accounts. Plain Node (run by mods/my-settings and by launch.ps1), not a mod module.
 //
 //   node profile.mjs create <claude|codex> <id>   make accounts/<tool>/<id>
 //   node profile.mjs sync   <claude|codex> <dir>  refresh its copies of your main settings
 //   node profile.mjs remove <claude|codex> <id>   delete it (its links first, never their targets)
 //   node profile.mjs info   <claude|codex> <dir>  what it shares and whether its links are intact
+//   node profile.mjs migrate [<old accounts dir>]  first use: bring herdr-app's accounts over (below)
 // Each prints one line of JSON: { ok: true, ... } or { error }.
 //
 // An account is a config home: CLAUDE_CONFIG_DIR for Claude Code, CODEX_HOME for Codex. Each one
@@ -36,6 +37,18 @@
 //   added or removed in the main account across (servers added in this account stay).
 // Never copied: .credentials.json, auth.json, ~/.claude/config.json (an old API key), history,
 // sqlite state, caches, daemon/jobs/session-env/shell-snapshots (per account by design).
+//
+// migrate: Atrous is a fork of herdr-app, whose accounts live in ~/.config/herdr-app/accounts
+// ($XDG_CONFIG_HOME/herdr-app when that's set). The accounts mods run it when this home has no
+// state.json yet; it does nothing unless that's still so and herdr's state.json exists. Each
+// account folder is copied, never moved, so herdr keeps working with its own. The copy never goes
+// through a link or junction (they lead into ~/.claude / ~/.codex: following one would duplicate
+// gigabytes and split the history): real files and folders are copied (the account's own login,
+// caches and history included), the shared folders are linked again the way `create` links them,
+// and any other link is made again to the same target. Each folder is built under
+// accounts/<tool>/.migrating-<id> and renamed into place when complete; state.json (herdr's, with
+// the new folders) is written last, so an interrupted run starts over cleanly. herdr's files are
+// only read.
 
 import fs from "node:fs";
 import os from "node:os";
@@ -44,7 +57,11 @@ import { fileURLToPath } from "node:url";
 
 const ACCOUNTS = path.dirname(fileURLToPath(import.meta.url));
 const HOME = os.homedir();
-const MARKER = ".herdr-account.json";
+const MARKER = ".atrous-account.json";
+// herdr-app's accounts (the app Atrous forked): read once by `migrate`, never written.
+const HERDR_ACCOUNTS = path.join(process.env.XDG_CONFIG_HOME || path.join(HOME, ".config"), "herdr-app", "accounts");
+const HERDR_MARKER = ".herdr-account.json";
+const ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
 
 const TOOLS = {
   claude: {
@@ -87,7 +104,7 @@ const same = (a, b) => path.resolve(a).toLowerCase() === path.resolve(b).toLower
 // The account folder for a tool and id, refusing anything but accounts/<tool>/<id>.
 function folderFor(tool, id) {
   if (!TOOLS[tool]) fail(`unknown tool: ${tool}`);
-  if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(id ?? "") || id === "default") fail(`bad account id: ${id}`);
+  if (!ID.test(id ?? "") || id === "default") fail(`bad account id: ${id}`);
   return path.join(ACCOUNTS, tool, id);
 }
 
@@ -259,13 +276,116 @@ function remove(tool, id) {
   out({ ok: true, dir, removed: true, mainEntries: before });
 }
 
+// ---- migrate: herdr-app's accounts, copied once into this home (see the header) ----
+
+// A link made again at `to`, to what the link at `from` points to. Never reads through it.
+function relink(from, to) {
+  const raw = fs.readlinkSync(from);
+  if (process.platform !== "win32") return fs.symlinkSync(raw, to); // relative stays relative
+  const target = path.resolve(path.dirname(from), raw.replace(/^\\\\\?\\/, "")); // junctions read back as \\?\C:\...
+  let dir = false;
+  try { dir = fs.statSync(target).isDirectory(); } catch {}
+  fs.symlinkSync(target, to, dir ? "junction" : "file");
+}
+
+// Copies the folder `src` into `dst` (which exists) without ever going through a link: files and
+// folders are copied, links are made again. At the top, the shared folders are linked into the
+// main account the way `create` links them (`shared` collects them), and herdr's marker stays out.
+// `rel`: where `src` is in the account folder ("" at the top, else ending in "/").
+function copyAccountTree(tool, src, dst, rel, shared, links) {
+  const top = rel === "";
+  for (const name of fs.readdirSync(src)) {
+    if (top && (name === HERDR_MARKER || name === MARKER)) continue;
+    const from = path.join(src, name);
+    const to = path.join(dst, name);
+    const st = fs.lstatSync(from);
+    if (st.isSymbolicLink()) {
+      if (top && TOOLS[tool].share.includes(name)) {
+        if (link(tool, dst, name)) shared.push(name);
+      } else {
+        try { relink(from, to); links.push(rel + name); } catch (e) { links.push(`${rel + name} (not made: ${e.code ?? e.message})`); }
+      }
+    } else if (st.isDirectory()) {
+      fs.mkdirSync(to);
+      copyAccountTree(tool, from, to, `${rel + name}/`, shared, links);
+    } else if (st.isFile()) {
+      fs.copyFileSync(from, to);
+      try { fs.utimesSync(to, st.atime, st.mtime); } catch {}
+    } // sockets, pipes: left out
+  }
+}
+
+// One herdr account folder, copied to accounts/<tool>/<id> here. Returns the new folder.
+function migrateAccount(a, from) {
+  if (!ID.test(a.id) || a.id === "default") throw new Error(`bad account id: ${a.id}`);
+  const src = path.resolve(a.dir);
+  if (!same(path.dirname(src), path.join(from, a.tool))) throw new Error(`not an account folder: ${a.dir}`);
+  const old = readJson(path.join(src, HERDR_MARKER));
+  if (!old || old.tool !== a.tool) throw new Error(`no account marker in ${a.dir}`);
+  const dir = path.join(ACCOUNTS, a.tool, a.id);
+  if (readJson(path.join(dir, MARKER))?.tool === a.tool) return { dir, again: true }; // an earlier, interrupted run's
+  if (exists(dir)) throw new Error(`${dir} already exists`);
+  const tmp = path.join(ACCOUNTS, a.tool, `.migrating-${a.id}`);
+  removeTree(tmp); // what an interrupted run left
+  fs.mkdirSync(tmp, { recursive: true });
+  try {
+    const shared = [], links = [];
+    copyAccountTree(a.tool, src, tmp, "", shared, links);
+    writeMarker(tmp, { ...old, tool: a.tool, id: a.id, sources: sources(a.tool), shared, migrated: { from: src, at: Date.now() } });
+    fs.renameSync(tmp, dir);
+    return { dir, shared, links };
+  } catch (e) {
+    removeTree(tmp);
+    throw e;
+  }
+}
+
+function migrate(given) {
+  const from = path.resolve(given || HERDR_ACCOUNTS);
+  const stateFile = path.join(ACCOUNTS, "state.json");
+  if (exists(stateFile)) return out({ ok: true, migrated: false, why: "this home has its own accounts" });
+  if (same(from, ACCOUNTS)) fail("the old accounts folder is this one");
+  const old = readJson(path.join(from, "state.json"));
+  if (!old || typeof old !== "object") return out({ ok: true, migrated: false, why: `no accounts to bring over (${from})` });
+  // One run at a time (every accounts mod may ask at once); a lock older than 5 minutes is a dead run's.
+  const lock = path.join(ACCOUNTS, ".migrate.lock");
+  try { if (Date.now() - fs.statSync(lock).mtimeMs > 5 * 60000) fs.unlinkSync(lock); } catch {}
+  let fd;
+  try { fd = fs.openSync(lock, "wx"); } catch { return out({ ok: true, migrated: false, why: "another run is migrating" }); }
+  try {
+    if (exists(stateFile)) return out({ ok: true, migrated: false, why: "this home has its own accounts" });
+    const accounts = [], copied = [], skipped = [];
+    for (const a of Array.isArray(old.accounts) ? old.accounts : []) {
+      if (!a || !TOOLS[a.tool] || !a.id) continue;
+      if (a.id === "default" || !a.dir) { accounts.push(a); continue; }
+      try {
+        const r = migrateAccount(a, from);
+        accounts.push({ ...a, dir: r.dir });
+        copied.push({ account: `${a.tool}:${a.id}`, dir: r.dir, shared: r.shared, links: r.links, again: r.again });
+      } catch (e) {
+        skipped.push({ account: `${a.tool}:${a.id}`, why: String(e?.message ?? e) });
+      }
+    }
+    const active = { ...(old.active ?? {}) };
+    for (const t of Object.keys(TOOLS)) {
+      if (active[t] && active[t] !== "default" && !accounts.some((x) => x.tool === t && x.id === active[t])) active[t] = "default";
+    }
+    writeAtomic(stateFile, JSON.stringify({ ...old, active, accounts }, null, 2) + "\n");
+    out({ ok: true, migrated: true, from, copied, skipped });
+  } finally {
+    fs.closeSync(fd);
+    try { fs.unlinkSync(lock); } catch {}
+  }
+}
+
 const [cmd, tool, arg] = process.argv.slice(2);
 try {
   if (cmd === "create") create(tool, arg);
   else if (cmd === "sync") sync(tool, arg);
   else if (cmd === "remove") remove(tool, arg);
   else if (cmd === "info") info(tool, arg);
-  else fail("usage: node profile.mjs create|sync|remove|info <claude|codex> <id|dir>");
+  else if (cmd === "migrate") migrate(tool);
+  else fail("usage: node profile.mjs create|sync|remove|info <claude|codex> <id|dir> | migrate [<old accounts dir>]");
 } catch (e) {
   fail(String(e?.message ?? e));
 }

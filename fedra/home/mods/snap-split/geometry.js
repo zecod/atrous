@@ -2,7 +2,7 @@
 // layout tree, and each of its panes from the tab's split tree. Pure functions,
 // all in mod px with the window's top left at 0,0.
 
-import { readTextFile, home } from "herdr";
+import { readTextFile, home } from "atrous";
 import * as fs from "fs/promises";
 
 const pad = (p) => (Array.isArray(p) ? [p[0] ?? 0, p[1] ?? p[0] ?? 0] : [p ?? 0, p ?? 0]);
@@ -69,24 +69,25 @@ export function paneRects(root, area, gap) {
   return out;
 }
 
-// The tab's split tree, from the core's saved copy of Herdr's document (this
+// The tab's split tree, from the core's saved copy of Atrous's document (this
 // computer only). Undocumented, so anything odd gives null and the caller falls
 // back to treating the focused pane as the whole area. The core's session
-// (HC_SESSION) names the folder: `default` first, then any other that has the tab.
+// (ATC_SESSION) names the folder: `default` first, then any other that has the tab.
+// The app's document is "atrous" in docs.json.
 export async function readTabTree(tab) {
   if (!tab) return null;
   const h = home().replace(/[\\/]+$/, "");
   const roots = [
-    `${h}\\AppData\\Local\\herdr-core`,
-    `${h}/Library/Application Support/herdr-core`,
-    `${h}/.local/state/herdr-core`,
-    `${h}/.local/share/herdr-core`,
+    `${h}\\AppData\\Local\\atrous-core`,
+    `${h}/Library/Application Support/atrous-core`,
+    `${h}/.local/state/atrous-core`,
+    `${h}/.local/share/atrous-core`,
   ];
   const lookIn = async (file) => {
     try {
       const text = await readTextFile(file);
       if (!text) return undefined;
-      const doc = JSON.parse(text)?.["herdr-app"]?.value;
+      const doc = JSON.parse(text)?.["atrous"]?.value;
       for (const s of doc?.spaces ?? []) for (const t of s.tabs ?? []) if (t.id === tab) return t.root ?? null;
     } catch {}
     return undefined;

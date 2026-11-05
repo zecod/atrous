@@ -1,6 +1,6 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { spaces, panes, run, openOverlay, theme, window, shared, setShared, layout, settings, focused, exec, appHome, readTextFile, notify } from "herdr";
+import { spaces, panes, run, openOverlay, theme, window, shared, setShared, layout, settings, focused, exec, appHome, readTextFile, notify } from "atrous";
 import { tabTerminal, armDrag, dragMove, dragLeft, disarm } from "./drag-out.js"; // smart split: drag a tab's agent down onto the tab
 
 function find(node, id) {
@@ -196,7 +196,7 @@ export default class Tabs extends View {
       .child(this.openButton(t, stop))
       .when(Boolean(panel && find(root, "files")) && enabled.includes("files"), el => el.child(panelButton("files", "Files", "mods/files/file.svg")))
       .when(Boolean(panel && find(root, "changes")) && enabled.includes("changes"), el => el.child(panelButton("changes", "Changes", "mods/changes/changes.svg")))
-      // A real Chrome in the side panel (mods/browser-panel); agents drive it over CDP at 127.0.0.1:9333.
+      // A real Chrome in the side panel (mods/browser-panel); agents drive it over CDP at 127.0.0.1:9733.
       .when(Boolean(panel && find(root, "browser")), el => el.child(panelButton("browser", "Browser", "mods/browser-panel/icons/globe.svg")))
       .when(w?.buttons, el => el.child(button("minimize", w.platform === "windows" ? svg("mods/my-tabs/win-min.svg").size(16) : "−", () => run("window.minimize")))
         .child(button("maximize", w.platform === "windows" ? svg(`mods/my-tabs/${w.maximized ? "win-restore" : "win-max"}.svg`).size(16) : "□", () => run("window.maximize")))

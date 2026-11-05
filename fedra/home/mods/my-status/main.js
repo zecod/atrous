@@ -1,7 +1,7 @@
 // Personal copy of the shipped `workspace-status` mod (cloned from 0.1.12). Change:
 // a "Terminal" button (and Ctrl+` via keys.json "my-status.toggle") that opens quick
 // terminals under the work area, like VS Code's panel. Each space has its own list of
-// shells (`hc run --bg --keep` terminals labelled herdr.quick=<space>, not tabs of the
+// shells (`atc run --bg --keep` terminals labelled atrous.quick=<space>, not tabs of the
 // space), shown as tabs in the panel's header: "+" starts another (a backend, a
 // frontend…), × ends one. They keep running while hidden; switching spaces shows that
 // space's terminals. When the last one exits the panel closes.
@@ -13,7 +13,7 @@
 //   limited to the "quick-terminal" node (hidden, size kept as dragged) and its
 //   "quick-terminal-term" block (content). Never layout.set with a tree from layout():
 //   that round trip flattens single-child columns and once lost the side panel. And not
-//   layout.show/hide either: herdr drops clicks on a node whose file entry changed, so a
+//   layout.show/hide either: Atrous drops clicks on a node whose file entry changed, so a
 //   show followed by a content edit snapped back to hidden.
 // - Keyboard focus waits until the terminal block is really on screen.
 // - Following the active space is event-driven: the status bar looks after each redraw
@@ -24,7 +24,7 @@
 
 import { View, div, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { spaces, agents, panes, terminals, focused, theme, run, window, keys, layout, hc, shared, setShared, props, nextCommand, appHome, readTextFile, writeTextFile } from "herdr";
+import { spaces, agents, panes, terminals, focused, theme, run, window, keys, layout, core, shared, setShared, props, nextCommand, appHome, readTextFile, writeTextFile } from "atrous";
 
 // shared: space id -> { list: [address…], active: address, at: { address: started ms } }
 // (an older version stored a bare address string).
@@ -183,10 +183,10 @@ export default class WorkspaceStatus extends View {
     const f = focused();
     const cwd = (f?.space === space.id ? f?.cwd : null) || panes().find((p) => space.tabs?.some((tb) => tb.id === p.tab) && p.cwd)?.cwd || space.folder;
     const local = space.id.includes("/") ? space.id.split("/").pop() : space.id;
-    const args = ["run", "--bg", "--keep", "--json", "--no-parent", "--no-notify", "--label", `herdr.quick=${local}`];
+    const args = ["run", "--bg", "--keep", "--json", "--no-parent", "--no-notify", "--label", `atrous.quick=${local}`];
     if (cwd) args.push("--cwd", cwd);
     if (space.machine) args.push("--on", space.machine);
-    const r = await hc(args);
+    const r = await core(args);
     if (r.code !== 0) throw new Error((r.stderr || r.stdout || "couldn't start a shell").trim());
     return JSON.parse(r.stdout).address;
   }

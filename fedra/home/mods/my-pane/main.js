@@ -1,5 +1,5 @@
 // Personal copy of the shipped `pane` header (cloned from 0.1.12). Change, marked
-// `// smart split`: dragging the header (not just herdr's top-center grip) hands the
+// `// smart split`: dragging the header (not just Atrous's top-center grip) hands the
 // pane's terminal to the snap-split overlay, so it can go beside another pane of the
 // tab, into its own tab, and so on (mods/snap-split).
 //
@@ -11,7 +11,7 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { panes, props, run, theme, home } from "herdr";
+import { panes, props, run, theme, home } from "atrous";
 import { armDrag, dragMove, dragLeft, disarm } from "./drag-out.js"; // smart split
 
 function icon(p, size, color) {

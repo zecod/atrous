@@ -7,11 +7,11 @@
 // - Annotate: a click opens a note popover at the element; notes pile up (numbered markers on
 //   the page, a count on the button, a list card) and go to an agent in one message: a new one
 //   (tab.new with the message as its first task) or a session already open in this space
-//   (hc send: one bracketed paste, then Enter).
+//   (atc send: one bracketed paste, then Enter).
 
 import { div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, Textarea, TextareaState } from "gpui-base";
-import { run, hc, agents, knownAgents, spaces, settings } from "herdr";
+import { run, core, agents, knownAgents, spaces, settings } from "atrous";
 
 const I = (name) => `mods/browser-panel/icons/${name}.svg`;
 const clip = (s, n) => { s = String(s ?? ""); return s.length > n ? `${s.slice(0, n - 1)}…` : s; };
@@ -21,7 +21,7 @@ const stop = (_e, cx) => cx.stop_propagation();
 // The message an agent gets: the pages, then per note its number, intent, element and text.
 export function noteMessage(notes) {
   const out = [`Feedback from the browser panel: ${notes.length} note${notes.length === 1 ? "" : "s"} on page elements.`,
-    "(The panel is a Chromium browser you can drive yourself: Playwright connectOverCDP(\"http://127.0.0.1:9333\").)", ""];
+    "(The panel is a Chromium browser you can drive yourself: Playwright connectOverCDP(\"http://127.0.0.1:9733\").)", ""];
   let page = null;
   notes.forEach((n, i) => {
     if (n.url !== page) {
@@ -238,7 +238,7 @@ export const Notes = {
     this.clearNotes(cx, `Sending to ${clip(a.title || a.program?.name || a.address, 30)}:`);
     cx.spawn(async (cx) => {
       // One bracketed paste, then Enter: the agent gets the whole message as one turn.
-      const r = await hc(["send", a.address, msg]).catch((e) => ({ code: 1, stderr: String(e?.message ?? e) }));
+      const r = await core(["send", a.address, msg]).catch((e) => ({ code: 1, stderr: String(e?.message ?? e) }));
       if (r.code !== 0) {
         this.notes = notes;
         this.syncMarks(cx);

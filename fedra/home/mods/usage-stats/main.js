@@ -5,7 +5,7 @@
 // invisible popup (mod.json: 2×2 px, no frame).
 
 import { View, div } from "gpui-kit";
-import { props, openOverlay, closeOverlay } from "herdr";
+import { props, openOverlay, closeOverlay } from "atrous";
 
 export default class UsageStats extends View {
   init() {

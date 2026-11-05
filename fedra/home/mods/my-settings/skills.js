@@ -18,25 +18,25 @@
 // - installed: ~/.claude/skills, ~/.agents/skills and ~/.codex/skills, merged by folder name.
 //   The skills CLI records what it installed in ~/.agents/.skill-lock.json (or
 //   $XDG_STATE_HOME/skills/): those get Remove, everything else is "Local" (Open folder only).
-// Every request sends a plain `herdr/1.0` user agent and nothing about the person.
+// Every request sends a plain `atrous/1.0` user agent and nothing about the person.
 //
 // Installing and removing run the Vercel `skills` CLI (`npx -y skills add|remove ...`) through
-// skills-run.mjs in a background herdr-core terminal (exec stops at 30 s; npx plus a clone can take
+// skills-run.mjs in a background atrous-core terminal (exec stops at 30 s; npx plus a clone can take
 // longer), with `--home` set to the folder this page lists (so the CLI installs where the page
-// looks, whatever profile herdr-core's terminals start with). The page polls the job file it
+// looks, whatever profile atrous-core's terminals start with). The page polls the job file it
 // writes, shows the CLI's current step, then the result, with the full output a click away.
-// DISABLE_TELEMETRY=1 when Herdr's own telemetry is off.
+// DISABLE_TELEMETRY=1 always: Atrous has no telemetry, so the CLI doesn't report either.
 // One job at a time; data/skills/job.json lets a reopened Settings follow one still running.
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Scrollbar, v_virtual_list, VirtualListScrollHandle, TextView } from "gpui-base";
-import { exec, hc, home, appHome, readTextFile, theme, telemetry, settings, window } from "herdr";
+import { exec, core, home, appHome, readTextFile, theme, window } from "atrous";
 import * as fs from "fs/promises";
 
 const I = (name) => `mods/my-settings/${name}.svg`;
 const SPINNER = "mods/workspace-chrome/spinner.svg";
 const MONO = "JetBrains Mono";
-const HEADERS = { "User-Agent": "herdr/1.0" };
+const HEADERS = { "User-Agent": "atrous/1.0" };
 const SKILLS_SH = "https://skills.sh";
 const PAGES = "https://www.skills.sh"; // skills.sh redirects pages here
 const CACHE_MS = 10 * 60000;
@@ -656,9 +656,9 @@ export class SkillsPage extends View {
 
   // ---- install / remove ----
 
+  // Atrous sends no usage data, so the skills CLI is asked not to either.
   noTelemetry() {
-    const tm = telemetry();
-    return tm?.setting === false || settings()?.telemetry === false;
+    return true;
   }
 
   installArgs(it, agents) {
@@ -705,7 +705,7 @@ export class SkillsPage extends View {
         await fs.mkdir(`${DIR()}/jobs`, { recursive: true }).catch(() => {});
         await this.pruneJobs();
         await fs.writeFile(file, JSON.stringify({ id, state: "running", line: job.line }));
-        const r = await hc(["run", "--bg", "--rm", "--json", "--no-parent", "--no-notify", "--name", `skills-${id}`.slice(0, 32), "--cwd", DIR(), "--",
+        const r = await core(["run", "--bg", "--rm", "--json", "--no-parent", "--no-notify", "--name", `skills-${id}`.slice(0, 32), "--cwd", DIR(), "--",
           "node", RUNNER(), file, "--home", userHome(), ...(noTel ? ["--no-telemetry"] : []), "--", ...args]);
         if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim() || "Couldn't start the skills CLI.");
         job.address = JSON.parse(r.stdout).address ?? null;
@@ -759,7 +759,7 @@ export class SkillsPage extends View {
         if (j?.line && j.line !== job.line) { job.line = j.line; changed = true; }
         if (job.address && Date.now() - (job.checked ?? 0) > 3000) {
           job.checked = Date.now();
-          const g = await hc(["get", job.address, "--json"]).catch(() => null);
+          const g = await core(["get", job.address, "--json"]).catch(() => null);
           let finished = false;
           try { finished = g?.code === 0 && JSON.parse(g.stdout).state !== "live"; } catch {}
           const gone = g && g.code !== 0;
@@ -771,7 +771,7 @@ export class SkillsPage extends View {
           }
         }
         if (Date.now() - job.started > JOB_LIMIT) {
-          if (job.address) await hc(["kill", job.address]).catch(() => null);
+          if (job.address) await core(["kill", job.address]).catch(() => null);
           await this.settle(job, { state: "error", error: "It took too long and was stopped." }, cx);
           changed = true;
         }
@@ -795,7 +795,7 @@ export class SkillsPage extends View {
       log: log.length > 16000 ? log.slice(-16000) : log, show: false,
     };
     await fs.unlink(CURRENT()).catch(() => {});
-    if (job.address) hc(["rm", job.address]).catch(() => null);
+    if (job.address) core(["rm", job.address]).catch(() => null);
     this.loadInstalled(cx);
   }
 

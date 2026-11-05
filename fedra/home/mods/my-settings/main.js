@@ -1,10 +1,10 @@
-// My settings: a copy of Herdr's Settings (frame/settings, 0.1.12) with an "Accounts" section
+// My settings: a copy of the stock Settings (frame/settings, cloned from 0.1.12) with an "Accounts" section
 // (accounts.js: several Claude Code / Codex logins) and a "Usage & activity" section (usage.js).
 // Writes changes immediately; no Save step.
 //
 // Open: `mod.open my-settings` (Look), `mod.open accounts` (Accounts), or openOverlay({ mod:
 // "my-settings", kind: "dialog", width: 960, height: 660, props: { section: "usage" } }) for a
-// section. While it's open, `my-settings.section:<id>` (keys.json, `herdr-app do`) shows a
+// section. While it's open, `my-settings.section:<id>` (keys.json, `atrous do`) shows a
 // section: look, machines, alerts, updates, privacy, accounts, skills, usage; `my-settings.refresh`
 // refreshes the usage numbers; `my-settings.login:<tool>:<id>` opens the login window of an added
 // account. With props { section: "usage", only: true } it is the standalone usage dialog instead
@@ -12,7 +12,7 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, Scrollbar, InputState, Input } from "gpui-base";
-import { hc, run, theme, themes, fonts, updates, telemetry, settings, layouts, shared, appHome, readTextFile, writeTextFile, playSound, props, closeOverlay, window, nextCommand } from "herdr";
+import { core, run, theme, themes, fonts, updates, settings, layouts, shared, appHome, readTextFile, writeTextFile, playSound, props, closeOverlay, window, nextCommand } from "atrous";
 import { UsagePage } from "./usage.js";
 import { AccountsPage } from "./accounts.js";
 import { SkillsPage } from "./skills.js";
@@ -34,8 +34,9 @@ const SECTIONS = [
 // the heatmap is laid out for it before its first measurement.
 const USAGE_WIDTH = 713;
 
-const LOOKS = { fedra: "Fedra", terminals: "Terminals", win98: "Herdr 98", main: "Herdr" };
-// Layouts left out of the picker (herdr's default; Fedra replaces it). Still reachable with Ctrl+Shift+L.
+const LOOKS = { fedra: "Fedra", terminals: "Terminals", win98: "Atrous 98", main: "Classic" };
+// Layouts left out of the picker unless shown now (Classic, the stock layout Fedra replaces).
+// Still reachable with Ctrl+Shift+L.
 const HIDDEN_LOOKS = new Set(["main"]);
 const APPEARANCES = [
   [null, "System"],
@@ -75,7 +76,6 @@ export default class Settings extends View {
     this.raw = null;
     this.previews = {}; // layout name -> its "preview" picture
     this.previewsOf = "";
-    this.showData = false;
     this.machineList = null;
     this.machineLoading = false;
     this.machineError = null;
@@ -108,7 +108,7 @@ export default class Settings extends View {
         cx.notify();
       });
     });
-    // keys.json / `herdr-app do my-settings.section:usage`: show a section.
+    // keys.json / `atrous do my-settings.section:usage`: show a section.
     cx.spawn(async (cx) => {
       for (;;) {
         const c = String(await nextCommand());
@@ -634,7 +634,7 @@ export default class Settings extends View {
     if (this.machineLoading) return;
     this.machineLoading = true;
     try {
-      const r = await hc(["machine", "ls", "--json"]);
+      const r = await core(["machine", "ls", "--json"]);
       if (r.code !== 0) throw new Error(r.stderr || r.stdout || "Couldn't read machines.");
       const list = JSON.parse(r.stdout).machines;
       if (!Array.isArray(list)) throw new Error("Couldn't read machines.");
@@ -659,12 +659,12 @@ export default class Settings extends View {
       try {
         const args = ["machine", action, machine];
         if (action === "rename") args.push(name.trim());
-        const r = await hc(args);
+        const r = await core(args);
         let payload = null;
         try { payload = JSON.parse(r.stdout || r.stderr); } catch {}
         if (r.code !== 0) throw new Error(payload?.error?.message || (r.stderr || r.stdout || "It didn't work.").trim());
         const message = action === "update"
-          ? `Updated ${machine}${payload?.version ? ` to hc ${payload.version}` : ""}; its terminals kept running.`
+          ? `Updated ${machine}${payload?.version ? ` to atrous-core ${payload.version}` : ""}; its terminals kept running.`
           : action === "rename" ? `Renamed ${machine} to ${name.trim()}.` : `Removed ${machine}; its terminals keep running there.`;
         if (action === "update") this.machineResults[machine] = { message, ok: true };
         else this.machineNotice = message;
@@ -724,9 +724,9 @@ export default class Settings extends View {
         .child(div().w(7).h(7).flex_none().rounded(4).bg(color))
         .child(v_flex().flex_1().min_w(0).gap(3)
           .child(div().text_size(14).text_color(t.foreground).child(m.name))
-          .child(div().text_size(12.5).text_color(t.dim).child(`${m.target ?? ""} · ${state} · ${m.version ? `hc ${m.version}` : "hc version unknown"}`)))
+          .child(div().text_size(12.5).text_color(t.dim).child(`${m.target ?? ""} · ${state} · ${m.version ? `atrous-core ${m.version}` : "core version unknown"}`)))
         .child(controls.flex_none()));
-    if (busy === "update") row.child(div().text_size(12.5).text_color(t.dim).child("Copying this computer's herdr-core. Its terminals keep running."));
+    if (busy === "update") row.child(div().text_size(12.5).text_color(t.dim).child("Copying this computer's atrous-core. Its terminals keep running."));
     if (edit && !busy) {
       const cancel = this.button(t, `st-m-cancel-${m.name}`, "Cancel", (_e, cx) => { this.machineEdit = null; this.handle.focus(); cx.notify(); });
       if (edit.action === "rm") row.child(v_flex().gap(8)
@@ -747,7 +747,7 @@ export default class Settings extends View {
     return v_flex().w_full()
       .child(this.heading(t, "Machines"))
       .child(div().pb(8).text_size(12.5).line_height("18px").text_color(t.dim).child("Your computers, reached over ssh. Their terminals keep running when you disconnect."))
-      .child(this.row(t, "This computer", `Connected · ${version ? `hc ${version}` : "hc version unknown"}`, div().w(7).h(7).rounded(4).bg(t.ansi2)))
+      .child(this.row(t, "This computer", `Connected · ${version ? `atrous-core ${version}` : "core version unknown"}`, div().w(7).h(7).rounded(4).bg(t.ansi2)))
       .children((this.machineList ?? []).map((m) => this.machineRow(t, m, version)))
       .when(this.machineList === null && !this.machineError, (el) => el.child(h_flex().py(14).gap(8).items_center().child(svg("mods/workspace-chrome/spinner.svg").size(12).text_color(t.working).spin(900)).child(div().text_size(12.5).text_color(t.dim).child("Reading machines…"))))
       .when(this.machineList?.length === 0, (el) => el.child(div().py(14).text_size(12.5).text_color(t.dim).child("No other machines yet.")))
@@ -761,7 +761,7 @@ export default class Settings extends View {
   alerts(t) {
     const sounds = this.person.sounds ?? {};
     const on = sounds.enabled !== false;
-    const file = (f) => (f ? f.split(/[\\/]/).pop() : "Herdr's sound");
+    const file = (f) => (f ? f.split(/[\\/]/).pop() : "Atrous's sound");
     return v_flex()
       .w_full()
       .child(this.heading(t, "Sounds"))
@@ -813,93 +813,41 @@ export default class Settings extends View {
         ? [`${u.app.ready} is ready. Restart to switch now; it also switches when you quit.`, primary("st-app-update", "Restart to update", () => run("app.update"))]
         : [result, check("st-check-app")];
     const c = u.core;
-    const core = c.managed
+    const coreRow = c.managed
       ? [`Managed by ${c.managed}: update it there.`, null]
       : c.updating
         ? ["Updating\u2026 your terminals keep running.", null]
         : c.error
           ? [`The update failed: ${c.error}`, primary("st-core-retry", "Try again", () => run("app.update_core"))]
           : c.ready
-            ? [`${c.ready} is ready. Your terminals keep running through it.`, primary("st-core-update", "Update herdr-core", () => run("app.update_core"))]
+            ? [`${c.ready} is ready. Your terminals keep running through it.`, primary("st-core-update", "Update atrous-core", () => run("app.update_core"))]
             : u.checks
               ? [result, check("st-check-core")]
               : ["Not checked: a build from source looks for no updates.", null];
     return v_flex()
       .w_full()
-      .child(this.heading(t, "Herdr"))
-      .child(this.row(t, `Herdr ${u.app.version}`, app[0], h_flex().gap(8).flex_none()
+      .child(this.heading(t, "Atrous"))
+      .child(this.row(t, `Atrous ${u.app.version}`, app[0], h_flex().gap(8).flex_none()
         .child(this.button(t, "st-whats-new", "What's new", () => { closeOverlay(props()?.overlay); run("app.whats_new"); }))
         .when(Boolean(app[1]), (el) => el.child(app[1]))))
       .child(div().h(18))
-      .child(this.heading(t, "herdr-core"))
-      .child(this.row(t, `herdr-core ${c.version ?? ""}`, core[0], core[1] ?? div()))
-      .child(div().pt(12).text_size(12.5).line_height("18px").text_color(t.dim).child("Herdr looks for both every hour and tells you in the corner. herdr-core runs your terminals, so they keep running through its updates."));
+      .child(this.heading(t, "atrous-core"))
+      .child(this.row(t, `atrous-core ${c.version ?? ""}`, coreRow[0], coreRow[1] ?? div()))
+      .child(div().pt(12).text_size(12.5).line_height("18px").text_color(t.dim).child("Atrous looks for both every hour and tells you in the corner. atrous-core runs your terminals, so they keep running through its updates."));
   }
 
 
   // Privacy --------------------------------------------------------------
 
-  // A report as it goes out, one line per line of JSON.
-  report(t, id, title, about, report) {
-    const lines = JSON.stringify(report, null, 2).split("\n");
+  // Atrous has no telemetry (no usage reports, no switch for them), so this page only says
+  // what does reach the network.
+  privacy(t) {
     return v_flex()
       .w_full()
-      .pt(14)
-      .gap(4)
-      .child(div().text_size(13.5).text_color(t.foreground).child(title))
-      .when(Boolean(about), (el) => el.child(div().text_size(12.5).text_color(t.dim).child(about)))
-      .child(
-        v_flex()
-          .id(id)
-          .mt(4)
-          .w_full()
-          .p(10)
-          .rounded(8)
-          .border_1()
-          .border_color(t.border)
-          .bg(t.background)
-          .children(lines.map((l) => div().font_family(DEFAULT_FONT).text_size(12).line_height("17px").text_color(t.muted).whitespace_nowrap().child(l || " "))),
-      );
-  }
-
-  privacy(t) {
-    const s = telemetry();
-    const on = s ? s.setting : this.person.telemetry !== false;
-    const at = (secs) => new Date(secs * 1000).toLocaleString();
-    const why = s?.off_because ? `Off for now: ${s.off_because} is set where Herdr started.` : null;
-    const body = v_flex()
-      .w_full()
       .child(this.heading(t, "Usage data"))
-      .child(
-        this.row(
-          t,
-          "Share anonymous usage data",
-          why ?? "Once a day: which agents and features you use, how many spaces and tabs, your system and Herdr's version. Never what's in your terminals, never names of files, folders or projects.",
-          this.toggle(t, "st-telemetry", on, (_e, cx) =>
-            this.change((p) => {
-              if (on) p.telemetry = false;
-              else delete p.telemetry;
-            }, cx),
-          ),
-        ),
-      )
-      .child(
-        this.row(
-          t,
-          "What we send",
-          s && !s.sends ? "This build never sends: it's built from source. You can still see what a release would send." : "Exactly what leaves your computer, word for word.",
-          this.button(t, "st-telemetry-show", this.showData ? "Hide" : "Show", (_e, cx) => {
-            this.showData = !this.showData;
-            cx.notify();
-          }),
-        ),
-      );
-    if (!this.showData) return body;
-    if (!s?.enabled) return body.child(div().pt(14).text_size(13).text_color(t.dim).child("Nothing is collected or sent while it's off."));
-    return body
-      .children(s.queued.map((r, i) => this.report(t, `st-tq-${i}`, `Waiting to send: ${r.day}`, "Sent as is, soon.", r)))
-      .when(Boolean(s.draft), (el) => el.child(this.report(t, "st-td", "Today so far", "A draft: it changes until the day ends (UTC), then goes out once.", s.draft)))
-      .when(Boolean(s.last_sent), (el) => el.child(this.report(t, "st-tl", `Last sent: ${s.last_sent.report.day}`, `Sent ${at(s.last_sent.at)}.`, s.last_sent.report)));
+      .child(this.row(t, "No usage data", "Atrous sends no usage reports. Nothing from your terminals, files, folders or projects leaves your computer.", div()))
+      .child(this.row(t, "Update checks", "Atrous and atrous-core look for new releases on GitHub (zecod/atrous, zecod/atrous-core). The check sends nothing about you.", div()))
+      .child(this.row(t, "Feedback", "Send feedback opens a new GitHub issue for you to read and send yourself.", div()));
   }
 
   // ----------------------------------------------------------------------

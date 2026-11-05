@@ -12,7 +12,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 
-const appHome = process.argv[2] || path.join(os.homedir(), ".config", "herdr-app");
+const appHome = process.argv[2] || path.join(os.homedir(), ".config", "atrous");
 const iconDir = path.join(appHome, "data", "ide-icons");
 const exists = (p) => { try { return Boolean(p) && fs.existsSync(p); } catch { return false; } };
 const run = (cmd, args) => { try { return execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 20000 }).trim(); } catch { return ""; } };

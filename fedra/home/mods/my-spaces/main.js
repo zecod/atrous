@@ -11,7 +11,7 @@
 //
 // Cost (2026-11-04): no 250 ms poll. What could make git due is looked at after each redraw
 // (live data changed) and every 5 s for time-based fallbacks; a place's repo is asked once
-// (rev-parse), then only `git status`; `hc machine ls` runs when the app's machines change,
+// (rev-parse), then only `git status`; `atc machine ls` runs when the app's machines change,
 // on coming back to the window, and every 60 s (15 s with other machines); redraws only
 // when git, machines or tok/s actually changed; the needs-you pulse runs only while the
 // window is in front (a `loop` rebuilds the whole list ~30x/s).
@@ -23,7 +23,7 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { spaces, machines, panes, agents, terminals, setAgentOrder, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, layout } from "herdr";
+import { spaces, machines, panes, agents, terminals, setAgentOrder, run, openOverlay, exec, core, theme, shared, setShared, watchFolder, window, layout } from "atrous";
 import { smartPress, smartMove, smartRelease } from "./smart-split.js"; // smart split: drag an agent onto the shown tab
 import { lastTurnSpeed, peekSpeed, speedNeedsRefresh, formatSpeed, claudeSessionDir } from "./speed.js"; // tokens/s of each finished turn
 import * as SA from "./subagents.js"; // Claude Code subagents: mini rows under their agent
@@ -77,7 +77,7 @@ function place(s, ps) {
 const rowHeight = ({ tree }) => (tree ? 28 : 30);
 const where = (s, ps) => JSON.stringify([s.machine ?? null, place(s, ps)]);
 const base = (path) => path.replace(/\/+$/, "").split("/").pop();
-// Changes made outside Herdr (an editor's save, a commit in another app): looked
+// Changes made outside Atrous (an editor's save, a commit in another app): looked
 // for this often, in repos the list shows, while the window is in front.
 const FALLBACK = 60000;
 
@@ -121,7 +121,7 @@ export default class Spaces extends View {
     this.where = {}; // where() -> { top, common, at }: a place's repo, asked once (it doesn't move)
     this.machinesAt = 0;
     this.refreshMachines(cx);
-    // `hc machine ls` is a process: asked when the app's machines change (see render), on
+    // `atc machine ls` is a process: asked when the app's machines change (see render), on
     // coming back to the window, and now and then for connection states (often only when
     // there are other machines to show).
     cx.timer.every(15000, (cx) => {
@@ -220,7 +220,7 @@ export default class Spaces extends View {
     this.machinesAt = Date.now();
     cx.spawn(async cx => {
       const before = JSON.stringify(this.machines);
-      try { const r = await hc(["machine", "ls", "--json"]); if (r.code === 0) this.machines = (JSON.parse(r.stdout).machines ?? []).filter((m) => !m.temporary); } catch {}
+      try { const r = await core(["machine", "ls", "--json"]); if (r.code === 0) this.machines = (JSON.parse(r.stdout).machines ?? []).filter((m) => !m.temporary); } catch {}
       this.machinesBusy = false;
       if (JSON.stringify(this.machines) !== before) cx.notify();
       if (this.machinesAgain) { this.machinesAgain = false; this.refreshMachines(cx); }
@@ -242,7 +242,7 @@ export default class Spaces extends View {
     cx.spawn(async cx => {
       try {
         const ask = async args => {
-          const r = await hc([...args, "--json"]);
+          const r = await core([...args, "--json"]);
           if (r.code !== 0) {
             let error;
             try { error = JSON.parse(r.stdout || r.stderr).error?.message; } catch {}
@@ -439,7 +439,7 @@ export default class Spaces extends View {
     });
   }
 
-  // Only what's unusual, after the name: "herdr \u00b7 spike \u21912 \u21931". The repo or
+  // Only what's unusual, after the name: "atrous \u00b7 spike \u21912 \u21931". The repo or
   // branch goes when the name already says it (a worktree is named after its branch),
   // and master/main go: nearly every space is on one.
   gitTail(g, tree, name, t) {
@@ -493,7 +493,7 @@ export default class Spaces extends View {
 
   // A "border beam": a bright arc running around `inner`'s edge (the active agent while it
   // works). One wedge (beam.svg) spins, centred on the element, seen only through four thin
-  // strips along the edges (each clips its own copy), so it never covers the content: herdr
+  // strips along the edges (each clips its own copy), so it never covers the content: Atrous
   // paints the animated shape above backgrounds. The strips stop short of the rounded corners.
   // Native animation: no timers, it stops when not shown.
   beam(t, inner, { id, w, h, radius, edge }) {
@@ -694,12 +694,12 @@ export default class Spaces extends View {
     return rows;
   }
 
-  // Working subagents of an agent (Claude Code's and herdr's), for the rail badge.
+  // Working subagents of an agent (Claude Code's and Atrous's), for the rail badge.
   busySubs(address) {
     const dir = this.subDirs.get(address)?.dir;
     const cc = dir ? SA.runningCount(dir) : 0;
-    const hc = [...this.terms.values()].filter((k) => k.parent === address && k.state === "live").length;
-    return cc + hc;
+    const ours = [...this.terms.values()].filter((k) => k.parent === address && k.state === "live").length;
+    return cc + ours;
   }
 
   // ---- agents under their space ----
@@ -915,7 +915,7 @@ export default class Spaces extends View {
       .tooltip(w.name)
       .on_click(() => run("space.select", { id: w.id }))
       .child(svg(`mods/${tree ? "workspace-chrome/branch" : "my-spaces/folder"}.svg`).size(tree ? 13 : 15).text_color(w.active ? t.foreground : t.muted));
-    // A small count on the tile: subagents working under it (Claude Code's and herdr's).
+    // A small count on the tile: subagents working under it (Claude Code's and Atrous's).
     const badge = (a, el) => {
       const n = this.busySubs(a.address);
       if (!n) return el;
@@ -974,7 +974,7 @@ export default class Spaces extends View {
     // agent.next / agent.prev follow the order the tree shows them in.
     const order = new Map(sp.map((s, n) => [s.id, n]));
     setAgentOrder([...this.agentList].sort((a, b) => (order.get(a.space) ?? 0) - (order.get(b.space) ?? 0)).map((a) => a.address));
-    // The app's machines changed, or the window is back in front: ask hc about them now.
+    // The app's machines changed, or the window is back in front: ask atc about them now.
     const msig = JSON.stringify(machines().map((m) => [m.name, m.layout]));
     const active = this.windowActive;
     const back = active && this.wasActive === false && Date.now() - this.machinesAt > 10000;

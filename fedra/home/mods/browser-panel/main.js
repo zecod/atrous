@@ -1,31 +1,31 @@
 // Browser: a real web page in the side panel, shared with coding agents.
 //
-// On Windows the page is drawn natively: herdr-browser-host (native/, a WebView2) shows it in a
-// borderless window owned by herdr's and kept exactly over this panel's page area, at the
+// On Windows the page is drawn natively: atrous-browser-host (native/, a WebView2) shows it in a
+// borderless window owned by Atrous's and kept exactly over this panel's page area, at the
 // display's refresh rate, with the page's own mouse, keyboard, IME, clipboard and scrolling.
 // This panel says how big the area is and whether it shows (POST /place on the host, every
-// change and each second); the host finds where it is in herdr's own frame (two marker squares
+// change and each second); the host finds where it is in Atrous's own frame (two marker squares
 // this panel draws under the page). While something of this panel's (a menu, the note popover,
-// a dialog) or herdr's (an overlay) must draw over the page, the host hides it and this panel
+// a dialog) or Atrous's (an overlay) must draw over the page, the host hides it and this panel
 // shows a still of the page in its place. Everything else is the same in both modes.
 //
 // Elsewhere, or when the native view can't start (props { screencast: true } forces it), the
 // page is streamed: a small Node helper (helper.mjs, started in the background with
-// `hc run --bg --name herdr-browser`) runs a headless Chrome with the DevTools Protocol on
-// 127.0.0.1:9333 and streams the page it follows into JPEG frames in mods/browser-panel-frames/
+// `atc run --bg --name atrous-browser`) runs a headless Chrome with the DevTools Protocol on
+// 127.0.0.1:9733 and streams the page it follows into JPEG frames in mods/browser-panel-frames/
 // (a sibling folder, not a mod: frames written in this folder would reload this mod; see
 // helper.mjs for why each frame has a new name). This panel draws the newest frame and sends
-// clicks, scrolling and keys back through the helper's localhost API (127.0.0.1:9334).
+// clicks, scrolling and keys back through the helper's localhost API (127.0.0.1:9734).
 //
 // Agents drive the same Chrome, and a page an agent opens is followed so the person sees it:
-//   Playwright:     chromium.connectOverCDP("http://127.0.0.1:9333")
-//   Playwright MCP: --cdp-endpoint http://127.0.0.1:9333
+//   Playwright:     chromium.connectOverCDP("http://127.0.0.1:9733")
+//   Playwright MCP: --cdp-endpoint http://127.0.0.1:9733
 //
 // Starts lazily (the first time it is shown) and polls only while shown. Closing the panel
 // leaves Chrome running for agents; the footer's Stop closes it.
 //
 // Props: { url? } the first page when it starts Chrome; { scale? } overrides the display scale;
-// { screencast? } never draws natively; { apiPort?, cdpPort?, hostPort? } other ports (9334, 9333, 9335).
+// { screencast? } never draws natively; { apiPort?, cdpPort?, hostPort? } other ports (9734, 9733, 9735).
 // Commands (keys.json "browser-panel.<name>"): focus, url, back, forward, reload, stop, start,
 // import (Import from Chrome, asks first), import-now, pick, annotate, debug[:console|network|elements],
 // note:<text> (saves the open note), send-to:<terminal> (sends the notes there), new-tab[:<url>],
@@ -33,31 +33,31 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { theme, hc, exec, appHome, props, layout, settings, nextCommand, keys, shared, run, readTextFile, watchFolder } from "herdr";
+import { theme, core, exec, appHome, props, layout, settings, nextCommand, keys, shared, run, readTextFile, watchFolder } from "atrous";
 import { Notes } from "./notes.js";
 import { Debug } from "./debug.js";
 
 const MOD = "browser-panel";
-let NAME = "herdr-browser"; // the helper's herdr-core terminal
-let API_PORT = 9334, CDP_PORT = 9333, HOST_PORT = 9335;
+let NAME = "atrous-browser"; // the helper's atrous-core terminal
+let API_PORT = 9734, CDP_PORT = 9733, HOST_PORT = 9735;
 let API = `http://127.0.0.1:${API_PORT}`;
 let CDP = `http://127.0.0.1:${CDP_PORT}`;
 let HOST = `http://127.0.0.1:${HOST_PORT}`; // the native host (Windows)
 function usePorts(p) {
-  API_PORT = Number(p?.apiPort) || 9334; CDP_PORT = Number(p?.cdpPort) || 9333; HOST_PORT = Number(p?.hostPort) || 9335;
+  API_PORT = Number(p?.apiPort) || 9734; CDP_PORT = Number(p?.cdpPort) || 9733; HOST_PORT = Number(p?.hostPort) || 9735;
   API = `http://127.0.0.1:${API_PORT}`; CDP = `http://127.0.0.1:${CDP_PORT}`; HOST = `http://127.0.0.1:${HOST_PORT}`;
-  NAME = API_PORT === 9334 ? "herdr-browser" : `herdr-browser-${API_PORT}`;
+  NAME = API_PORT === 9734 ? "atrous-browser" : `atrous-browser-${API_PORT}`;
 }
 // Windows homes start with a drive letter; macOS and Linux are told apart once with uname.
 const isWindows = () => /^[a-z]:[\\/]/i.test(String(appHome() ?? ""));
 const MARK_A = "#ff00ff", MARK_B = "#00ffff", MARK = 4; // the native view's position markers (see top)
 const FRAMES = `mods/${MOD}-frames`;
 const I = (name) => `mods/${MOD}/icons/${name}.svg`;
-const WAIT_FOR_WATCHER = true; // show a new frame only once herdr's watcher has reported its file (see apply)
+const WAIT_FOR_WATCHER = true; // show a new frame only once Atrous's watcher has reported its file (see apply)
 const LAYERS = 3; // frames stacked, newest on top: one still loading never leaves a hole
 const MIN_REDRAW_MS = 45; // at most ~20 redraws a second, only while frames change
 const WIDE = 680; // px: the side panel's width while the browser shows, when it was narrower (as Files does for a file)
-const IMPORT = "herdr-browser-import"; // the Import from Chrome run's herdr-core terminal
+const IMPORT = "atrous-browser-import"; // the Import from Chrome run's atrous-core terminal
 const TABS_H = 34; // the tab strip
 const BAR_H = 42; // the toolbar
 const BIT = { left: 1, right: 2, middle: 4 };
@@ -128,11 +128,11 @@ function sizedAncestor() {
   return null;
 }
 
-// A frame path as herdr's watcher and the helper name it, in one spelling: relative to the
+// A frame path as Atrous's watcher and the helper name it, in one spelling: relative to the
 // app home, forward slashes, lowercase (Windows paths are case-insensitive).
 function norm(p) {
   const home = appHome().replace(/\\/g, "/").toLowerCase();
-  // herdr's watcher reports extended-length paths on Windows: \\?\C:\...
+  // Atrous's watcher reports extended-length paths on Windows: \\?\C:\...
   let s = String(p ?? "").replace(/\\/g, "/").toLowerCase().replace(/^\/\/\?\//, "");
   if (s.startsWith(home)) s = s.slice(home.length);
   return s.replace(/^\/+/, "");
@@ -140,10 +140,10 @@ function norm(p) {
 
 // The browser's data folder (profile, import report), as the helper and importer use it.
 async function browserBase() {
-  if (isWindows()) return `${(await exec("cmd", ["/c", "echo", "%LOCALAPPDATA%"])).stdout.trim().replace(/\\/g, "/")}/herdr-browser`;
+  if (isWindows()) return `${(await exec("cmd", ["/c", "echo", "%LOCALAPPDATA%"])).stdout.trim().replace(/\\/g, "/")}/atrous-browser`;
   const sh = async (script) => (await exec("sh", ["-c", script])).stdout.trim();
-  if ((await sh("uname -s")) === "Darwin") return `${await sh('printf %s "$HOME"')}/Library/Application Support/herdr-browser`;
-  return `${await sh('printf %s "${XDG_DATA_HOME:-$HOME/.local/share}"')}/herdr-browser`;
+  if ((await sh("uname -s")) === "Darwin") return `${await sh('printf %s "$HOME"')}/Library/Application Support/atrous-browser`;
+  return `${await sh('printf %s "${XDG_DATA_HOME:-$HOME/.local/share}"')}/atrous-browser`;
 }
 
 const isWeb = (url) => /^https?:\/\//i.test(url ?? "");
@@ -157,7 +157,7 @@ export default class Browser extends View {
     this.host = null; // the native host's last state (Windows)
     this.hostVer = -1;
     this.stillShown = null; // the still drawn in place of the native view: { path, w, h }
-    this.herdrPid = 0;
+    this.atrousPid = 0;
     this.hostGen = 0;
     this.hostLooping = false;
     this.ver = -1;
@@ -183,7 +183,7 @@ export default class Browser extends View {
     this.imp = null; // Import from Chrome: { phase: "confirm" | "running" | "done" | "error", ... }
     this.importing = false; // while true the helper isn't restarted
     this.rootW = 0; this.rootH = 600;
-    this.seenFrames = new Set(); // frame files herdr's watcher has reported (normalized paths)
+    this.seenFrames = new Set(); // frame files Atrous's watcher has reported (normalized paths)
     this.waiting = null; // the newest frame, until its file has been reported
     this.initNotes();
     this.initDebug(cx);
@@ -210,9 +210,9 @@ export default class Browser extends View {
       this.sendPlace(cx);
     });
     if (this.wantNative()) cx.spawn(async (cx) => {
-      // herdr's own process, so the host owns its view to the right window: exec runs programs
-      // as herdr-app's children.
-      try { this.herdrPid = Number((await exec("node", ["-e", "process.stdout.write(String(process.ppid))"])).stdout.trim()) || 0; } catch {}
+      // Atrous's own process, so the host owns its view to the right window: exec runs programs
+      // as atrous.exe's children.
+      try { this.atrousPid = Number((await exec("node", ["-e", "process.stdout.write(String(process.ppid))"])).stdout.trim()) || 0; } catch {}
     });
   }
 
@@ -238,12 +238,12 @@ export default class Browser extends View {
 
   placeState() {
     const a = this.area;
-    const keys = this.herdrKeyActions();
+    const keys = this.atrousKeyActions();
     return {
       visible: Boolean(this.visible && this.isNative() && !this.stopped && !this.importing && this.connected && a),
       frozen: this.freezeNeeded(),
       w: a ? Math.round(a.width * 100) / 100 : 0, h: a ? Math.round(a.height * 100) / 100 : 0,
-      sig: this.layoutSig(), keys, stillShown: this.stillShown?.path ?? null, pid: this.herdrPid || undefined,
+      sig: this.layoutSig(), keys, stillShown: this.stillShown?.path ?? null, pid: this.atrousPid || undefined,
     };
   }
 
@@ -295,7 +295,7 @@ export default class Browser extends View {
     }
     const still = hs.still;
     if (still?.path && still.path !== this.stillShown?.path && still.path !== this.stillWanted) {
-      // Drawn once herdr's watcher has seen the file (else herdr reloads it on screen); then
+      // Drawn once Atrous's watcher has seen the file (else Atrous reloads it on screen); then
       // the host is told, and hides the view over it.
       this.stillWanted = still.path;
       cx.spawn(async (cx) => {
@@ -406,7 +406,7 @@ export default class Browser extends View {
     this.st = st;
     if (st.frame && st.frame !== this.frames[this.frames.length - 1]?.path && st.frame !== this.waiting?.path) {
       const f = { path: st.frame, w: st.frameW, h: st.frameH, at: Date.now() };
-      // A frame file herdr's watcher hasn't reported yet would be dropped and reloaded by herdr
+      // A frame file Atrous's watcher hasn't reported yet would be dropped and reloaded by Atrous
       // the moment it does, a few tens of ms after it's on screen: for one frame the picture
       // under it (the previous frame) shows again. That was the flicker. So a new file is shown
       // only once the watcher has reported it (watchFrames); one it has seen shows right away.
@@ -431,7 +431,7 @@ export default class Browser extends View {
     if (this.frames.length > LAYERS) this.frames.shift();
   }
 
-  // herdr's own watcher, the one that drops changed images, reporting the frames folder.
+  // Atrous's own watcher, the one that drops changed images, reporting the frames folder.
   watchFrames(cx) {
     if (this.watchingFrames) return;
     this.watchingFrames = true;
@@ -449,7 +449,7 @@ export default class Browser extends View {
         while (this.seenFrames.size > 200) this.seenFrames.delete(this.seenFrames.values().next().value);
         const w = this.waiting;
         if (w && (all || this.seenFrames.has(norm(w.path)))) {
-          // herdr handles the event in the same pass; one more frame of margin, then show it
+          // Atrous handles the event in the same pass; one more frame of margin, then show it
           await cx.sleep(16);
           if (this.waiting === w) { this.showFrame(w); cx.notify(); }
         }
@@ -486,15 +486,15 @@ export default class Browser extends View {
     if (this.starting || this.stopped || this.importing) return;
     this.starting = true;
     try {
-      const g = await hc(["get", NAME, "--json"]).catch(() => null);
+      const g = await core(["get", NAME, "--json"]).catch(() => null);
       let info = null;
       try { info = g?.code === 0 ? JSON.parse(g.stdout) : null; } catch {}
       if (info?.state === "live") {
         // Still starting Chrome, or stuck: give it 25 s, then replace it.
         if (Date.now() - (info.created_ms ?? 0) < 25000) { this.status = "Starting the browser…"; return; }
-        await hc(["kill", NAME]).catch(() => {});
+        await core(["kill", NAME]).catch(() => {});
       }
-      if (info) await hc(["rm", NAME]).catch(() => {});
+      if (info) await core(["rm", NAME]).catch(() => {});
       this.status = "Starting the browser…";
       cx.notify();
       const home = appHome().replace(/\\/g, "/");
@@ -507,11 +507,11 @@ export default class Browser extends View {
       if (props()?.url) args.push("--url", String(props().url));
       if (this.wantNative()) {
         args.push("--native", "true", "--host-port", String(HOST_PORT));
-        if (this.herdrPid) args.push("--herdr-pid", String(this.herdrPid));
+        if (this.atrousPid) args.push("--atrous-pid", String(this.atrousPid));
         if (props()?.hostArgs) args.push(`--host-args=${props().hostArgs}`);
       }
       if (props()?.helperArgs) args.push(...String(props().helperArgs).split(" ").filter(Boolean)); // tests: e.g. --no-clipboard true
-      const r = await hc(args);
+      const r = await core(args);
       if (r.code !== 0) this.status = `Couldn't start the browser helper: ${(r.stderr || r.stdout).trim()}`;
     } catch (e) {
       this.status = `Couldn't start the browser helper: ${String(e?.message ?? e)}`;
@@ -602,8 +602,8 @@ export default class Browser extends View {
       try { await api("/shutdown", {}); } catch {}
       await cx.sleep(4000);
       // The helper exits once Chrome is gone; make sure nothing lingers.
-      const g = await hc(["get", NAME, "--json"]).catch(() => null);
-      if (g?.code === 0) await hc(["kill", NAME]).catch(() => {});
+      const g = await core(["get", NAME, "--json"]).catch(() => null);
+      if (g?.code === 0) await core(["kill", NAME]).catch(() => {});
     });
     cx.notify();
   }
@@ -690,23 +690,23 @@ export default class Browser extends View {
     const base = await browserBase();
     const reportFile = `${base}/import-report.json`;
     // Natively the browser is WebView2: its profile is the host's data folder's EBWebView.
-    const dest = this.isNative() ? ["--dest", `${base}/${HOST_PORT === 9335 ? "webview2" : `webview2-${HOST_PORT}`}/EBWebView`] : [];
+    const dest = this.isNative() ? ["--dest", `${base}/${HOST_PORT === 9735 ? "webview2" : `webview2-${HOST_PORT}`}/EBWebView`] : [];
     const home = appHome().replace(/\\/g, "/");
-    await hc(["kill", IMPORT]).catch(() => {});
-    await hc(["rm", IMPORT]).catch(() => {});
-    const r = await hc(["run", "--bg", "--json", "--no-parent", "--no-notify", "--name", IMPORT, "--cwd", `${home}/mods/${MOD}`, "--",
+    await core(["kill", IMPORT]).catch(() => {});
+    await core(["rm", IMPORT]).catch(() => {});
+    const r = await core(["run", "--bg", "--json", "--no-parent", "--no-notify", "--name", IMPORT, "--cwd", `${home}/mods/${MOD}`, "--",
       "node", `${home}/mods/${MOD}/import-chrome.mjs`, "--report", reportFile, "--cdp-port", String(CDP_PORT), ...dest]);
     if (r.code !== 0) throw new Error(`Couldn't start the import: ${(r.stderr || r.stdout).trim()}`);
     const started = Date.now();
     for (;;) {
       await cx.sleep(600);
-      const g = await hc(["get", IMPORT, "--json"]).catch(() => null);
+      const g = await core(["get", IMPORT, "--json"]).catch(() => null);
       let info = null;
       try { info = g?.code === 0 ? JSON.parse(g.stdout) : null; } catch {}
       if (!info || info.state === "finished") break;
-      if (Date.now() - started > 5 * 60000) { await hc(["kill", IMPORT]).catch(() => {}); throw new Error("The import took over 5 minutes and was stopped."); }
+      if (Date.now() - started > 5 * 60000) { await core(["kill", IMPORT]).catch(() => {}); throw new Error("The import took over 5 minutes and was stopped."); }
     }
-    await hc(["rm", IMPORT]).catch(() => {});
+    await core(["rm", IMPORT]).catch(() => {});
     const text = await readTextFile(reportFile);
     const report = text ? JSON.parse(text) : null;
     if (!report || Date.parse(report.started) < started - 60000) throw new Error("The import didn't write its report.");
@@ -797,9 +797,9 @@ export default class Browser extends View {
     this.send({ t: "wheel", x: p.x, y: p.y, dx, dy, modifiers: e.modifiers }, cx);
   }
 
-  // Keys Herdr binds (keys.json: global, this layout's, this mod's) stay Herdr's, so alt-h /
+  // Keys Atrous binds (keys.json: global, this layout's, this mod's) stay Atrous's, so alt-h /
   // alt-left still leave the panel and ctrl-tab still switches tabs.
-  herdrKeys() {
+  atrousKeys() {
     const layoutName = String(shared("layout") ?? "");
     const sections = new Set(["global", `layout:${layoutName}`, `mod:${MOD}`]);
     let list = [];
@@ -812,9 +812,9 @@ export default class Browser extends View {
     return this.bound;
   }
 
-  // herdr's chords with their actions (this mod's section over the layout's over global), for the
-  // native view: pressed in the page, the host runs the action in herdr.
-  herdrKeyActions() {
+  // Atrous's chords with their actions (this mod's section over the layout's over global), for the
+  // native view: pressed in the page, the host runs the action in Atrous.
+  atrousKeyActions() {
     const layoutName = String(shared("layout") ?? "");
     let list = [];
     try { list = keys(); } catch {}
@@ -839,7 +839,7 @@ export default class Browser extends View {
     const k = String(e.key ?? "").toLowerCase();
     if (MODIFIER_KEYS.has(k)) return;
     if (this.draft) return; // typing in the note popover
-    if (this.herdrKeys().has(chord(e.keystroke))) return;
+    if (this.atrousKeys().has(chord(e.keystroke))) return;
     const mode = this.inspectMode();
     if (mode !== "off" && !m.control && !m.alt && !m.platform) {
       if (k === "escape") { cx.stop_propagation(); return this.setMode(mode, cx); }
@@ -964,7 +964,7 @@ export default class Browser extends View {
       view = view.child(div().absolute().top(0).left(0).size(MARK).bg(MARK_A))
         .child(div().absolute().bottom(0).right(0).size(MARK).bg(MARK_B));
       // The still goes under the native view as soon as the host steps aside for something
-      // (frozen, an overlay): the host hides the view only once herdr's frame shows it there.
+      // (frozen, an overlay): the host hides the view only once Atrous's frame shows it there.
       // (Drawing it only after the view hid left ~80 ms of bare page area: the annotate flicker.)
       const away = !this.host?.shown || this.host?.frozen || this.host?.overlayBlock || Date.now() - (this.hostShownAt ?? 0) < 180;
       if (away && this.stillShown && this.area) {

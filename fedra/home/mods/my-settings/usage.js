@@ -6,11 +6,11 @@
 //   props { section: "usage", only: true }: mode "standalone"),
 // because a mod can't import from another mod's folder.
 //
-// Data: collect.mjs runs ccusage in a background herdr-core terminal and merges a compact
-// per-day summary into ~/.config/herdr-app/data/usage-stats/ccusage.json (see its header).
+// Data: collect.mjs runs ccusage in a background atrous-core terminal and merges a compact
+// per-day summary into ~/.config/atrous/data/usage-stats/ccusage.json (see its header).
 // Preferences (source, metric, range, last width) go to prefs.json beside it.
 //
-// Smoothness. Herdr interrupts a render after ~55 ms of script and keeps the last good frame,
+// Smoothness. Atrous interrupts a render after ~55 ms of script and keeps the last good frame,
 // so nothing here renders much at once:
 // - the page is split into retained views that rebuild only when their own inputs change:
 //   the page (header, toggles, job state), HeatView (the 53x7 grid: data, source, metric,
@@ -23,7 +23,7 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { theme, hc, appHome, closeOverlay } from "herdr";
+import { theme, core, appHome, closeOverlay } from "atrous";
 import * as fs from "fs/promises";
 
 const STALE = 5 * 60000;
@@ -149,7 +149,7 @@ function setPrefs(p) {
   store.prefs = { ...store.prefs, ...p, width: { ...(p.width ?? {}) } };
 }
 
-// The first frame after Herdr starts: the files aren't read yet (a busy disk can take a while),
+// The first frame after Atrous starts: the files aren't read yet (a busy disk can take a while),
 // so the numbers and preferences come from this copy's localStorage, which reads at once.
 function seed() {
   if (store.data) return;
@@ -729,7 +729,7 @@ export class UsagePage extends View {
       try {
         await fs.mkdir(DIR(), { recursive: true }).catch(() => {});
         await fs.writeFile(JOB(), JSON.stringify({ id: job.id, started: job.started, state: "running" }));
-        const r = await hc(["run", "--bg", "--rm", "--json", "--no-parent", "--no-notify", "--cwd", DIR(), "--", "node", SCRIPT(), DIR(), job.id, ...(full ? ["--full"] : [])]);
+        const r = await core(["run", "--bg", "--rm", "--json", "--no-parent", "--no-notify", "--cwd", DIR(), "--", "node", SCRIPT(), DIR(), job.id, ...(full ? ["--full"] : [])]);
         if (r.code !== 0) throw new Error(errorText(r) || "Couldn't start ccusage.");
         job.address = JSON.parse(r.stdout).address;
         // So a later page can follow it too (unless it already finished: npx alone takes seconds).
@@ -746,10 +746,10 @@ export class UsagePage extends View {
   }
 
   // A live collector terminal (it runs in the data folder), when job.json lacks its address:
-  // the page that started it closed before `hc run` answered. None: that job never started.
+  // the page that started it closed before `atc run` answered. None: that job never started.
   async findCollector() {
     try {
-      const r = await hc(["ls", "--json"]);
+      const r = await core(["ls", "--json"]);
       const norm = (p) => String(p ?? "").replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
       const t = (JSON.parse(r.stdout).terminals ?? []).find((x) => x.state === "live" && norm(x.cwd) === norm(DIR()));
       return t?.address ?? null;
@@ -792,12 +792,12 @@ export class UsagePage extends View {
         }
         if (job.address && Date.now() - (job.checked ?? 0) > 4000) {
           job.checked = Date.now();
-          const g = await hc(["get", job.address, "--json"]).catch(() => null);
+          const g = await core(["get", job.address, "--json"]).catch(() => null);
           let finished = false;
           try { finished = g?.code === 0 && JSON.parse(g.stdout).state === "finished"; } catch {}
           const gone = g && g.code !== 0 && /not_found|no terminal/.test(`${g.stdout}${g.stderr}`);
           if (finished || gone) {
-            if (finished) hc(["rm", job.address]).catch(() => {});
+            if (finished) core(["rm", job.address]).catch(() => {});
             const again = await readJson(JOB());
             await this.settle(job, again?.id === job.id ? again : null);
             changed = true;
@@ -805,7 +805,7 @@ export class UsagePage extends View {
           }
         }
         if (Date.now() - job.started > JOB_LIMIT) {
-          if (job.address) hc(["kill", job.address]).catch(() => {});
+          if (job.address) core(["kill", job.address]).catch(() => {});
           await this.settle(job, { state: "error", error: "ccusage took too long and was stopped." });
           changed = true;
         }

@@ -1,7 +1,7 @@
 // Right-click menu for an agent in the sidebar tree (opened by my-spaces).
 // The point: hand one agent's session to ANOTHER agent so it can talk to it.
-// - Copy agent ID: the herdr-core address (t11). Any agent can drive it with hc:
-//   `hc send t11 "…"`, `hc wait t11`, `hc read t11`.
+// - Copy agent ID: the atrous-core address (t11). Any agent can drive it with atc:
+//   `atc send t11 "…"`, `atc wait t11`, `atc read t11`.
 // - Copy session ID: the Claude Code / Codex session id (claude --resume <id>), when known.
 // - Copy message for another agent: a ready-to-paste note with both and the exact commands.
 // Plus Go to and Pin. Props: { address, title, program, cwd, sessionId, source, pinned, pane, overlay }.
@@ -10,7 +10,7 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { props, closeOverlay, run, theme, notify, openOverlay, panes, focused, spaces, agents } from "herdr"; // smart split: openOverlay..agents
+import { props, closeOverlay, run, theme, notify, openOverlay, panes, focused, spaces, agents } from "atrous"; // smart split: openOverlay..agents
 
 // smart split: the five places, and a tiny drawing of each (a pane with its new half filled).
 const MOVES = [["left", "Left"], ["right", "Right"], ["top", "Top"], ["bottom", "Bottom"], ["tab", "New tab"]];
@@ -34,10 +34,10 @@ const I = (name) => `mods/agent-menu/${name}.svg`;
 function handoff(p) {
   const who = `${p.program ?? "agent"} session "${p.title}"`;
   const lines = [
-    `You can talk to my ${who}. It runs in herdr, terminal ${p.address}${p.cwd ? `, in ${p.cwd}` : ""}.`,
-    `- Send it a message (pastes it and presses Enter):  hc send ${p.address} "<your message>"`,
-    `- Wait until it has finished answering:            hc wait ${p.address}`,
-    `- Read its answer (screen and recent history):     hc read ${p.address} --lines 150`,
+    `You can talk to my ${who}. It runs in Atrous, terminal ${p.address}${p.cwd ? `, in ${p.cwd}` : ""}.`,
+    `- Send it a message (pastes it and presses Enter):  atc send ${p.address} "<your message>"`,
+    `- Wait until it has finished answering:            atc wait ${p.address}`,
+    `- Read its answer (screen and recent history):     atc read ${p.address} --lines 150`,
     `Ask one clear question at a time, wait, then read before sending the next.`,
   ];
   if (p.sessionId) {
@@ -59,7 +59,7 @@ export default class AgentMenu extends View {
     const p = props() ?? {};
     return [
       { icon: "copy", label: "Copy agent ID", hint: p.address, copy: () => p.address,
-        done: `Copied ${p.address}. Other agents talk to it with hc send / wait / read ${p.address}.` },
+        done: `Copied ${p.address}. Other agents talk to it with atc send / wait / read ${p.address}.` },
       { icon: "copy", label: "Copy session ID", hint: p.sessionId ? "" : "unknown", enabled: Boolean(p.sessionId),
         copy: () => p.sessionId, done: "Copied the session id." },
       { icon: "message", label: "Copy message for another agent", hint: "", copy: () => handoff(p),

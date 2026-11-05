@@ -1,18 +1,18 @@
-// herdr-browser-host: the Browser panel's page, drawn natively. A WebView2 lives in a borderless
-// popup owned by herdr's main window and kept exactly over the panel's page area. (Not a child
-// window: herdr draws through DirectComposition above its child windows, so a child never shows.)
+// atrous-browser-host: the Browser panel's page, drawn natively. A WebView2 lives in a borderless
+// popup owned by Atrous's main window and kept exactly over the panel's page area. (Not a child
+// window: Atrous draws through DirectComposition above its child windows, so a child never shows.)
 // The panel (browser-panel mod) says how big the area is and whether it shows; the host finds
-// where it is in herdr's own frame. Agents drive the pages over the DevTools Protocol.
+// where it is in Atrous's own frame. Agents drive the pages over the DevTools Protocol.
 //
-//   herdr-browser-host --home <herdr home> [--port 9335] [--cdp-port 9333] [--data <dir>] [--url <url>]
-//                      [--herdr-pid <pid>] [--frames mods/browser-panel-frames] [--no-occlusion]
+//   atrous-browser-host --home <Atrous home> [--port 9735] [--cdp-port 9733] [--data <dir>] [--url <url>]
+//                      [--atrous-pid <pid>] [--frames mods/browser-panel-frames] [--no-occlusion]
 //
 // API (127.0.0.1:<port>, JSON):
 //   GET  /state?since=<ver>&wait=<ms>   what the host shows (long poll)
 //   POST /place {visible, frozen, w, h, sig, keys?, stillShown?, pid?}   from the panel, on every change and each second
 //   POST /tabs/new {url?, activate?} -> {id}    /tabs/activate {id}    /tabs/close {id}
-//   POST /focus {page}   page: true puts the keyboard in the page, false gives it back to herdr
-//   POST /still -> {path}   a still of the page, written where herdr can show it
+//   POST /focus {page}   page: true puts the keyboard in the page, false gives it back to Atrous
+//   POST /still -> {path}   a still of the page, written where Atrous can show it
 //   POST /detect   find the page area again    POST /shutdown
 using System;
 using System.Collections.Generic;
@@ -30,12 +30,12 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using Microsoft.Web.WebView2.Core;
 
-namespace HerdrBrowserHost;
+namespace AtrousBrowserHost;
 
 sealed class Opt
 {
-    public string Home, Data, Url, Frames = "mods/browser-panel-frames", HerdrExe;
-    public int Port = 9335, Cdp = 9333, HerdrPid;
+    public string Home, Data, Url, Frames = "mods/browser-panel-frames", AtrousExe;
+    public int Port = 9735, Cdp = 9733, AtrousPid;
     public bool NoOcclusion;
 
     public static Opt Parse(string[] a)
@@ -50,20 +50,20 @@ sealed class Opt
                 case "--data": o.Data = v(); break;
                 case "--url": o.Url = v(); break;
                 case "--frames": o.Frames = v(); break;
-                case "--herdr-exe": o.HerdrExe = v(); break;
+                case "--atrous-exe": o.AtrousExe = v(); break;
                 case "--port": o.Port = int.Parse(v()); break;
                 case "--cdp-port": o.Cdp = int.Parse(v()); break;
-                case "--herdr-pid": o.HerdrPid = int.Parse(v()); break;
+                case "--atrous-pid": o.AtrousPid = int.Parse(v()); break;
                 case "--no-occlusion": o.NoOcclusion = true; break;
             }
         }
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        o.Home ??= Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", "herdr-app");
-        o.Data ??= Path.Combine(local, "herdr-browser", o.Port == 9335 ? "webview2" : $"webview2-{o.Port}");
-        if (string.IsNullOrEmpty(o.HerdrExe))
+        o.Home ??= Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", "atrous");
+        o.Data ??= Path.Combine(local, "atrous-browser", o.Port == 9735 ? "webview2" : $"webview2-{o.Port}");
+        if (string.IsNullOrEmpty(o.AtrousExe))
         {
-            var p = Path.Combine(local, "Programs", "herdr-app", "herdr-app.exe");
-            o.HerdrExe = File.Exists(p) ? p : "herdr-app";
+            var p = Path.Combine(local, "Programs", "atrous", "atrous.exe");
+            o.AtrousExe = File.Exists(p) ? p : "atrous";
         }
         return o;
     }
@@ -76,7 +76,7 @@ sealed class Tab
     public CoreWebView2 W => C.CoreWebView2;
 }
 
-// The window the pages are drawn in: a borderless popup, owned by herdr's window while it shows
+// The window the pages are drawn in: a borderless popup, owned by Atrous's window while it shows
 // (an owned window stays above its owner, hides with it when minimized, and keeps out of the taskbar).
 sealed class ViewWindow : NativeWindow
 {
@@ -103,7 +103,7 @@ sealed class ViewWindow : NativeWindow
 
 sealed class Host : ApplicationContext
 {
-    static string logFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "herdr-browser", "host.log");
+    static string logFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "atrous-browser", "host.log");
     public static void Log(string s)
     {
         try { File.AppendAllText(logFile, $"[{DateTime.Now:HH:mm:ss.fff}] {s}\n"); } catch { }
@@ -111,9 +111,9 @@ sealed class Host : ApplicationContext
 
     public static void LogTo(int port)
     {
-        var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "herdr-browser");
+        var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "atrous-browser");
         Directory.CreateDirectory(dir);
-        logFile = Path.Combine(dir, port == 9335 ? "host.log" : $"host-{port}.log");
+        logFile = Path.Combine(dir, port == 9735 ? "host.log" : $"host-{port}.log");
     }
 
     readonly Opt o;
@@ -130,8 +130,8 @@ sealed class Host : ApplicationContext
     bool ready;
     string error;
 
-    // herdr's window
-    IntPtr herdr;
+    // Atrous's window
+    IntPtr atrous;
     bool embedded;
     long lastFind;
     Size lastClient;
@@ -142,11 +142,11 @@ sealed class Host : ApplicationContext
     bool want, frozen;
     double areaW, areaH;
     string sig = "";
-    Dictionary<string, string> keys = new(); // herdr's chords while the page has the keyboard -> their actions
+    Dictionary<string, string> keys = new(); // Atrous's chords while the page has the keyboard -> their actions
     long lastPlace;
     string stillAck;
 
-    // where the view is: the page area's top left in herdr's client pixels, found in herdr's own frame
+    // where the view is: the page area's top left in Atrous's client pixels, found in Atrous's own frame
     Point origin;
     bool originKnown;
     int marginRight; // client width - page area right edge, at the last detection (a window resize keeps it)
@@ -158,7 +158,7 @@ sealed class Host : ApplicationContext
     bool shown;
     bool focused;
 
-    // a still of the page, shown by the panel while something of herdr's must draw over the page
+    // a still of the page, shown by the panel while something of Atrous's must draw over the page
     enum Freeze { None, Capturing, WaitingAck, Verifying, Done }
     Freeze freeze;
     long freezeAt;
@@ -166,7 +166,7 @@ sealed class Host : ApplicationContext
     int stillW, stillH, stillSeq;
     byte[] stillBytes;
 
-    // herdr's overlays (dialogs, popups, windows): over the page they hide the view
+    // Atrous's overlays (dialogs, popups, windows): over the page they hide the view
     HashSet<string> overlaySet = new(), clearOverlays = new();
     bool overlayBlock, verifyPending, statusBusy;
     long lastStatus, lastVerify;
@@ -188,9 +188,9 @@ sealed class Host : ApplicationContext
     {
         this.o = o;
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var baseDir = Path.Combine(local, "herdr-browser");
+        var baseDir = Path.Combine(local, "atrous-browser");
         Directory.CreateDirectory(baseDir);
-        string suffix = o.Port == 9335 ? "" : $"-{o.Port}";
+        string suffix = o.Port == 9735 ? "" : $"-{o.Port}";
         tmpDir = Path.Combine(baseDir, $"tmp-host{suffix}");
         tabsFile = Path.Combine(baseDir, $"host-tabs{suffix}.json");
         Directory.CreateDirectory(tmpDir);
@@ -212,7 +212,7 @@ sealed class Host : ApplicationContext
 
 
         // A press on the page makes it the active window (the keyboard follows), whichever app
-        // was in front: herdr's window isn't active when the page is clicked from elsewhere.
+        // was in front: Atrous's window isn't active when the page is clicked from elsewhere.
         mouseProc = MouseHook;
         mouseHook = N.SetWindowsHookEx(N.WH_MOUSE_LL, mouseProc, N.GetModuleHandle(null), 0);
 
@@ -329,7 +329,7 @@ sealed class Host : ApplicationContext
             error,
             pid = Environment.ProcessId,
             cdp = $"http://127.0.0.1:{o.Cdp}",
-            herdr = herdr != IntPtr.Zero,
+            atrous = atrous != IntPtr.Zero,
             view = (long)view.Handle,
             embedded,
             shown,
@@ -445,14 +445,14 @@ sealed class Host : ApplicationContext
             keys = map;
         }
         if (b["stillShown"] != null) stillAck = (string)b["stillShown"];
-        if (b["pid"] != null && (int)b["pid"] != o.HerdrPid) { o.HerdrPid = (int)b["pid"]; lastFind = 0; }
+        if (b["pid"] != null && (int)b["pid"] != o.AtrousPid) { o.AtrousPid = (int)b["pid"]; lastFind = 0; }
         if (DetectKey() != detectedKey && !detecting && detectAt == 0) detectAt = Environment.TickCount64 + 40;
         if (changed) Bump();
     }
 
-    // ---- herdr's window ----
+    // ---- Atrous's window ----
 
-    void FindHerdr()
+    void FindAtrous()
     {
         IntPtr best = IntPtr.Zero;
         long bestArea = 0;
@@ -461,10 +461,10 @@ sealed class Host : ApplicationContext
         {
             if (!N.IsWindowVisible(h) || N.ClassOf(h) != "Zed::Window") return true;
             N.GetWindowThreadProcessId(h, out uint pid);
-            if (o.HerdrPid != 0 && pid != o.HerdrPid) return true;
-            if (o.HerdrPid == 0)
+            if (o.AtrousPid != 0 && pid != o.AtrousPid) return true;
+            if (o.AtrousPid == 0)
             {
-                try { if (!Process.GetProcessById((int)pid).ProcessName.Equals("herdr-app", StringComparison.OrdinalIgnoreCase)) return true; } catch { return true; }
+                try { if (!Process.GetProcessById((int)pid).ProcessName.Equals("atrous", StringComparison.OrdinalIgnoreCase)) return true; } catch { return true; }
             }
             candidates++;
             N.GetWindowRect(h, out var r);
@@ -472,30 +472,30 @@ sealed class Host : ApplicationContext
             if (area > bestArea) { bestArea = area; best = h; }
             return true;
         }, IntPtr.Zero);
-        // Without a pid, only a single herdr window is certain.
-        if (o.HerdrPid == 0 && candidates != 1) best = IntPtr.Zero;
-        if (best != herdr && best != IntPtr.Zero)
+        // Without a pid, only a single Atrous window is certain.
+        if (o.AtrousPid == 0 && candidates != 1) best = IntPtr.Zero;
+        if (best != atrous && best != IntPtr.Zero)
         {
             if (embedded) Unembed();
-            herdr = best;
+            atrous = best;
             lastClient = Size.Empty;
-            Log($"herdr window {herdr} (pid {o.HerdrPid})");
+            Log($"Atrous window {atrous} (pid {o.AtrousPid})");
             Bump();
         }
     }
 
     void Embed()
     {
-        N.SetWindowLongPtr(view.Handle, -8 /* GWLP_HWNDPARENT: the owner */, herdr);
+        N.SetWindowLongPtr(view.Handle, -8 /* GWLP_HWNDPARENT: the owner */, atrous);
         N.SetWindowPos(view.Handle, IntPtr.Zero, 0, 0, 0, 0, N.SWP_NOMOVE | N.SWP_NOSIZE | N.SWP_NOACTIVATE | N.SWP_NOZORDER | N.SWP_HIDEWINDOW);
         shown = false;
         embedded = true;
-        // herdr's window moving or resizing moves the view at once (the tick would trail it)
-        N.GetWindowThreadProcessId(herdr, out uint pid);
+        // Atrous's window moving or resizing moves the view at once (the tick would trail it)
+        N.GetWindowThreadProcessId(atrous, out uint pid);
         if (winHook != IntPtr.Zero) NI.UnhookWinEvent(winHook);
         winEventProc = OnWinEvent;
         winHook = NI.SetWinEventHook(NI.EVENT_OBJECT_LOCATIONCHANGE, NI.EVENT_OBJECT_LOCATIONCHANGE, IntPtr.Zero, winEventProc, pid, 0, NI.WINEVENT_OUTOFCONTEXT);
-        Log($"owned by {herdr}");
+        Log($"owned by {atrous}");
         Bump();
     }
 
@@ -510,15 +510,15 @@ sealed class Host : ApplicationContext
 
     void OnWinEvent(IntPtr hook, uint ev, IntPtr hwnd, int idObject, int idChild, uint thread, uint time)
     {
-        if (hwnd != herdr || idObject != 0) return;
+        if (hwnd != atrous || idObject != 0) return;
         try { Follow(); } catch { }
     }
 
-    // Keep the view on the page area as herdr's window moves.
+    // Keep the view on the page area as Atrous's window moves.
     void Follow()
     {
         var p = new N.POINT();
-        N.ClientToScreen(herdr, ref p);
+        N.ClientToScreen(atrous, ref p);
         if (p.X == lastScreen.X && p.Y == lastScreen.Y) return;
         lastScreen = p;
         if (shown) { var at = Screen(cur.Location); N.SetWindowPos(view.Handle, IntPtr.Zero, at.X, at.Y, cur.Width, cur.Height, N.SWP_NOACTIVATE | N.SWP_NOOWNERZORDER | N.SWP_NOZORDER); }
@@ -530,27 +530,27 @@ sealed class Host : ApplicationContext
     void Tick()
     {
         long now = Environment.TickCount64;
-        if (herdr != IntPtr.Zero && !N.IsWindow(herdr))
+        if (atrous != IntPtr.Zero && !N.IsWindow(atrous))
         {
-            Log("herdr window closed");
+            Log("Atrous window closed");
             embedded = false;
             shown = false;
-            herdr = IntPtr.Zero;
+            atrous = IntPtr.Zero;
             originKnown = false;
             Bump();
         }
-        if (herdr == IntPtr.Zero && now - lastFind > 1000) { lastFind = now; FindHerdr(); }
-        bool ok = herdr != IntPtr.Zero && N.IsWindowVisible(herdr) && !N.IsIconic(herdr);
+        if (atrous == IntPtr.Zero && now - lastFind > 1000) { lastFind = now; FindAtrous(); }
+        bool ok = atrous != IntPtr.Zero && N.IsWindowVisible(atrous) && !N.IsIconic(atrous);
         if (ok)
         {
             if (!embedded) Embed();
-            N.GetClientRect(herdr, out var cr);
+            N.GetClientRect(atrous, out var cr);
             var client = new Size(cr.Width, cr.Height);
-            uint dpi = N.GetDpiForWindow(herdr);
+            uint dpi = N.GetDpiForWindow(atrous);
             if (client != lastClient || dpi != lastDpi)
             {
                 // A resize keeps the side panel's distance from the window's right edge: follow it now,
-                // and look again in herdr's frame once the size settles.
+                // and look again in Atrous's frame once the size settles.
                 if (originKnown && dpi == lastDpi && lastClient != Size.Empty)
                 {
                     int w = (int)Math.Round(areaW * dpi / 96.0);
@@ -589,11 +589,11 @@ sealed class Host : ApplicationContext
         }
     }
 
-    // Where a point of herdr's client area is for the view's own SetWindowPos.
+    // Where a point of Atrous's client area is for the view's own SetWindowPos.
     Point Screen(Point p)
     {
         var q = new N.POINT { X = p.X, Y = p.Y };
-        N.ClientToScreen(herdr, ref q);
+        N.ClientToScreen(atrous, ref q);
         return new Point(q.X, q.Y);
     }
 
@@ -638,17 +638,17 @@ sealed class Host : ApplicationContext
         Bump();
     }
 
-    // ---- finding the page area in herdr's own frame ----
+    // ---- finding the page area in Atrous's own frame ----
     // The panel draws a magenta square in the page area's top left corner and a cyan one in its
-    // bottom right, under the view. `herdr-app shot` is herdr's own rendering, with them in it.
+    // bottom right, under the view. `atrous shot` is Atrous's own rendering, with them in it.
 
-    // herdr's own socket (<home>/herdr-app.sock): one JSON request, the reply, then it closes.
-    // What `herdr-app status` and `herdr-app shot` send, without starting a process each time.
-    async Task<string> HerdrSocket(string json, int ms = 3000)
+    // Atrous's own socket (<home>/atrous.sock): one JSON request, the reply, then it closes.
+    // What `atrous status` and `atrous shot` send, without starting a process each time.
+    async Task<string> AtrousSocket(string json, int ms = 3000)
     {
         using var sock = new System.Net.Sockets.Socket(System.Net.Sockets.AddressFamily.Unix, System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Unspecified);
         using var cts = new CancellationTokenSource(ms);
-        await sock.ConnectAsync(new System.Net.Sockets.UnixDomainSocketEndPoint(Path.Combine(o.Home, "herdr-app.sock")), cts.Token);
+        await sock.ConnectAsync(new System.Net.Sockets.UnixDomainSocketEndPoint(Path.Combine(o.Home, "atrous.sock")), cts.Token);
         await sock.SendAsync(Encoding.UTF8.GetBytes(json + "\n"), System.Net.Sockets.SocketFlags.None, cts.Token);
         var ms2 = new MemoryStream();
         var buf = new byte[16384];
@@ -667,18 +667,18 @@ sealed class Host : ApplicationContext
     {
         if (socketOk)
         {
-            try { return (JsonNode.Parse(await HerdrSocket("{\"status\":true}"))?["overlays"] as JsonArray)?.Select(x => (string)x).ToArray() ?? Array.Empty<string>(); }
-            catch (Exception e) { socketOk = false; Log("herdr socket: " + e.Message + " (using the CLI)"); }
+            try { return (JsonNode.Parse(await AtrousSocket("{\"status\":true}"))?["overlays"] as JsonArray)?.Select(x => (string)x).ToArray() ?? Array.Empty<string>(); }
+            catch (Exception e) { socketOk = false; Log("Atrous socket: " + e.Message + " (using the CLI)"); }
         }
-        var (code, stdout) = await Herdr("status");
+        var (code, stdout) = await AtrousCli("status");
         return code == 0 ? (JsonNode.Parse(stdout)?["overlays"] as JsonArray)?.Select(x => (string)x).ToArray() ?? Array.Empty<string>() : null;
     }
 
-    async Task<(int code, string stdout)> Herdr(params string[] args)
+    async Task<(int code, string stdout)> AtrousCli(params string[] args)
     {
-        var psi = new ProcessStartInfo(o.HerdrExe) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
+        var psi = new ProcessStartInfo(o.AtrousExe) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
         foreach (var a in args) psi.ArgumentList.Add(a);
-        psi.Environment["HERDR_APP_HOME"] = o.Home;
+        psi.Environment["ATROUS_HOME"] = o.Home;
         using var p = Process.Start(psi);
         var stdout = p.StandardOutput.ReadToEndAsync();
         var stderr = p.StandardError.ReadToEndAsync();
@@ -693,12 +693,12 @@ sealed class Host : ApplicationContext
         bool done = false;
         if (socketOk)
         {
-            try { await HerdrSocket(new JsonObject { ["shot"] = file }.ToJsonString()); done = File.Exists(file); }
-            catch (Exception e) { Log("herdr socket shot: " + e.Message); }
+            try { await AtrousSocket(new JsonObject { ["shot"] = file }.ToJsonString()); done = File.Exists(file); }
+            catch (Exception e) { Log("Atrous socket shot: " + e.Message); }
         }
         if (!done)
         {
-            var (code, _) = await Herdr("shot", file);
+            var (code, _) = await AtrousCli("shot", file);
             if (code != 0) return null;
         }
         if (!File.Exists(file)) return null;
@@ -731,7 +731,7 @@ sealed class Host : ApplicationContext
             }
             else
             {
-                // herdr may not have drawn the new layout yet: look again shortly
+                // Atrous may not have drawn the new layout yet: look again shortly
                 if (++detectTries <= 8) detectAt = Environment.TickCount64 + 120 * detectTries;
                 if (detectTries == 1 || detectTries == 8) Log($"detect: {(found is Rectangle rr ? $"found {rr} but the panel says {ew}x{eh}" : "markers not found")} (try {detectTries})");
             }
@@ -801,7 +801,7 @@ sealed class Host : ApplicationContext
         catch { }
     }
 
-    // One still per folder (s00..s03 round robin), each with a new name: herdr reloads the images
+    // One still per folder (s00..s03 round robin), each with a new name: Atrous reloads the images
     // in a folder where a file changes, so a still never shares a folder with the one on screen.
     async Task CaptureStill()
     {
@@ -840,7 +840,7 @@ sealed class Host : ApplicationContext
                 if (freeze == Freeze.Capturing) { freeze = Freeze.WaitingAck; freezeAt = Environment.TickCount64; }
                 break;
             case Freeze.WaitingAck:
-                // the panel says the still is drawn (or half a second went by): look for it in herdr's frame
+                // the panel says the still is drawn (or half a second went by): look for it in Atrous's frame
                 if ((stillPath != null && stillAck == stillPath) || now - freezeAt > 500)
                 {
                     freeze = Freeze.Verifying;
@@ -851,8 +851,8 @@ sealed class Host : ApplicationContext
         }
     }
 
-    // The view hides only once herdr's own frame shows the still where the page is: the marker
-    // squares under it are covered then. (Hiding on the panel's word alone showed herdr's bare
+    // The view hides only once Atrous's own frame shows the still where the page is: the marker
+    // squares under it are covered then. (Hiding on the panel's word alone showed Atrous's bare
     // page area for ~80 ms while the picture was still being decoded: the annotate flicker.)
     async Task HideOverStill()
     {
@@ -877,7 +877,7 @@ sealed class Host : ApplicationContext
         freezeAt = Environment.TickCount64;
     }
 
-    // Is either marker square (top left magenta, bottom right cyan) visible in herdr's frame? By hue:
+    // Is either marker square (top left magenta, bottom right cyan) visible in Atrous's frame? By hue:
     // a dialog's dimming backdrop darkens them but keeps them magenta and cyan.
     static bool MarkersShowing(Bitmap bmp, Rectangle r)
     {
@@ -902,10 +902,10 @@ sealed class Host : ApplicationContext
     void PollOverlays(long now)
     {
         if (statusBusy || now - lastStatus < 150) return;
-        // Overlays open from the person's use of the window (or a command); while herdr (or the
+        // Overlays open from the person's use of the window (or a command); while Atrous (or the
         // page) isn't in front, look less often.
         var fg = N.GetForegroundWindow();
-        bool front = fg == herdr || fg == view.Handle || N.GetAncestor(fg, N.GA_ROOT) == herdr;
+        bool front = fg == atrous || fg == view.Handle || N.GetAncestor(fg, N.GA_ROOT) == atrous;
         if (!front && now - lastStatus < 1000) return;
         statusBusy = true;
         lastStatus = now;
@@ -930,7 +930,7 @@ sealed class Host : ApplicationContext
         Bump();
     }
 
-    // With the view hidden and the still drawn by herdr in its place: does herdr's frame show the
+    // With the view hidden and the still drawn by Atrous in its place: does Atrous's frame show the
     // still there, untouched? Then the overlays are elsewhere and the view can come back.
     async Task VerifyOverlays()
     {
@@ -1111,7 +1111,7 @@ sealed class Host : ApplicationContext
     // ---- keyboard and focus ----
 
     // The page has the keyboard when the view is the active window (clicking it activates it;
-    // clicking herdr activates herdr again, as with any two windows).
+    // clicking Atrous activates Atrous again, as with any two windows).
     bool ViewHasFocus() => N.GetForegroundWindow() == view.Handle;
 
     // The keyboard into the page: a plain request to make the view the active window (Windows
@@ -1126,7 +1126,7 @@ sealed class Host : ApplicationContext
 
     void GiveBackFocus()
     {
-        if (herdr != IntPtr.Zero && ViewHasFocus()) NI.SetForegroundWindow(herdr);
+        if (atrous != IntPtr.Zero && ViewHasFocus()) NI.SetForegroundWindow(atrous);
     }
 
     static readonly Dictionary<uint, string> Named = new()
@@ -1166,7 +1166,7 @@ sealed class Host : ApplicationContext
     {
         try
         {
-            await HerdrSocket(new JsonObject { ["do"] = action, ["args"] = null }.ToJsonString());
+            await AtrousSocket(new JsonObject { ["do"] = action, ["args"] = null }.ToJsonString());
             Log($"key {chord} -> {action}");
         }
         catch (Exception x) { Log($"key {chord} -> {action} failed: {x.Message}"); }
@@ -1185,7 +1185,7 @@ sealed class Host : ApplicationContext
         if (!keys.TryGetValue(chord, out var action)) return;
         // "terminal" and "send:" keys belong to whatever has the keyboard: here, the page.
         if (action == "terminal" || action.StartsWith("send:")) return;
-        // herdr's keys do what they do in herdr: its window comes back in front and the bound
+        // Atrous's keys do what they do in Atrous: its window comes back in front and the bound
         // action runs through its socket (the action, never a re-typed key).
         e.Handled = true;
         GiveBackFocus();

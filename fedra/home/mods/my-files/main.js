@@ -13,7 +13,7 @@
 //   what it shows changed.
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState, TextView } from "gpui-base";
-import { spaces, panes, focused, exec, readTextFile, watchFolder, theme, settings, window, layout, run } from "herdr";
+import { spaces, panes, focused, exec, readTextFile, watchFolder, theme, settings, window, layout, run } from "atrous";
 
 function find(node, id) {
   if (node?.id === id) return node;

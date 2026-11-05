@@ -1,7 +1,7 @@
 using System;
 using System.Runtime.InteropServices;
 
-namespace HerdrBrowserHost;
+namespace AtrousBrowserHost;
 
 // Window activation and window event hooks. (Nothing here types or clicks: the host never injects input.)
 static class NI

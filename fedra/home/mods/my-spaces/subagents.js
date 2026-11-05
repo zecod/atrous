@@ -13,7 +13,7 @@
 // (watchFolder) and calls refresh() with the changed transcripts; the helper runs then, at most
 // once every 2 s, and only for transcripts that changed.
 
-import { exec, appHome } from "herdr";
+import { exec, appHome } from "atrous";
 import * as fs from "fs/promises";
 import { b64 } from "./speed.js";
 

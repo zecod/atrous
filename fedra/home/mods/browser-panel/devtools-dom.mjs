@@ -26,7 +26,7 @@
 //   GET  /app/workers   POST /app/worker-unregister {scope}
 //   GET  /app/usage     POST /app/clear-site {types?}
 //
-// For agents (skills/herdr-browser/dom.mjs, `bp dom|cookies|local|session|idb`). Everything acts on
+// For agents (skills/atrous-browser/dom.mjs, `bp dom|cookies|local|session|idb`). Everything acts on
 // the shown tab; errors are { ok: false, error } with an HTTP status.
 //   POST /dom/query {selector, limit?=20}  -> {count, matches: [{nodeId, tag, id, classes, label, text, textLength, box, visible}]}
 //   GET  /dom/html[?selector=|nodeId=][&all=1][&picked=1][&max=]  outerHTML: {nodeId, label, total, truncated, html}
@@ -62,7 +62,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const httpErr = (status, message) => Object.assign(new Error(message), { status });
 const clip = (s, n = TEXT_MAX) => { const t = String(s ?? "").replace(/\s+/g, " ").trim(); return t.length > n ? `${t.slice(0, n)}…` : t; };
 const isWeb = (u) => /^https?:/i.test(u ?? "");
-const STRIP_HERDR = /<div data-herdr="[^"]*"[^>]*><\/div>/g; // the helper's own outline / note-marker hosts
+const STRIP_ATROUS = /<div data-atrous="[^"]*"[^>]*><\/div>/g; // the helper's own outline / note-marker hosts
 
 export function registerDevtools(ctx) {
   const S = ctx.S;
@@ -169,8 +169,8 @@ export function registerDevtools(ctx) {
     D.expanded.delete(id);
   }
 
-  const herdrOwn = (n) => n?.type === 1 && n.attrs && n.attrs.indexOf("data-herdr") >= 0 && n.attrs.indexOf("data-herdr") % 2 === 0;
-  const kidsOf = (n) => [...n.extra, ...(n.kids ?? [])].filter((k) => !herdrOwn(D.nodes.get(k)));
+  const atrousOwn = (n) => n?.type === 1 && n.attrs && n.attrs.indexOf("data-atrous") >= 0 && n.attrs.indexOf("data-atrous") % 2 === 0;
+  const kidsOf = (n) => [...n.extra, ...(n.kids ?? [])].filter((k) => !atrousOwn(D.nodes.get(k)));
   const tagOf = (n) => (n.pseudo ? `::${n.pseudo}` : (n.local || n.name.toLowerCase()));
   const attr = (n, name) => { const a = n.attrs ?? []; for (let i = 0; i < a.length; i += 2) if (a[i] === name) return a[i + 1]; return null; };
   function label(n) {
@@ -217,7 +217,7 @@ export function registerDevtools(ctx) {
     const out = [], index = new Map();
     const visit = (id, d) => {
       const n = D.nodes.get(id);
-      if (!n || herdrOwn(n)) return;
+      if (!n || atrousOwn(n)) return;
       const [r, open] = rowOf(n, d);
       index.set(id, out.length);
       out.push(r);
@@ -544,7 +544,7 @@ export function registerDevtools(ctx) {
 
   async function pageHtml() {
     const r = await send("Runtime.evaluate", { returnByValue: true,
-      expression: "(() => { const d = document.documentElement.cloneNode(true); d.querySelectorAll('[data-herdr]').forEach((e) => e.remove()); const t = document.doctype; return (t ? '<!DOCTYPE ' + t.name + '>\\n' : '') + d.outerHTML; })()" }, 20000);
+      expression: "(() => { const d = document.documentElement.cloneNode(true); d.querySelectorAll('[data-atrous]').forEach((e) => e.remove()); const t = document.doctype; return (t ? '<!DOCTYPE ' + t.name + '>\\n' : '') + d.outerHTML; })()" }, 20000);
     if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? "Couldn't read the page");
     return String(r.result?.value ?? "");
   }
@@ -554,7 +554,7 @@ export function registerDevtools(ctx) {
     if (!n) throw httpErr(404, "That node is gone from the page");
     if (n.type === 9 && id === D.doc) return pageHtml();
     const { outerHTML } = await send("DOM.getOuterHTML", { nodeId: id }, 20000);
-    return n.type === 1 && (n.local === "html" || n.local === "body") ? outerHTML.replace(STRIP_HERDR, "") : outerHTML;
+    return n.type === 1 && (n.local === "html" || n.local === "body") ? outerHTML.replace(STRIP_ATROUS, "") : outerHTML;
   }
 
   async function setHtml(id, html, select = true) {
@@ -833,7 +833,7 @@ export function registerDevtools(ctx) {
       breakdown: (r.usageBreakdown ?? []).filter((b) => b.usage > 0).map((b) => ({ type: b.storageType, usage: b.usage })) };
   }
 
-  // ---- the agents' API (skills/herdr-browser/dom.mjs) -------------------------------------
+  // ---- the agents' API (skills/atrous-browser/dom.mjs) -------------------------------------
 
   const exceptionText = (d) => String(d.exception?.description ?? d.text ?? "failed").split("\n")[0].replace(/^(Uncaught )?(\w*Error|DOMException): /, "");
 
@@ -842,7 +842,7 @@ export function registerDevtools(ctx) {
   async function isolatedCall(fn, args) {
     await session();
     const frameId = await mainFrameId();
-    const { executionContextId } = await send("Page.createIsolatedWorld", { frameId, worldName: "herdr-agent" });
+    const { executionContextId } = await send("Page.createIsolatedWorld", { frameId, worldName: "atrous-agent" });
     const r = await send("Runtime.callFunctionOn", { executionContextId, functionDeclaration: fn,
       arguments: args.map((value) => ({ value: value === undefined ? null : value })), awaitPromise: true, returnByValue: true }, 30000);
     if (r.exceptionDetails) throw httpErr(400, exceptionText(r.exceptionDetails));
@@ -862,7 +862,7 @@ export function registerDevtools(ctx) {
     let nodeIds;
     try { ({ nodeIds } = await send("DOM.querySelectorAll", { nodeId: D.doc, selector: String(b.selector) })); }
     catch (e) { throw httpErr(400, /selector|DOM Error/i.test(e.message) ? `Not a valid CSS selector: ${b.selector}` : e.message); }
-    const ids = nodeIds.filter((id) => D.nodes.has(id) && !herdrOwn(D.nodes.get(id)));
+    const ids = nodeIds.filter((id) => D.nodes.has(id) && !atrousOwn(D.nodes.get(id)));
     return all ? ids : ids.slice(0, 1);
   }
 

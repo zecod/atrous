@@ -7,7 +7,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading.Tasks;
 
-namespace HerdrBrowserHost;
+namespace AtrousBrowserHost;
 
 sealed class HttpError : Exception
 {

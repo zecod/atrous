@@ -1,5 +1,5 @@
 // Collector for the Usage & activity page (usage.js). Plain Node, not a mod module: usage.js starts it as a
-// background herdr-core terminal (`hc run --bg --rm -- node collect.mjs <dir> <id> [--full]`),
+// background atrous-core terminal (`atc run --bg --rm -- node collect.mjs <dir> <id> [--full]`),
 // since reading every Claude Code / Codex log can take minutes on a busy disk, past exec's 30 s.
 //
 // Runs `ccusage daily --json --by-agent` (all agents ccusage detects: Claude Code, Codex,

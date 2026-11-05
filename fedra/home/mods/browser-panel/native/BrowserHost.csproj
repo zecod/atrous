@@ -5,8 +5,8 @@
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>disable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
-    <AssemblyName>herdr-browser-host</AssemblyName>
-    <RootNamespace>HerdrBrowserHost</RootNamespace>
+    <AssemblyName>atrous-browser-host</AssemblyName>
+    <RootNamespace>AtrousBrowserHost</RootNamespace>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <NoWarn>$(NoWarn);MSB3277;WFO0003</NoWarn>
     <WebView2EnableCsWinRTProjection>false</WebView2EnableCsWinRTProjection>

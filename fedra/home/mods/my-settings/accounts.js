@@ -23,7 +23,7 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Popover } from "gpui-base";
-import { exec, hc, theme, shared, terminals, openOverlay, run } from "herdr";
+import { exec, core, theme, shared, terminals, openOverlay, run } from "atrous";
 import { TOOLS, TOOL_KEYS, keyOf, readState, updateState, publish, currentState, setActive, accountsOf, activeOf, readLogin, readEmail, pairRows, displayName, accountsDir } from "./accounts-core.js";
 
 const I = (name) => `mods/my-settings/${name}.svg`;
@@ -84,11 +84,11 @@ export class AccountsPage extends View {
     }
   }
 
-  // herdr-core's live terminals ({ address, name }), straight from `hc ls`: login terminals run
+  // atrous-core's live terminals ({ address, name }), straight from `atc ls`: login terminals run
   // outside every space, so this doesn't rely on what the app's terminals() list includes.
   async liveTerminals() {
     try {
-      const r = await hc(["ls", "--json"]);
+      const r = await core(["ls", "--json"]);
       return r.code === 0 ? (JSON.parse(r.stdout).terminals ?? []).filter((t) => t.state === "live") : null;
     } catch {
       return null;
@@ -109,11 +109,11 @@ export class AccountsPage extends View {
       // Finished sign-in terminals (the dialog keeps them for its details) whose account no longer
       // waits for a sign-in: tidy them away.
       try {
-        const all = await hc(["ls", "--all", "--json"]);
+        const all = await core(["ls", "--all", "--json"]);
         for (const t of JSON.parse(all.stdout).terminals ?? []) {
           const m = /^login-(claude|codex)-(.+)$/.exec(t.name ?? "");
           if (!m || t.state === "live") continue;
-          if (!st.accounts.find((x) => x.tool === m[1] && x.id === m[2])?.pending) hc(["rm", t.address]).catch(() => null);
+          if (!st.accounts.find((x) => x.tool === m[1] && x.id === m[2])?.pending) core(["rm", t.address]).catch(() => null);
         }
       } catch {}
       const emails = {};
@@ -194,7 +194,7 @@ export class AccountsPage extends View {
         run("usage-card.accounts");
       }
     }
-    if (!liveList) return; // hc didn't answer: decide next time
+    if (!liveList) return; // atc didn't answer: decide next time
     // Ended: it was seen running and is gone, or it never showed up within 20 s.
     if (t || (!L.seen && Date.now() - L.since < 20000)) return;
     delete this.logins[key];
@@ -259,8 +259,8 @@ export class AccountsPage extends View {
     cx.spawn(async (cx) => {
       const t = this.liveLogin(a, await this.liveTerminals());
       if (t) {
-        await hc(["kill", t.address]).catch(() => null);
-        await hc(["rm", t.address]).catch(() => null);
+        await core(["kill", t.address]).catch(() => null);
+        await core(["rm", t.address]).catch(() => null);
       }
       delete this.logins[key];
       if (a.pending) await this.discard(a, cx);
@@ -369,7 +369,7 @@ export class AccountsPage extends View {
     return div().pt(6).pb(8).text_size(12).font_semibold().text_color(t.dim).child(text.toUpperCase());
   }
 
-  // Herdr's switch (Settings > Alerts).
+  // Atrous's switch (Settings > Alerts).
   toggle(t, id, on, onClick) {
     return div().id(id).w(36).h(20).rounded(10).p(2).cursor_pointer().bg(on ? t.accent : t.hover).flex()
       .when(on, (el) => el.justify_end())
@@ -582,7 +582,7 @@ export class AccountsPage extends View {
     const usage = shared("accounts.usage") ?? {};
     const running = {};
     for (const term of terminals()) {
-      const v = term.labels?.["herdr-account"];
+      const v = term.labels?.["atrous-account"];
       if (v && term.state === "live") running[v] = (running[v] ?? 0) + 1;
     }
     return v_flex().id("acct-page").track_focus(this.handle).w_full()

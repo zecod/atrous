@@ -2,7 +2,7 @@ using System;
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace HerdrBrowserHost;
+namespace AtrousBrowserHost;
 
 // Win32, only what the host uses.
 static class N

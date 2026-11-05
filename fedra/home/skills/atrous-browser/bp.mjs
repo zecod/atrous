@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// bp: the herdr Browser panel, for agents. See SKILL.md next to this file.
+// bp: the Atrous Browser panel, for agents. See SKILL.md next to this file.
 //
 //   node bp.mjs <command> [args]          (JSON on stdout; errors on stderr, exit 1)
 //
-// Talks to the panel's helper (127.0.0.1:9334, or HERDR_BROWSER_API=<port>), the same browser the
-// person sees in herdr, and for eval/shot to that browser's DevTools endpoint directly.
+// Talks to the panel's helper (127.0.0.1:9734, or ATROUS_BROWSER_API=<port>), the same browser the
+// person sees in Atrous, and for eval/shot to that browser's DevTools endpoint directly.
 // Command groups live in modules next to this file: net.mjs (traffic, intercept, replay) and
 // dom.mjs (live HTML, cookies, local/session storage, IndexedDB). Each exports run(argv, api);
 // argv starts with the group word ("net", or "dom" | "cookies" | "local" | "session" | "idb").
@@ -16,7 +16,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const PORT = Number(process.env.HERDR_BROWSER_API) || 9334;
+const PORT = Number(process.env.ATROUS_BROWSER_API) || 9734;
 const BASE = `http://127.0.0.1:${PORT}`;
 
 class NotRunning extends Error {}
@@ -104,7 +104,7 @@ async function screenshot({ selector, full, file }) {
       clip = { ...clip, scale: 1 };
     }
     const r = await send("Page.captureScreenshot", { format: "png", ...(clip ? { clip, captureBeyondViewport: true } : {}), ...(full ? { captureBeyondViewport: true } : {}) });
-    const dir = path.join(os.tmpdir(), "herdr-browser-shots");
+    const dir = path.join(os.tmpdir(), "atrous-browser-shots");
     fs.mkdirSync(dir, { recursive: true });
     const p = file ? path.resolve(file) : path.join(dir, `shot-${Date.now()}.png`);
     fs.writeFileSync(p, Buffer.from(r.data, "base64"));
@@ -114,14 +114,14 @@ async function screenshot({ selector, full, file }) {
 
 // ---- commands ------------------------------------------------------------------------------
 
-const HELP = `bp: the herdr Browser panel (shared with the person). JSON out.
+const HELP = `bp: the Atrous Browser panel (shared with the person). JSON out.
   status                         url, title, tabs, what the person picked
-  start                          open the Browser panel in herdr if it isn't running
+  start                          open the Browser panel in Atrous if it isn't running
   open <url> [--new] [--no-wait] go there (in a new tab with --new) and wait for the load
   back | forward | reload [--hard]
   tabs | tab <id> | close [<id>]
   console [--errors] [--grep re] [--limit n]
-  html [page|picked]             the page's HTML (without herdr's own marks)
+  html [page|picked]             the page's HTML (without Atrous's own marks)
   eval <js|@file>                run JS in the page, print the result (awaits promises)
   shot [--selector css] [--full] [--out file.png]   screenshot, prints its path
   cdp                            the DevTools endpoint (Playwright connectOverCDP)
@@ -135,14 +135,14 @@ async function main(argv) {
     case "status": return out(await state());
     case "start": {
       try { return out({ started: false, ...(await state()) }); } catch (e) { if (!(e instanceof NotRunning)) throw e; }
-      const run = (c, a) => spawnSync("herdr-app", ["do", c, JSON.stringify(a)], { encoding: "utf8", shell: process.platform === "win32" });
+      const run = (c, a) => spawnSync("atrous", ["do", c, JSON.stringify(a)], { encoding: "utf8", shell: process.platform === "win32" });
       run("layout.select", { stack: "panel-body", child: "browser" });
       run("layout.show", { id: "panel" });
       for (let i = 0; i < 60; i++) {
         await sleep(500);
         try { const s = await state(); if (s.url) return out({ started: true, ...s }); } catch {}
       }
-      throw new Error("The Browser panel didn't start in 30 s (is the Fedra layout shown in herdr?)");
+      throw new Error("The Browser panel didn't start in 30 s (is the Fedra layout shown in Atrous?)");
     }
     case "open": {
       const newTab = flag(argv, "--new"), noWait = flag(argv, "--no-wait");

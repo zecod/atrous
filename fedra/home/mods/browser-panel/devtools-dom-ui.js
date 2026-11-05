@@ -4,7 +4,7 @@
 
 import { div, svg } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
-import { props, settings, theme } from "herdr";
+import { props, settings, theme } from "atrous";
 
 export const I = (name) => `mods/browser-panel/icons/${name}.svg`;
 
@@ -20,7 +20,7 @@ export const bytes = (n) => (n == null ? "" : n >= 1073741824 ? `${(n / 10737418
 export const syntax = (t = theme()) => ({ keyword: t.ansi5, string: t.ansi2, comment: t.dim, function: t.ansi4, type: t.ansi3, number: t.ansi1, constant: t.ansi6 });
 
 // The helper's local API, on this panel's port (props.apiPort).
-export const apiBase = () => `http://127.0.0.1:${Number(props()?.apiPort) || 9334}`;
+export const apiBase = () => `http://127.0.0.1:${Number(props()?.apiPort) || 9734}`;
 async function answer(r) {
   let j;
   try { j = await r.json(); } catch { j = { ok: false, error: `The helper answered ${r.status}` }; }

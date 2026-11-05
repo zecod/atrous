@@ -1,8 +1,30 @@
-// Personal copy of the shipped `workspace-chrome` mod (cloned from 0.1.12). Change: the
-// footer's Settings opens mods/my-settings (Settings plus a "Usage & activity" tab).
+// Personal copy of the shipped `workspace-chrome` mod (cloned from 0.1.12). Changes: the
+// footer's Settings opens mods/my-settings (Settings plus a "Usage & activity" tab); the brand
+// shows the Atrous logo (atrous.png here); the brand copy links the atrous-browser agent skill.
 import { View, div, image, svg } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
-import { theme, run, props, window, shared, setShared, updates, layout } from "herdr";
+import { theme, run, props, window, shared, setShared, updates, layout, exec, home, appHome, readTextFile } from "atrous";
+import * as fs from "fs/promises";
+
+const slash = (p) => String(p ?? "").replace(/\\/g, "/").replace(/\/+$/, "");
+
+// The atrous-browser agent skill (skills/atrous-browser in the app home, shipped with Fedra) is a
+// link in ~/.claude/skills and ~/.codex/skills, so Claude Code and Codex find it. Checked once
+// per start by the brand block (always in the Fedra layout): when a tool that's installed lacks
+// the link (or it's broken), the skill's own install.mjs makes it. It touches only the
+// atrous-browser links, never another app's skills.
+async function linkBrowserSkill() {
+  const skill = `${slash(appHome())}/skills/atrous-browser`;
+  if (!(await readTextFile(`${skill}/install.mjs`).catch(() => null))) return; // not shipped here
+  const h = slash(home());
+  for (const dir of [".claude", ".codex"]) {
+    const installed = await fs.readdir(`${h}/${dir}`).then(() => true, () => false);
+    if (!installed) continue;
+    if (await readTextFile(`${h}/${dir}/skills/atrous-browser/SKILL.md`).catch(() => null)) continue;
+    await exec("node", [`${skill}/install.mjs`]).catch(() => null);
+    return; // install.mjs links every tool at once
+  }
+}
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -26,6 +48,9 @@ function toggleSidebar() {
 }
 
 export default class WorkspaceChrome extends View {
+  init(_props, cx) {
+    if (!props()?.footer) cx.spawn(async () => { await linkBrowserSkill().catch(() => null); });
+  }
   button(id, label, action) {
     const t = theme();
     return div().id(id).size(26).flex_none().flex().items_center().justify_center().rounded(6).text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
@@ -47,7 +72,7 @@ export default class WorkspaceChrome extends View {
     }
     return h_flex().size_full().bg(t.chrome).pl(collapsed ? 6 : 14).pr(10).gap(4).items_center().text_size(13.5)
       .when(window()?.platform === "macos" && !window()?.fullscreen && !collapsed, el => el.pl(76))
-      .when(!collapsed, el => el.child(h_flex().flex_1().gap(8).items_center().child(image("frame/welcome/herdr.png").size(20).rounded(5)).child(div().font_semibold().text_color(t.foreground).child("Herdr"))))
+      .when(!collapsed, el => el.child(h_flex().flex_1().gap(8).items_center().child(image("mods/my-chrome/atrous.png").size(22)).child(div().font_semibold().text_color(t.foreground).child("Atrous"))))
       .when(!collapsed, el => el.child(this.button("search", svg("mods/my-chrome/search.svg").size(15), () => run("mod.open", { name: "picker" }))))
       // On the macOS rail the traffic lights fill the row; the agents list's » unfolds it.
       .when(!(collapsed && window()?.platform === "macos"), el => el.child(this.button("sidebar-toggle", svg("mods/my-chrome/sidebar.svg").size(15), toggleSidebar)));

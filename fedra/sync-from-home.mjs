@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Copies Fedra's files from a working herdr-app home (~/.config/herdr-app) into fedra/home/,
+// Copies Fedra's files from a working Atrous home (~/.config/atrous) into fedra/home/,
 // so the repo can be committed. The reverse of install.mjs. Never copies app state, account
-// state/folders, usage data, or files herdr generates (.d.ts, jsconfig.json).
+// state/folders, usage data, or files Atrous generates (.d.ts, jsconfig.json).
 //
 //   node sync-from-home.mjs [--home <path>]
 
@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const at = process.argv.indexOf("--home");
-const home = at > 0 ? process.argv[at + 1] : process.env.HERDR_APP_HOME || path.join(os.homedir(), ".config", "herdr-app");
+const home = at > 0 ? process.argv[at + 1] : process.env.ATROUS_HOME || path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "atrous");
 const out = path.join(here, "home");
 
 const MODS = [
@@ -20,7 +20,7 @@ const MODS = [
   "my-new-menu", "my-pane", "my-settings", "my-spaces", "my-status", "my-tabs", "my-worktree", "open-in",
   "snap-split", "usage-card", "usage-stats",
 ];
-const SKIP = (name) => name === "gpui-kit.d.ts" || name === "jsconfig.json" || name === "node_modules"
+const SKIP = (name) => name.endsWith(".d.ts") || name === "jsconfig.json" || name === "node_modules"
   || name === "bin" || name === "obj" || name.startsWith(".")
   || /\.(tmp|error|log|fedra-tmp)$/.test(name) || /\.(exe|dll|pdb)$/i.test(name);
 

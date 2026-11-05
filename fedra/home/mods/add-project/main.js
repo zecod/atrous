@@ -4,13 +4,13 @@
 // a new space; if a space already shows that folder, that space is selected.
 //
 // Props: { machine } — the host to add on (null: this computer).
-// Clones run in a background herdr-core terminal (`hc run --bg`), so a big repo
+// Clones run in a background atrous-core terminal (`atc run --bg`), so a big repo
 // isn't cut off by exec's 30 s limit; the dialog shows git's last line and
 // stops the clone if it is closed or "Stop" is pressed.
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { run, props, closeOverlay, openOverlay, theme, hc, exec, home, pickFolder, spaces, panes, shared, setShared, window, nextCommand } from "herdr";
+import { run, props, closeOverlay, openOverlay, theme, core, exec, home, pickFolder, spaces, panes, shared, setShared, window, nextCommand } from "atrous";
 
 const I = (name) => `mods/add-project/${name}.svg`;
 // Shared: host ("" = this computer) -> the folder the last project went in.
@@ -73,14 +73,14 @@ export default class AddProject extends View {
     cx.timer.after(300, () => { if (this.view === "home") this.handle.focus(); });
     cx.spawn(async (cx) => {
       try {
-        const r = await hc(["machine", "ls", "--json"]);
+        const r = await core(["machine", "ls", "--json"]);
         if (r.code === 0) this.hosts = [null, ...(JSON.parse(r.stdout).machines ?? []).filter((m) => !m.temporary).map((m) => m.name)];
       } catch {}
       if (!this.hosts.includes(this.host)) this.host = null;
       cx.notify();
     });
     cx.timer.every(700, (cx) => this.poll(cx));
-    // keys.json / `herdr-app do`: add-project.home | add-project.clone | add-project.create
+    // keys.json / `atrous do`: add-project.home | add-project.clone | add-project.create
     cx.spawn(async (cx) => {
       for (;;) {
         const c = await nextCommand();
@@ -234,7 +234,7 @@ export default class AddProject extends View {
         const args = ["run", "--bg", "--json", "--no-parent", "--no-notify", "--cwd", where.parent];
         if (this.host) args.push("--on", this.host);
         args.push("--", "git", "clone", "--progress", url, where.name);
-        const r = await hc(args);
+        const r = await core(args);
         if (r.code !== 0) throw new Error(errorText(r) || "Couldn't start git.");
         this.job = { address: JSON.parse(r.stdout).address, dest: where.dest, parent: where.parent };
         this.busy = "Cloning…";
@@ -253,9 +253,9 @@ export default class AddProject extends View {
     this.polling = true;
     cx.spawn(async (cx) => {
       try {
-        const g = await hc(["get", job.address, "--json"]);
+        const g = await core(["get", job.address, "--json"]);
         const info = g.code === 0 ? JSON.parse(g.stdout) : null;
-        const screen = info ? await hc(["read", job.address]) : { stdout: "" };
+        const screen = info ? await core(["read", job.address]) : { stdout: "" };
         const lines = screen.stdout.split(/\r?\n/).map((l) => l.trimEnd()).filter(Boolean);
         if (this.job !== job) return;
         if (info && info.state !== "finished") {
@@ -263,7 +263,7 @@ export default class AddProject extends View {
           return;
         }
         this.job = null;
-        if (info) await hc(["rm", job.address]).catch(() => {});
+        if (info) await core(["rm", job.address]).catch(() => {});
         if (info?.exit_code === 0) {
           this.remember(job.parent);
           this.open(job.dest);
@@ -285,8 +285,8 @@ export default class AddProject extends View {
     this.job = null;
     this.busy = null;
     if (job) cx.spawn(async () => {
-      await hc(["kill", job.address]).catch(() => {});
-      await hc(["rm", job.address]).catch(() => {});
+      await core(["kill", job.address]).catch(() => {});
+      await core(["rm", job.address]).catch(() => {});
     });
     cx.notify();
   }
@@ -342,7 +342,7 @@ export default class AddProject extends View {
   async close(_cx) {
     const job = this.job;
     this.job = null;
-    if (job) await hc(["kill", job.address]).catch(() => {});
+    if (job) await core(["kill", job.address]).catch(() => {});
   }
 
   key(e, cx) {

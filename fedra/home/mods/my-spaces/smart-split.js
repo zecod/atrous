@@ -6,7 +6,7 @@
 // ends where it began stays a click, so rows still focus their agent.
 // (Its own file because a mod can't import from another mod's folder.)
 
-import { openOverlay } from "herdr";
+import { openOverlay } from "atrous";
 
 const SLOP = 6; // px of travel before a press counts as a drag
 
