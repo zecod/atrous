@@ -1,3 +1,7 @@
+# DEVELOPERS ONLY: atrous-core ships inside Atrous (core/ of zecod/atrous)
+# and installs and updates with it. This standalone installer is for working
+# on the core alone.
+#
 # Installs atrous-core (atc) on Windows, or updates it:
 #
 #   powershell -c "irm https://github.com/zecod/atrous-core/releases/latest/download/install.ps1 | iex"

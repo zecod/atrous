@@ -53,6 +53,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "atrous-core"
+version = "0.2.0"
+dependencies = [
+ "clap",
+ "ghostty-vt",
+ "libc",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tokio",
+ "toml",
+ "windows-sys",
+]
+
+[[package]]
 name = "bytes"
 version = "1.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -129,21 +144,6 @@ name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
-
-[[package]]
-name = "atrous-core"
-version = "0.1.18"
-dependencies = [
- "clap",
- "ghostty-vt",
- "libc",
- "schemars",
- "serde",
- "serde_json",
- "tokio",
- "toml",
- "windows-sys",
-]
 
 [[package]]
 name = "is_terminal_polyfill"

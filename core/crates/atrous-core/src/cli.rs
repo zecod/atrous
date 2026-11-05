@@ -579,6 +579,10 @@ fn run(cmd: Option<Cmd>, json: bool, asked: bool) -> Result<Option<Out>, RpcErro
             Out { json: r, human }
         }
         Cmd::Server { action: ServerCmd::Stop } => stop(&paths)?,
+        Cmd::Update { .. } if client::installed_by() == Some("atrous") => {
+            let exe = client::exe().map(|e| e.display().to_string()).unwrap_or_else(|| "atc".into());
+            return Err(update::shipped(&exe));
+        }
         Cmd::Update { from: None, version, force } => {
             let this = format!("atc {}", env!("CARGO_PKG_VERSION"));
             if let Some(v) = &version

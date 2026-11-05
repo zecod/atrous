@@ -212,6 +212,7 @@ async fn server_status(core: Ctx<'_>, _: Empty) -> Result<StatusResult, RpcError
         live,
         finished: st.reg.terminals.len() - live,
         installed_by: crate::client::installed_by().map(String::from),
+        exe: crate::client::exe().map(|e| e.to_string_lossy().into_owned()),
     })
 }
 

@@ -11,8 +11,17 @@ See [NOTICE](NOTICE) for what changed.
 
 ## Install
 
-Releases are published as [GitHub releases](https://github.com/zecod/atrous-core/releases).
-Until the first one is out, [build from source](#build-and-install-on-a-mac).
+atrous-core ships inside [Atrous](https://github.com/zecod/atrous): this folder is `core/` of the Atrous
+repo, built by its one build (`just build`), released in the same download at the same version, and
+updated with the app. Install Atrous and you have `atc`: Windows puts `atrous-core.exe` and `atc.exe`
+beside `atrous.exe` in `%LOCALAPPDATA%\Programs\atrous`; macOS nests `Atrous Core.app` in
+`Atrous.app/Contents/Helpers` and links `~/.local/bin/atc` to it; Linux keeps both beside `atrous`.
+Terminals the core starts find `atc` first on their PATH. Such a core refuses `atc update`: update Atrous.
+
+### Standalone (developers only)
+
+The standalone installers, releases and `atc update` below are for developing the core on its own.
+People get the core with Atrous.
 
 Linux and macOS:
 

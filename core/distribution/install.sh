@@ -1,4 +1,8 @@
 #!/bin/sh
+# DEVELOPERS ONLY: atrous-core ships inside Atrous (core/ of zecod/atrous)
+# and installs and updates with it. This standalone installer is for working
+# on the core alone.
+#
 # Installs atrous-core (atc), or updates it:
 #
 #   curl -fsSL https://github.com/zecod/atrous-core/releases/latest/download/install.sh | sh

@@ -1,4 +1,7 @@
 //! Lost kept records stay live without a holder until a replacement shell starts.
+//! One labeled `atrous.resume` (an argv as a JSON array, which Atrous sets on
+//! the agents it starts) comes back running that instead: the agent resuming
+//! its last session, in a shell that stays.
 use crate::holder_proto as proto;
 use crate::runtime::{Core, now_ms};
 use crate::terminals::{KEEP_RETRY_MS, Terminal};
@@ -92,7 +95,7 @@ impl Core {
             let (env, scope) = crate::api::terminal_env(&self, id, &cwd, env);
             t.scope = Some(scope);
             t.holder = Some(instance);
-            t.argv = shell.clone();
+            t.argv = resume_argv(&t.labels).unwrap_or_else(|| shell.clone());
             t.cwd = cwd.clone();
             t.template = None;
             t.reported = false;
@@ -118,9 +121,31 @@ impl Core {
     }
 }
 
+/// Label naming what a lost kept terminal runs when it comes back.
+pub(crate) const RESUME: &str = "atrous.resume";
+
+/// The `atrous.resume` argv, if it is a non-empty JSON array of strings.
+fn resume_argv(labels: &std::collections::BTreeMap<String, String>) -> Option<Vec<String>> {
+    let argv: Vec<String> = serde_json::from_str(labels.get(RESUME)?).ok()?;
+    argv.first().is_some_and(|program| !program.is_empty()).then_some(argv)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::terminals::{NewTerminal, Registry};
+
+    #[test]
+    fn a_lost_agent_comes_back_with_its_resume_argv_else_a_shell() {
+        let labels = |v: &str| [(super::RESUME.to_string(), v.to_string())].into_iter().collect();
+        assert_eq!(
+            super::resume_argv(&labels(r#"["claude","--continue"]"#)),
+            Some(vec!["claude".to_string(), "--continue".to_string()])
+        );
+        for broken in ["", "[]", "claude --continue", "{\"a\":1}", "[1,2]"] {
+            assert_eq!(super::resume_argv(&labels(broken)), None, "{broken}");
+        }
+        assert_eq!(super::resume_argv(&Default::default()), None);
+    }
 
     #[test]
     fn retries_back_off_forever_and_reset_only_after_a_stable_program() {

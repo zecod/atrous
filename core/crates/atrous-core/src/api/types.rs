@@ -146,8 +146,12 @@ pub struct StatusResult {
     pub finished: usize,
     /// The package manager this atc came from (homebrew, nix, mise, or
     /// system package manager): it updates atc, `atc update` won't.
-    /// Null for a replaceable plain install.
+    /// Null for a replaceable plain install; `atrous` when Atrous ships it.
     pub installed_by: Option<String>,
+    /// The binary this core runs from, as it was when it started. Atrous
+    /// reads it to tell its own core from one installed separately.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exe: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]

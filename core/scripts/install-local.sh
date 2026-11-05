@@ -1,4 +1,6 @@
 #!/bin/sh
+# DEVELOPERS ONLY: Atrous builds and installs its core itself (just build,
+# just install at the repo root). This installs core/ alone, for working on it.
 # Builds a release binary into ~/.local/bin (replacing any older one), then
 # restarts the core the planned way so running terminals pick up the new build.
 set -eu

@@ -19,6 +19,28 @@ pub fn remember_exe() {
     build_id();
 }
 
+/// The binary this atc runs from, as it was at startup.
+pub fn exe() -> Option<std::path::PathBuf> {
+    EXE.get().cloned().or_else(|| std::env::current_exe().ok())
+}
+
+/// The folder this atc runs from (Atrous ships it beside the app).
+pub fn exe_dir() -> Option<std::path::PathBuf> {
+    exe()?.parent().map(std::path::Path::to_path_buf)
+}
+
+/// Atrous ships this core: beside its `atrous` binary (Windows, Linux), or
+/// as the helper bundle inside Atrous.app (`Contents/Helpers/Atrous
+/// Core.app/Contents/MacOS/atrous-core`). It updates with Atrous, never alone.
+pub(crate) fn shipped_with_atrous(exe: &std::path::Path) -> bool {
+    let Some(dir) = exe.parent() else { return false };
+    // A real file: ~/.local/bin holds only a link to the app, beside a separately installed core.
+    let app = dir.join(format!("atrous{}", std::env::consts::EXE_SUFFIX));
+    app.symlink_metadata().is_ok_and(|m| m.is_file())
+        || dir.ancestors().nth(3).is_some_and(|helpers| helpers.file_name() == Some("Helpers".as_ref()))
+            && dir.ancestors().nth(2).is_some_and(|core| core.file_name() == Some("Atrous Core.app".as_ref()))
+}
+
 /// The package manager this atc came from, or "system package manager" as a
 /// compatibility marker when its folder isn't writable. None for a replaceable install.
 pub fn installed_by() -> Option<&'static str> {
@@ -28,7 +50,27 @@ pub fn installed_by() -> Option<&'static str> {
 
 pub(crate) fn installed_by_path(exe: &std::path::Path) -> Option<&'static str> {
     let path = exe.canonicalize().unwrap_or_else(|_| exe.to_path_buf());
+    if shipped_with_atrous(exe) || shipped_with_atrous(&path) {
+        return Some("atrous");
+    }
     manager_of(&path.to_string_lossy()).or_else(|| (!platform::can_replace(&path)).then_some("system package manager"))
+}
+
+#[cfg(test)]
+#[test]
+fn a_core_beside_the_atrous_binary_or_in_its_helper_bundle_ships_with_atrous() {
+    let root = std::env::temp_dir().join(format!("atc-shipped-{}", platform::random_hex()));
+    let exe = std::env::consts::EXE_SUFFIX;
+    let core = root.join(format!("atrous-core{exe}"));
+    std::fs::create_dir_all(&root).unwrap();
+    assert!(!shipped_with_atrous(&core), "alone: a separate install");
+    std::fs::write(root.join(format!("atrous{exe}")), "").unwrap();
+    assert!(shipped_with_atrous(&core));
+    assert_eq!(installed_by_path(&core), Some("atrous"));
+    let helper = std::path::Path::new("/Applications/Atrous.app/Contents/Helpers/Atrous Core.app/Contents/MacOS/atrous-core");
+    assert!(shipped_with_atrous(helper));
+    assert!(!shipped_with_atrous(std::path::Path::new("/Users/me/.local/share/atrous-core/active/Atrous Core.app/Contents/MacOS/atrous-core")));
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 fn manager_of(path: &str) -> Option<&'static str> {

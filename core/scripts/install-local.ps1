@@ -1,3 +1,5 @@
+# DEVELOPERS ONLY: Atrous builds and installs its core itself (just build,
+# just install at the repo root). This installs core/ alone, for working on it.
 # Builds this checkout and installs it with distribution/install.ps1, from a
 # zip like a release's: PATH set, running terminals kept.
 $ErrorActionPreference = "Stop"

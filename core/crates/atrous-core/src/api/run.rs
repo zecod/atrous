@@ -247,11 +247,47 @@ pub(crate) fn child_env(base: BTreeMap<String, String>, extra: BTreeMap<String, 
         env.insert("TERM_PROGRAM".into(), "ghostty".into());
         env.remove("TERM_PROGRAM_VERSION"); // the version belonged to whatever we replaced
     }
+    if let Some(dir) = crate::client::exe_dir() {
+        own_folder_first(&mut env, &dir);
+    }
     env
+}
+
+/// This core's folder first on the terminal's PATH: `atc` (and `atrous`, which
+/// Atrous ships beside it) in an agent's shell is this core's, never an older
+/// one found later on PATH.
+fn own_folder_first(env: &mut BTreeMap<String, String>, dir: &std::path::Path) {
+    let key = env.keys().find(|k| k.eq_ignore_ascii_case("PATH")).cloned().unwrap_or_else(|| "PATH".into());
+    let path = env.get(&key).cloned().unwrap_or_default();
+    let same = |d: &std::path::Path| {
+        if cfg!(windows) {
+            d.as_os_str().to_string_lossy().trim_end_matches('\\').eq_ignore_ascii_case(dir.as_os_str().to_string_lossy().trim_end_matches('\\'))
+        } else {
+            d == dir
+        }
+    };
+    let mut dirs = vec![dir.to_path_buf()];
+    dirs.extend(std::env::split_paths(&path).filter(|d| !d.as_os_str().is_empty() && !same(d)));
+    if let Ok(joined) = std::env::join_paths(dirs) {
+        env.insert(key, joined.to_string_lossy().into_owned());
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_cores_own_folder_comes_first_on_path_once() {
+        let dir = std::env::temp_dir().join("atrous-bin");
+        let other = std::env::temp_dir().join("elsewhere");
+        let start = std::env::join_paths([other.clone(), dir.clone()]).unwrap().to_string_lossy().into_owned();
+        let key = if cfg!(windows) { "Path" } else { "PATH" };
+        let mut env: std::collections::BTreeMap<String, String> = [(key.to_string(), start)].into();
+        super::own_folder_first(&mut env, &dir);
+        let dirs: Vec<_> = std::env::split_paths(&env[key]).collect();
+        assert_eq!(dirs, [dir, other], "first, and only once, under the key the environment already had");
+        assert_eq!(env.len(), 1);
+    }
+
     #[test]
     fn a_long_output_keeps_whole_lines_from_its_end_even_mid_character() {
         let text = "é".repeat(30_000) + "\nlast line";

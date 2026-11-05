@@ -47,6 +47,15 @@ pub(super) fn up_to_date(paths: &Paths, release: &str, human: String) -> Result<
     Ok(out)
 }
 
+/// atrous-core ships inside Atrous and updates with it.
+pub(super) fn shipped(path: &str) -> RpcError {
+    RpcError::new(
+        "refused",
+        format!("{path} ships with Atrous and updates with it"),
+        "update Atrous (Settings, Updates); your terminals keep running",
+    )
+}
+
 /// Swaps the binary this atc runs from for `from`, then restarts the core
 /// the planned way: every terminal keeps running. One swap path, for people
 /// and for apps that bundle atc.
@@ -58,6 +67,7 @@ pub(super) fn update(paths: &Paths, from: &std::path::Path, force: bool) -> Resu
     let shown = dest.display().to_string();
     if let Some(manager) = client::installed_by() {
         let how = match manager {
+            "atrous" => return Err(shipped(&shown)),
             "homebrew" => "brew upgrade atrous-core",
             "nix" => "update it in your Nix configuration",
             "mise" => "mise upgrade atrous-core",
