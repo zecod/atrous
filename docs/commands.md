@@ -444,7 +444,7 @@ No arguments.
 
 ## `app.welcome`
 
-Show the welcome again.
+Show the first-run flow again (the onboarding mod).
 
 No arguments.
 
@@ -456,7 +456,7 @@ No arguments.
 
 ## `app.feedback`
 
-Draft feedback for the person to review and send (from: person or agent).
+Draft feedback for the person to review and open as a GitHub issue on zecod/atrous (from: person or agent).
 
 | Argument | Required |
 |---|---|
@@ -471,7 +471,7 @@ No arguments.
 
 ## `app.settings`
 
-Open the settings (section: look, alerts, updates).
+Open Settings, Fedra's my-settings (section: look, machines, alerts, updates, privacy, accounts, skills, usage).
 
 | Argument | Required |
 |---|---|
