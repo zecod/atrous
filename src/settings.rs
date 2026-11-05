@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Mutex;
 
-/// A terminal palette, as herdr-app shipped them.
+/// A terminal palette, as atrous shipped them.
 #[derive(Clone)]
 struct Palette {
     background: u32,
@@ -98,6 +98,7 @@ const THEMES: &[(&str, &str)] = &[
     ("atom-one-dark", include_str!("../defaults/themes/atom-one-dark.json")),
     ("win98", include_str!("../defaults/themes/win98.json")),
 ];
+#[allow(dead_code)]
 pub const SHIPPED_THEMES: &[&str] = &["atom-one-dark", "win98"];
 
 /// `themes/<name>.json`: a palette, plus `colors` overrides like settings.json's.
@@ -216,7 +217,7 @@ fn parse_theme_file(name: &str, text: &str) -> Result<(Palette, BTreeMap<String,
 
 #[test]
 fn shipped_theme_upgrades_preserve_personal_edits() {
-    let root = std::env::temp_dir().join(format!("herdr-theme-upgrades-{}", std::process::id()));
+    let root = std::env::temp_dir().join(format!("atrous-theme-upgrades-{}", std::process::id()));
     std::fs::create_dir_all(&root).unwrap();
     for (name, previous) in PREVIOUS_THEMES {
         let path = root.join(format!("{name}.json"));
@@ -370,7 +371,7 @@ pub struct Person {
     /// How big the whole app is drawn (1 = as designed). The zoom keys change it.
     pub zoom: f32,
     pub sounds: Sounds,
-    /// The herdr-core to use, when it isn't where Herdr looks (core_bin.rs).
+    /// The atrous-core to use, when it isn't where Atrous looks (core_bin.rs).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub core: Option<String>,
     /// Fonts for layouts that don't set their own.
@@ -383,9 +384,6 @@ pub struct Person {
     /// The panels' font (their sizes follow zoom).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ui_font: Option<String>,
-    /// Anonymous usage data (telemetry.rs). On unless set to false.
-    #[serde(skip_serializing_if = "is_true")]
-    pub telemetry: bool,
     /// Allow terminal programs (including remote ones) to copy text locally.
     #[serde(skip_serializing_if = "is_true")]
     pub clipboard_write: bool,
@@ -452,7 +450,6 @@ impl Default for Person {
             font_size: None,
             font_ligatures: false,
             ui_font: None,
-            telemetry: true,
             clipboard_write: true,
             pane_scrollbars: true,
             minimum_contrast: 1.0,
@@ -483,7 +480,7 @@ pub struct Settings {
     pub theme_dark: String,
     /// Whether the window is dark now (the person's `appearance`, else the system's).
     pub dark: bool,
-    /// Any theme color by name (see `theme()` in herdr.d.ts), `#rrggbb` or `#rrggbbaa`.
+    /// Any theme color by name (see `theme()` in atrous.d.ts), `#rrggbb` or `#rrggbbaa`.
     pub colors: BTreeMap<String, String>,
     /// A draggable scroll position thumb at a terminal pane's right edge.
     pub pane_scrollbars: bool,
@@ -499,7 +496,7 @@ pub struct Settings {
 
 /// Attention sounds: when an agent needs you, and when one finished while you
 /// weren't looking. `done` / `blocked`: an MP3 file instead of the bundled one
-/// (absolute, or relative to ~/.config/herdr-app).
+/// (absolute, or relative to ~/.config/atrous).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Sounds {
@@ -556,7 +553,7 @@ impl Settings {
             None => (DEFAULT_LIGHT.to_owned(), DEFAULT_DARK.to_owned()),
         };
         Settings {
-            // The layout's own, else the person's, else Herdr's.
+            // The layout's own, else the person's, else Atrous's.
             font_family: look.font.clone().or(person.font.clone()).unwrap_or(d.font_family),
             font_size: look.font_size.or(person.font_size).unwrap_or(d.font_size),
             font_ligatures: person.font_ligatures,
@@ -674,18 +671,6 @@ pub fn load_person() -> Result<Person, String> {
     Ok(person)
 }
 
-/// The value of settings.json's own `telemetry`, read even when the file has
-/// another problem: an explicit `false` always counts.
-pub fn telemetry_setting(person: &Result<Person, String>) -> bool {
-    match person {
-        Ok(p) => p.telemetry,
-        Err(_) => {
-            let raw = std::fs::read_to_string(path()).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
-            raw.and_then(|v| v.get("telemetry").and_then(serde_json::Value::as_bool)).unwrap_or(true)
-        }
-    }
-}
-
 pub fn write_person(person: &Person) -> std::io::Result<()> {
     crate::persist::write_atomic(&path(), serde_json::to_string_pretty(person).unwrap_or_default() + "\n")
 }
@@ -774,7 +759,7 @@ pub fn note_fonts(names: Vec<String>) {
 }
 
 /// Font files the home brings: `fonts/` and each mod's `fonts/` (a layout's
-/// look travels with its mod, as Herdr 98's does). Loads the ones not loaded
+/// look travels with its mod, as Atrous 98's does). Loads the ones not loaded
 /// yet; true when any was.
 pub fn load_home_fonts(cx: &mut gpui::App) -> bool {
     static LOADED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
@@ -821,7 +806,7 @@ pub fn terminal_font() -> String {
     }
 }
 
-/// Fonts Herdr ships, so the defaults look the same everywhere.
+/// Fonts Atrous ships, so the defaults look the same everywhere.
 pub const BUNDLED_FONTS: &[&[u8]] = &[
     include_bytes!("../assets/fonts/GeistMono-Variable.ttf"),
     include_bytes!("../assets/fonts/GeistMono-Italic-Variable.ttf"),
@@ -941,7 +926,7 @@ mod tests {
     /// settings.json key.
     #[test]
     fn the_guide_explains_every_setting() {
-        let all = Person { core: Some(String::new()), font: Some(String::new()), font_size: Some(1.0), ui_font: Some(String::new()), telemetry: false, clipboard_write: false, appearance: Appearance::Light, theme: Some(crate::layout::ThemeChoice::One(String::new())), colors: [("text".into(), String::new())].into(), ..Person::default() };
+        let all = Person { core: Some(String::new()), font: Some(String::new()), font_size: Some(1.0), ui_font: Some(String::new()), clipboard_write: false, appearance: Appearance::Light, theme: Some(crate::layout::ThemeChoice::One(String::new())), colors: [("text".into(), String::new())].into(), ..Person::default() };
         let keys: Vec<String> = serde_json::to_value(&all).unwrap().as_object().unwrap().keys().cloned().collect();
         let guide = include_str!("../defaults/AGENTS.md");
         let section = guide.split("## The person").nth(1).and_then(|s| s.split("\n## ").next()).unwrap_or_default();

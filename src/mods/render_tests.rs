@@ -14,7 +14,7 @@ impl Staged {
     fn new() -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let path = PathBuf::from(format!(
-            "/var/tmp/herdr-render-{}-{}",
+            "/var/tmp/atrous-render-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
@@ -83,7 +83,7 @@ fn fixture(populated: bool, props: Value, update: Value) -> BTreeMap<String, Val
         ("settings".into(), serde_json::to_value(crate::settings::Settings::default()).unwrap()),
         ("themes".into(), json!([{"name":"graphite", "colors": &*crate::settings::theme()}])),  ("fonts".into(), json!(["Monospace", "Sans"])),
         ("updates".into(), update),
-        ("telemetry".into(), json!({"enabled":true,"setting":true,"sends":true,"off_because":null,"endpoint":"https://invalid.example", "draft":{},"queued":[],"last_sent":null})),
+        ("telemetry".into(), crate::telemetry::status()),
         ("window".into(), json!({"platform":"linux","titlebar":"none","buttons":true,"maximized":false,"fullscreen":false,"active":true})),
         ("placement".into(), Value::Null),
         ("home".into(), json!("/fixture")), ("appHome".into(), json!("/fixture/app")),
@@ -107,13 +107,13 @@ fn fixture(populated: bool, props: Value, update: Value) -> BTreeMap<String, Val
 }
 
 fn module(values: BTreeMap<String, Value>, calls: Rc<RefCell<Calls>>) -> HostModule {
-    let mut module = HostModule::new("herdr");
+    let mut module = HostModule::new("atrous");
     for (name, value) in values {
         module = module.function(name, move |_| Ok(to_host(&value)));
     }
     module = module.function("feedbackPreview", |a| {
         Ok(to_host(
-            &json!({"available":true,"body":{"message":a.string(0)?,"email":a.string(1)?}}),
+            &json!({"available":true,"body":{"title":a.string(0)?.lines().next().unwrap_or_default(),"body":a.string(0)?,"url":"https://github.com/zecod/atrous/issues/new?title=x"}}),
         ))
     });
     let shared = calls.clone();
@@ -154,7 +154,7 @@ fn module(values: BTreeMap<String, Value>, calls: Rc<RefCell<Calls>>) -> HostMod
     for name in ["nextCommand", "watchFolder"] {
         module = module.async_function(name, |_| Ok(std::future::pending::<gpui_shell::HostResult>()));
     }
-    for name in ["exec", "hc", "readTextFile", "writeTextFile", "sendFeedback"] {
+    for name in ["exec", "core", "hc", "readTextFile", "writeTextFile", "sendFeedback"] {
         let calls = calls.clone();
         module = module.async_function(name, move |a| {
             let first = a.get(0).map(from_host).unwrap_or(Value::Null);
@@ -166,10 +166,10 @@ fn module(values: BTreeMap<String, Value>, calls: Rc<RefCell<Calls>>) -> HostMod
                     .and_then(|p| p.strip_suffix(".json"))
                     .filter(|n| crate::window::shipped_layouts().contains(n))
                     .map(|_| json!("{}")),
-                "hc" if first == json!(["machine", "ls", "--json"]) => {
+                "core" | "hc" if first == json!(["machine", "ls", "--json"]) => {
                     Some(json!({"code":0,"stdout":"{\"machines\":[{\"name\":\"remote\",\"state\":\"online\"}]}","stderr":""}))
                 }
-                "hc" if first.as_array().and_then(|a| a.first()).and_then(Value::as_str) == Some("run") => {
+                "core" | "hc" if first.as_array().and_then(|a| a.first()).and_then(Value::as_str) == Some("run") => {
                     Some(json!({"code":0,"stdout":"{\"address\":\"t-setup\"}","stderr":""}))
                 }
                 // The files panel lists a folder with sh: kind and name pairs.
@@ -598,10 +598,10 @@ fn local_state_and_overlay_initial_descriptions(cx: &mut TestAppContext) {
             Some(&format!("this.page = {page};")),
         )
         .unwrap();
-        let expected = ["Herdr runs your terminals in the background", "Add your other machines", "Choose your panels", "Make it yours"][page - 1];
+        let expected = ["Atrous runs your terminals in the background", "Add your other machines", "Choose your panels", "Make it yours"][page - 1];
         assert!(tree.contains(expected), "welcome page {page}: {tree}");
     }
-    for setup in ["", "this.sent = true;", "this.error = 'Fixture error';"] {
+    for setup in ["", "this.opened = true;", "this.error = 'Fixture error';"] {
         let tree = describe(
             cx,
             &staged,
@@ -615,12 +615,12 @@ fn local_state_and_overlay_initial_descriptions(cx: &mut TestAppContext) {
         assert!(tree.contains("feedback"), "{tree}");
         if setup.is_empty() {
             assert!(
-                tree.contains("Input #") && tree.contains("Textarea #") && tree.contains("A prefilled message"),
+                tree.contains("Textarea #") && tree.contains("A prefilled message") && tree.contains("Open on GitHub"),
                 "{tree}"
             );
         } else {
             assert!(
-                tree.contains(if setup.contains("sent") { "Sent. Thanks" } else { "Fixture error" }),
+                tree.contains(if setup.contains("opened") { "Opened in your browser" } else { "Fixture error" }),
                 "{tree}"
             );
         }

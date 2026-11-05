@@ -2,7 +2,7 @@
 //! that can serve this app runs:
 //! - none found (core_bin.rs): install it for me (the core's own installer),
 //!   or point at one;
-//! - too old (or missing a method the app calls): update it (`hc update`,
+//! - too old (or missing a method the app calls): update it (`atc update`,
 //!   terminals kept);
 //! - a newer generation than this app speaks: update the app.
 //! Then the main window opens.
@@ -15,16 +15,8 @@ use gpui::*;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-const ICON: &[u8] = include_bytes!("../assets/icons/herdr-ui-icon-clean.png");
-#[cfg(not(windows))]
-const APP_INSTALL: &str = "curl -fsSL https://releases.herdr.dev/app/install.sh | sh";
-#[cfg(windows)]
-const APP_INSTALL: &str = "powershell -c \"irm https://releases.herdr.dev/app/install.ps1 | iex\"";
-#[cfg(not(windows))]
-const CORE_INSTALL: &str = "curl -fsSL https://releases.herdr.dev/core/install.sh | sh";
-#[cfg(windows)]
-const CORE_INSTALL: &str = "powershell -c \"irm https://releases.herdr.dev/core/install.ps1 | iex\"";
-const CORE_PLACE: &str = if cfg!(windows) { r"%LOCALAPPDATA%\Programs\herdr-core" } else { "~/.local/bin" };
+const ICON: &[u8] = include_bytes!("../assets/brand/atrous-128.png");
+const CORE_PLACE: &str = if cfg!(windows) { r"%LOCALAPPDATA%\Programs\atrous-core" } else { "~/.local/bin" };
 
 /// What's missing before the main window can open.
 pub enum Need {
@@ -48,13 +40,13 @@ pub struct Setup {
 pub fn open(need: Need, requests: async_channel::Receiver<Request>, cx: &mut App) {
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(620.0), px(460.0)), cx))),
-        titlebar: Some(TitlebarOptions { title: Some("Herdr".into()), ..Default::default() }),
-        app_id: Some("herdr-app".into()),
+        titlebar: Some(TitlebarOptions { title: Some(crate::brand::NAME.into()), ..Default::default() }),
+        app_id: Some(crate::app_id()),
         ..Default::default()
     };
     let icon = Arc::new(Image::from_bytes(ImageFormat::Png, ICON.to_vec()));
     cx.open_window(options, |_, cx| cx.new(|_| Setup { need, state: State::Ready, requests: Some(requests), icon }))
-        .expect("cannot open the Herdr window");
+        .expect("cannot open the Atrous window");
     cx.activate(true);
 }
 
@@ -75,7 +67,7 @@ impl Setup {
                     self.state = State::Ready;
                 }
             },
-            Err(e) => self.state = State::Failed(format!("herdr-core is there but didn't start: {e:#}")),
+            Err(e) => self.state = State::Failed(format!("atrous-core is there but didn't start: {e:#}")),
         }
         cx.notify();
     }
@@ -103,25 +95,25 @@ impl Setup {
     }
 
     fn install(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.run("Installing herdr-core…", || crate::core_bin::install().map(Some), window, cx);
+        self.run("Installing atrous-core…", || crate::core_bin::install().map(Some), window, cx);
     }
 
     fn update(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.run("Updating herdr-core… your terminals keep running.", || crate::core_bin::update().map(|_| None), window, cx);
+        self.run("Updating atrous-core… your terminals keep running.", || crate::core_bin::update().map(|_| None), window, cx);
     }
 
     fn choose(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let paths = cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple: false, prompt: Some("Use this herdr-core".into()) });
+        let paths = cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple: false, prompt: Some("Use this atrous-core".into()) });
         cx.spawn_in(window, async move |this, cx| {
             let Ok(Ok(Some(paths))) = paths.await else { return };
             let Some(bin) = paths.into_iter().next() else { return };
             let _ = this.update_in(cx, |this, window, cx| {
                 if crate::core_bin::version(&bin).is_none() {
-                    this.state = State::Failed(format!("{} isn't herdr-core (it should answer `--version` with `hc …`)", bin.display()));
+                    this.state = State::Failed(format!("{} isn't atrous-core (it should answer `--version` with `atc …`)", bin.display()));
                     cx.notify();
                     return;
                 }
-                // Remembered: next time Herdr looks there first.
+                // Remembered: next time Atrous looks there first.
                 let mut person = settings::load_person().unwrap_or_default();
                 person.core = Some(bin.to_string_lossy().into_owned());
                 let _ = settings::write_person(&person);
@@ -136,24 +128,24 @@ impl Setup {
     fn words(&self) -> (String, String, String) {
         match &self.need {
             Need::Install => (
-                "Herdr needs herdr-core".into(),
-                "herdr-core runs your terminals and agents, and keeps them alive when this window closes. Herdr couldn't find it on this computer.".into(),
-                format!("Install it for me puts it in {CORE_PLACE} (with hc), like its own installer: {CORE_INSTALL}"),
+                "Atrous needs atrous-core".into(),
+                "atrous-core runs your terminals and agents, and keeps them alive when this window closes. Atrous couldn't find it on this computer.".into(),
+                format!("Install it for me puts it in {CORE_PLACE} (with atc), like its own installer: {}", crate::brand::core_install_command()),
             ),
             Need::Fix(Mismatch::TooOld { have, need }) => (
-                "Herdr needs a newer herdr-core".into(),
-                format!("Yours is {have}; this Herdr needs {need} or newer. Updating keeps your terminals running."),
-                "Or update it yourself: hc update".into(),
+                "Atrous needs a newer atrous-core".into(),
+                format!("Yours is {have}; this Atrous needs {need} or newer. Updating keeps your terminals running."),
+                "Or update it yourself: atc update".into(),
             ),
             Need::Fix(Mismatch::Missing(methods)) => (
-                "Herdr needs a newer herdr-core".into(),
-                format!("Your herdr-core can't do everything this Herdr needs ({}). Updating keeps your terminals running.", methods.join(", ")),
-                "Or update it yourself: hc update".into(),
+                "Atrous needs a newer atrous-core".into(),
+                format!("Your atrous-core can't do everything this Atrous needs ({}). Updating keeps your terminals running.", methods.join(", ")),
+                "Or update it yourself: atc update".into(),
             ),
             Need::Fix(Mismatch::Newer { generation }) => (
-                "This Herdr is older than your herdr-core".into(),
-                format!("Your herdr-core speaks a newer protocol (generation {generation}) than this Herdr understands. Update Herdr; your terminals keep running."),
-                format!("Update Herdr: {APP_INSTALL}"),
+                "This Atrous is older than your atrous-core".into(),
+                format!("Your atrous-core speaks a newer protocol (generation {generation}) than this Atrous understands. Update Atrous; your terminals keep running."),
+                format!("Update Atrous: {}", crate::brand::app_install_command()),
             ),
         }
     }
@@ -192,7 +184,7 @@ impl Render for Setup {
             Need::Fix(_) => div()
                 .flex()
                 .gap(px(10.0))
-                .child(button("update", "Update herdr-core", true).when(!busy, |d| d.on_click(cx.listener(|this, _, w, cx| this.update(w, cx))))),
+                .child(button("update", "Update atrous-core", true).when(!busy, |d| d.on_click(cx.listener(|this, _, w, cx| this.update(w, cx))))),
         };
         div()
             .size_full()

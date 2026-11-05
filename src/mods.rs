@@ -1,5 +1,6 @@
-//! Mods: folders of JavaScript under ~/.config/herdr-app/mods that agents write and
-//! Herdr runs live (gpui-shell), plus the `herdr` module they import.
+//! Mods: folders of JavaScript under ~/.config/atrous/mods that agents write and
+//! Atrous runs live (gpui-shell), plus the `atrous` module they import (also
+//! importable as `herdr`, so mods written for herdr-app load unchanged).
 
 use crate::layout::Node;
 use gpui::App;
@@ -46,11 +47,11 @@ pub fn note_fonts(cx: &gpui::App) {
     *FONTS.lock().unwrap() = names;
 }
 
-/// The app's home: `$HERDR_APP_HOME` (tests, experiments), else
-/// `$XDG_CONFIG_HOME/herdr-app`, else `~/.config/herdr-app`, on every OS.
+/// The app's home: `$ATROUS_HOME` (tests, experiments), else
+/// `$XDG_CONFIG_HOME/atrous`, else `~/.config/atrous`, on every OS.
 pub fn app_dir() -> PathBuf {
     let env = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
-    env("HERDR_APP_HOME").unwrap_or_else(|| env("XDG_CONFIG_HOME").unwrap_or_else(|| home().join(".config")).join("herdr-app"))
+    env("ATROUS_HOME").unwrap_or_else(|| env("XDG_CONFIG_HOME").unwrap_or_else(|| home().join(".config")).join("atrous"))
 }
 
 pub fn mods_dir() -> PathBuf {
@@ -69,7 +70,8 @@ pub fn write_workspace() -> std::io::Result<()> {
     if std::fs::read_to_string(dir.join("CLAUDE.md")).is_ok_and(|s| s == "@AGENTS.md\n") {
         let _ = std::fs::remove_file(dir.join("CLAUDE.md"));
     }
-    write_if_changed(&dir.join("herdr.d.ts"), DECLARATIONS)?;
+    write_if_changed(&dir.join("atrous.d.ts"), DECLARATIONS)?;
+    write_if_changed(&dir.join("herdr.d.ts"), ALIAS_DECLARATIONS)?;
     let types = gpui_shell::type_declarations(&gpui_shell::FrozenComponentRegistry::default());
     write_if_changed(&dir.join("gpui-kit.d.ts"), &types)?;
     let _ = std::fs::remove_dir_all(frame_dir());
@@ -79,6 +81,13 @@ pub fn write_workspace() -> std::io::Result<()> {
         std::fs::write(&file, bytes)?;
     }
     sync_defaults(&mods_dir(), &dir.join("installed.json"), DEFAULT_MODS)
+}
+
+/// The mods Atrous ships (defaults/mods).
+pub fn shipped_mod_names() -> Vec<&'static str> {
+    let mut names: Vec<&str> = DEFAULT_MODS.iter().filter_map(|(p, _)| p.split('/').next()).collect();
+    names.dedup();
+    names
 }
 
 static SYNC_NOTES: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
@@ -267,26 +276,6 @@ fn clone_mod_at(mods: &Path, name: &str, to: &str) -> std::io::Result<()> {
     result
 }
 
-/// Mods in use by kind, for telemetry: the shipped ones as shipped (by
-/// name), how many shipped ones were edited, how many are the person's own
-/// (never their names).
-pub fn kinds(names: &std::collections::BTreeSet<String>) -> (Vec<String>, usize, usize) {
-    let text = std::fs::read_to_string(app_dir().join("installed.json")).unwrap_or_default();
-    let installed: Installed = serde_json::from_str(&text).unwrap_or_default();
-    let shipped = |n: &str| DEFAULT_MODS.iter().any(|(p, _)| p.split('/').next() == Some(n));
-    let (mut builtin, mut edited, mut custom) = (Vec::new(), 0, 0);
-    for name in names {
-        if !shipped(name) {
-            custom += 1;
-        } else if installed.get(name).is_some_and(|files| as_shipped(&mods_dir().join(name), files)) {
-            builtin.push(name.clone());
-        } else {
-            edited += 1;
-        }
-    }
-    (builtin, edited, custom)
-}
-
 /// Exactly as installed: every file unchanged and none added.
 fn as_shipped(dir: &Path, files: &Files) -> bool {
     fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) {
@@ -311,7 +300,7 @@ fn as_shipped(dir: &Path, files: &Files) -> bool {
 
 /// File path (inside the mod) to content fingerprint.
 type Files = std::collections::BTreeMap<String, String>;
-/// Default mods Herdr installed, with the files as installed.
+/// Default mods Atrous installed, with the files as installed.
 type Installed = std::collections::BTreeMap<String, Files>;
 
 /// FNV-1a: stable across builds, unlike std's hasher.
@@ -320,7 +309,7 @@ fn fingerprint(bytes: &[u8]) -> String {
     format!("{h:016x}")
 }
 
-/// Whether every file Herdr installed is still there as installed.
+/// Whether every file Atrous installed is still there as installed.
 fn untouched(dir: &Path, files: &Files) -> bool {
     files.iter().all(|(path, want)| std::fs::read(dir.join(path)).is_ok_and(|b| fingerprint(&b) == *want))
 }
@@ -391,7 +380,7 @@ pub enum Request {
     OpenOverlay { id: String, spec: Value },
     CloseOverlay { id: String },
     Refresh,
-    /// From `herdr-app do` / `herdr-app status` (control.rs); answer on `reply`.
+    /// From `atrous do` / `atrous status` (control.rs); answer on `reply`.
     Control { cmd: Value, reply: std::sync::mpsc::Sender<Value> },
 }
 
@@ -741,7 +730,18 @@ pub fn from_host(v: &HostValue) -> Value {
     }
 }
 
-pub const DECLARATIONS: &str = include_str!("../defaults/herdr.d.ts");
+pub const DECLARATIONS: &str = include_str!("../defaults/atrous.d.ts");
+
+/// The module mods import, and the alias herdr-app's mods use.
+pub const MODULE: &str = "atrous";
+pub const ALIAS: &str = "herdr";
+/// The alias's types file: the same module, under its old name.
+const ALIAS_DECLARATIONS: &str = "// `herdr` is an alias of the `atrous` module, so mods written for herdr-app load\n// unchanged. New mods import from \"atrous\": see atrous.d.ts. Generated by Atrous; do not edit.\nexport * from \"./atrous\";\n";
+
+/// The same module under the alias name.
+pub fn alias(module: &HostModule) -> HostModule {
+    module.clone().renamed(ALIAS)
+}
 
 fn strings(v: Option<&HostValue>) -> Vec<String> {
     v.and_then(HostValue::as_array).map(|a| a.iter().filter_map(|s| s.as_str().map(str::to_owned)).collect()).unwrap_or_default()
@@ -802,10 +802,10 @@ pub fn run_remote(machine: &str, command: &str, args: &[String], cwd: Option<Str
     hc_args.push("--".into());
     hc_args.push(command.into());
     hc_args.extend(args.iter().cloned());
-    let (_, out, err) = run_blocking("hc", &hc_args, None)?;
-    let v: Value = serde_json::from_str(out.trim()).or_else(|_| serde_json::from_str(err.trim())).map_err(|_| format!("hc exec: {}", err.trim()))?;
+    let (_, out, err) = run_blocking(&core_cli(), &hc_args, None)?;
+    let v: Value = serde_json::from_str(out.trim()).or_else(|_| serde_json::from_str(err.trim())).map_err(|_| format!("atc exec: {}", err.trim()))?;
     if let Some(e) = v.get("error") {
-        return Err(e.get("message").and_then(Value::as_str).unwrap_or("hc exec failed").to_owned());
+        return Err(e.get("message").and_then(Value::as_str).unwrap_or("atc exec failed").to_owned());
     }
     if v.get("timed_out").and_then(Value::as_bool) == Some(true) {
         return Err(format!("{command} took longer than {} s on {machine} and was stopped", EXEC_LIMIT.as_secs()));
@@ -874,6 +874,11 @@ fn exec_future(command: String, args: Vec<String>, cwd: Option<String>, on: Opti
     }
 }
 
+/// The core the app found (`atc` by name until then): what mods' `core()` runs.
+fn core_cli() -> String {
+    crate::core_bin::path().to_string_lossy().into_owned()
+}
+
 fn module(inst: Instance, copy: u64) -> HostModule {
     let reads = Rc::new(RefCell::new(LiveReads::default()));
     LIVE_READS.with_borrow_mut(|copies| {
@@ -886,7 +891,7 @@ fn module(inst: Instance, copy: u64) -> HostModule {
     let feedback_layout = inst.props.get("layout").and_then(Value::as_str).unwrap_or("other").to_owned();
     let (cmd_tx, commands) = async_channel::unbounded::<String>();
     COMMANDS.with(|c| c.borrow_mut().push((copy, inst.name.clone(), cmd_tx)));
-    HostModule::new("herdr")
+    HostModule::new(MODULE)
         .declarations(DECLARATIONS)
         .async_function("exec", |a| {
             let command = a.string(0)?.to_owned();
@@ -904,7 +909,9 @@ fn module(inst: Instance, copy: u64) -> HostModule {
             let expected = a.get(2).and_then(|v| match v { HostValue::Str(s) => Some(s.clone()), _ => None });
             Ok(crate::mod_files::write_text(a.string(0)?.to_owned(), a.string(1)?.to_owned(), expected))
         })
-        .async_function("hc", |a| Ok(exec_future("hc".into(), strings(a.get(0)), None, None)))
+        .async_function("core", |a| Ok(exec_future(core_cli(), strings(a.get(0)), None, None)))
+        // herdr-app's name for core(), kept for its mods.
+        .async_function("hc", |a| Ok(exec_future(core_cli(), strings(a.get(0)), None, None)))
         .function("home", |_| Ok(home().to_string_lossy().into_owned().into()))
         .function("appHome", |_| Ok(app_dir().to_string_lossy().into_owned().into()))
         .function("fonts", |_| Ok(to_host(&json!(*FONTS.lock().unwrap()))))
@@ -1081,7 +1088,7 @@ fn module(inst: Instance, copy: u64) -> HostModule {
         })
         .async_function("nextCommand", move |_| {
             let rx = commands.clone();
-            Ok(async move { rx.recv().await.map(HostValue::Str).map_err(|_| HostError::new("herdr-app is shutting down")) })
+            Ok(async move { rx.recv().await.map(HostValue::Str).map_err(|_| HostError::new("atrous is shutting down")) })
         })
 }
 
@@ -1127,19 +1134,22 @@ fn capabilities() -> Capabilities {
         .clipboard_write(true)
 }
 
-/// What mods may touch, and the `herdr` module they import. Also used by `herdr-app check`.
+/// What mods may touch, and the `atrous` module they import (and its `herdr`
+/// alias). Also used by `atrous check`.
 pub fn install_policy() -> async_channel::Receiver<Request> {
     gpui_shell::policy::update_default(|p| {
+        let m = module(Instance { name: String::new(), props: Value::Null }, 0);
         p.with_capabilities(capabilities())
-            .with_host_module(module(Instance { name: String::new(), props: Value::Null }, 0))
-            .expect("herdr module is valid")
+            .with_host_module(alias(&m))
+            .and_then(|p| p.with_host_module(m))
+            .expect("atrous module is valid")
     });
     let (tx, rx) = async_channel::unbounded();
     let _ = REQUESTS.set(tx);
     rx
 }
 
-/// Gives the next mod copy to load a policy of its own: its `herdr` module
+/// Gives the next mod copy to load a policy of its own: its `atrous` module
 /// (its props, its identity) and its localStorage file. The shell hands every
 /// view a copy of the default that *shares* modules and storage, so each copy
 /// needs a fresh default rather than an edit of the old one.
@@ -1159,12 +1169,14 @@ pub fn prepare_load(inst: &Instance) -> u64 {
         inst.props.to_string().hash(&mut h);
         format!("store-{:016x}.json", h.finish())
     };
+    let m = module(inst.clone(), copy);
     let policy = gpui_shell::policy::Policy::new()
         .with_application(inst.key())
         .with_capabilities(capabilities())
         .with_storage_path(dir.join(file))
-        .with_host_module(module(inst.clone(), copy))
-        .expect("herdr module is valid");
+        .with_host_module(alias(&m))
+        .and_then(|p| p.with_host_module(m))
+        .expect("atrous module is valid");
     gpui_shell::policy::set_default(policy);
     copy
 }
@@ -1250,9 +1262,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn known_agents_uses_snapshot_and_refreshes_changed_commands() {
-        let snapshot = vec![json!({"key": "claude", "run": ["herdr_issue57_not_installed"]})];
+        let snapshot = vec![json!({"key": "claude", "run": ["atrous_issue57_not_installed"]})];
         let first = std::thread::spawn(move || known_agents(None, snapshot)).join().unwrap();
-        assert_eq!(first[0]["run"], json!(["herdr_issue57_not_installed"]));
+        assert_eq!(first[0]["run"], json!(["atrous_issue57_not_installed"]));
         assert_eq!(first[0]["installed"], false);
         let snapshot = vec![json!({"key": "claude", "run": ["printf"]}), json!({"key": "claude-alt", "run": ["printf"]})];
         let next = std::thread::spawn(move || known_agents(None, snapshot)).join().unwrap();
@@ -1265,7 +1277,7 @@ mod tests {
     #[test]
     fn shared_bursts_persist_only_complete_snapshots_and_finish_at_final_state() {
         let root = if cfg!(target_os = "linux") { PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
-        let dir = root.join(format!("herdr-shared-stress-{}", std::process::id()));
+        let dir = root.join(format!("atrous-shared-stress-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("shared.json");
         let reading = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
@@ -1303,7 +1315,7 @@ mod tests {
     #[test]
     fn corrupt_shared_file_is_kept_before_starting_empty() {
         let root = if cfg!(target_os = "linux") { PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
-        let dir = root.join(format!("herdr-shared-corrupt-{}", std::process::id()));
+        let dir = root.join(format!("atrous-shared-corrupt-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("shared.json");
         let corrupt = b"{\"kept\":true} old snapshot tail";
@@ -1335,7 +1347,7 @@ mod tests {
 
     #[test]
     fn an_added_file_makes_a_shipped_mod_edited() {
-        let dir = std::env::temp_dir().join(format!("herdr-app-shipped-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("atrous-shipped-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("icons")).unwrap();
         std::fs::write(dir.join("main.js"), "a").unwrap();
@@ -1356,7 +1368,7 @@ mod tests {
 
     #[test]
     fn cloned_mods_rewrite_assets_and_self_overlays_and_reject_nonobject_metadata() {
-        let root = std::env::temp_dir().join(format!("herdr-mod-clone-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("atrous-mod-clone-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("original")).unwrap();
         std::fs::write(root.join("original/mod.json"), "{}").unwrap();
@@ -1379,7 +1391,7 @@ mod tests {
     fn layout_formatting_is_not_an_edit_and_rescued_clicks_still_apply() {
         use crate::layout::{Node, Size};
         use crate::layout_sync::State;
-        let root = std::env::temp_dir().join(format!("herdr-layout-click-rescue-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("atrous-layout-click-rescue-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let dir = root.join("layouts");
         std::fs::create_dir_all(dir.join(".state")).unwrap();
@@ -1409,7 +1421,7 @@ mod tests {
 
     #[test]
     fn a_0_1_x_layout_is_kept_aside_quietly_not_rescued() {
-        let root = std::env::temp_dir().join(format!("herdr-layout-0-1-x-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("atrous-layout-0-1-x-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let dir = root.join("layouts");
         std::fs::create_dir_all(&dir).unwrap();
@@ -1427,7 +1439,7 @@ mod tests {
 
     #[test]
     fn layouts_restore_preserve_edits_clicks_and_drop_only_untouched() {
-        let root = std::env::temp_dir().join(format!("herdr-layout-sync-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("atrous-layout-sync-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let dir = root.join("layouts");
         sync_layouts(&root, &[("a", "a1"), ("b", "b1"), ("c", "c1")]).unwrap();
@@ -1453,7 +1465,7 @@ mod tests {
 
     #[test]
     fn default_mods_restore_shipped_and_move_edits_to_clones() {
-        let root = std::env::temp_dir().join(format!("herdr-app-sync-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("atrous-sync-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let (mods, record) = (root.join("mods"), root.join("installed.json"));
         let read = |p: &str| std::fs::read_to_string(mods.join(p)).unwrap_or_default();

@@ -132,7 +132,7 @@ fn launch_failure(record: &Value, output: &str) -> Option<String> {
     Some(if tail.is_empty() { format!("Exit code {code}") } else { format!("Exit code {code}\n{tail}") })
 }
 
-/// The shipped layouts (defaults/layouts): `main` is Herdr's window (spaces
+/// The shipped layouts (defaults/layouts): `main` is Atrous's window (spaces
 /// sidebar, tab bar).
 const LAYOUTS: &[(&str, &str)] = &[
     ("main", include_str!("../defaults/layouts/main.json")),
@@ -151,7 +151,7 @@ fn shipped_layout(name: &str) -> &'static str {
     LAYOUTS.iter().find(|(n, _)| *n == name).unwrap_or(&LAYOUTS[0]).1
 }
 
-/// A layout as shipped (main for names Herdr doesn't ship).
+/// A layout as shipped (main for names Atrous doesn't ship).
 fn default_layout(name: &str) -> Node {
     serde_json::from_str(shipped_layout(name)).expect("defaults/layouts are valid")
 }
@@ -398,7 +398,7 @@ pub struct AppWindow {
     reply: Option<Value>,
     /// The `where` label last written per terminal address.
     written_where: HashMap<String, String>,
-    /// `herdr.seen` turns written but not yet back from the core.
+    /// `atrous.seen` turns written but not yet back from the core.
     written_seen: HashMap<String, u64>,
     /// Agents the person is looking at, and the turn they were shared as seen at.
     looked: HashMap<String, u64>,
@@ -410,7 +410,7 @@ pub struct AppWindow {
     cwds: HashMap<String, String>,
     /// When each terminal's repo and branch were last read, and what it was doing.
     folders_checked: HashMap<String, FolderCheck>,
-    /// When Herdr started each terminal: a listing already in flight can't know them yet.
+    /// When Atrous started each terminal: a listing already in flight can't know them yet.
     born: RefCell<HashMap<String, Instant>>,
     /// Connection epoch: ignore replies from an old connection.
     core_generation: u64,
@@ -566,13 +566,13 @@ impl AppWindow {
         install_layouts();
         let name = mods::shared("layout").and_then(|v| v.as_str().map(str::to_owned)).filter(|n| layout_path(n).exists());
         // A layout whose mods are gone (Zen, T4, ADE after the update took
-        // theirs) starts on Herdr's instead of a wall of "did not load".
+        // theirs) starts on Atrous's instead of a wall of "did not load".
         let gone = name.as_deref().map(missing_mods).unwrap_or_default();
         w.load_layout(if gone.is_empty() { name.as_deref().unwrap_or("main") } else { "main" });
         w.apply_look(window, cx);
         w.show_layout_notes(window, cx);
         if let (Some(n), false) = (&name, gone.is_empty()) {
-            let note = json!({ "title": format!("{n} needs mods that aren't here"), "body": format!("Showing Herdr instead. Missing: {}. Your {n} layout file is still there.", gone.join(", ")), "level": "info", "timeout": 12000 });
+            let note = json!({ "title": format!("{n} needs mods that aren't here"), "body": format!("Showing Atrous instead. Missing: {}. Your {n} layout file is still there.", gone.join(", ")), "level": "info", "timeout": 12000 });
             w.open_overlay(mods::new_overlay_id(), json!({ "kind": "toast", "notification": note }), window, cx);
         }
 
@@ -789,7 +789,7 @@ impl AppWindow {
         std::thread::spawn(move || {
             if let Ok(s) = core.call("server.status", json!({})) {
                 let text = |k: &str| s.get(k).and_then(Value::as_str).map(str::to_owned);
-                crate::update::set_core(text("version").map(|v| v.trim_start_matches("hc ").to_owned()), text("installed_by"));
+                crate::update::set_core(text("version").map(|v| v.trim_start_matches("atc ").to_owned()), text("installed_by"));
             }
         });
     }
@@ -860,7 +860,6 @@ impl AppWindow {
         let s_time = mtime(&settings::path());
         if s_time.is_none() || s_time != self.watched.settings {
             let loaded = settings::load_person();
-            crate::telemetry::set_setting(settings::telemetry_setting(&loaded));
             match loaded {
                 Ok(p) => {
                     self.person = p;
@@ -1094,8 +1093,12 @@ impl AppWindow {
 
     /// What installing layouts kept of the person's own, as toasts.
     fn show_layout_notes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // A first start that brought the person's files over from herdr-app says so, once.
+        if let Some(n) = crate::migrate::take_note() {
+            self.open_overlay(mods::new_overlay_id(), json!({ "kind": "toast", "notification": n }), window, cx);
+        }
         for clone in mods::take_sync_notes() {
-            let n = json!({ "title": format!("Your edits are in {clone}"), "body": "Herdr's own layouts and mods can't be changed: clone one to make it yours.", "level": "info", "timeout": 12000 });
+            let n = json!({ "title": format!("Your edits are in {clone}"), "body": "Atrous's own layouts and mods can't be changed: clone one to make it yours.", "level": "info", "timeout": 12000 });
             self.open_overlay(mods::new_overlay_id(), json!({ "kind": "toast", "notification": n }), window, cx);
         }
     }
@@ -1505,7 +1508,7 @@ impl AppWindow {
         cx.notify();
     }
 
-    /// Shares what the person looks at as `herdr.seen` (docs/labels.md): an
+    /// Shares what the person looks at as `atrous.seen` (docs/labels.md): an
     /// agent on screen in the active window, once per turn while it stays
     /// there, so a phone marking it unread isn't undone by a screen nobody
     /// watches. Only ever raises it. True when a status changed.
@@ -1528,7 +1531,7 @@ impl AppWindow {
             self.written_seen.insert(addr.clone(), turn);
             let core = self.core.clone();
             cx.spawn(async move |this, cx| {
-                let params = json!({ "terminal": addr, "labels": { "herdr.seen": turn.to_string() } });
+                let params = json!({ "terminal": addr, "labels": { "atrous.seen": turn.to_string() } });
                 let Err(e) = cx.background_executor().spawn(async move { core.call("terminal.label", params) }).await else { return };
                 tracing::warn!("seen label for {addr}: {e:#}");
                 let _ = this.update(cx, |this, _| {
@@ -1637,7 +1640,7 @@ impl AppWindow {
     fn load(&self, inst: Instance, window: &mut Window, cx: &mut Context<Self>) -> Copy {
         let mut copy = Copy { inst, id: 0, root: None, _watch: None, error: None };
         let (Some(runtime), Some(folder)) = (&self.runtime, self.folders.get(&copy.inst.name)) else {
-            copy.error = Some(format!("no mod folder ~/.config/herdr-app/mods/{}", copy.inst.name));
+            copy.error = Some(format!("no mod folder ~/.config/atrous/mods/{}", copy.inst.name));
             return copy;
         };
         copy.id = mods::prepare_load(&copy.inst);
@@ -1728,7 +1731,7 @@ impl AppWindow {
                         "tab": ctx.id, "tab_index": ci + 1, "tab_name": Model::tab_name(pr, ctx),
                         "status": status, "app": a.and_then(|a| a.app.clone()), "program": self.program(addr), "title": title.unwrap_or_default(),
                         "seq": a.map(|a| a.seq).unwrap_or(0),
-                        "pinned": self.live.get(addr).and_then(|r| r.pointer("/labels/herdr.pinned")).and_then(Value::as_str).is_some_and(|v| !v.is_empty()),
+                        "pinned": self.live.get(addr).and_then(|r| r.pointer("/labels/atrous.pinned")).and_then(Value::as_str).is_some_and(|v| !v.is_empty()),
                         "focused": m.active.as_deref() == Some(pr.id.as_str()) && focused_pane.as_deref() == Some(p.id.as_str()),
                     }));
                 }
@@ -1763,9 +1766,9 @@ impl AppWindow {
     }
 
     /// Tells the core where each terminal lives, in words: the `where` label,
-    /// `<space> / <tab>`, which hc shows in its picker and `ls`.
-    /// Sub-agents get their parent's. The ids (`herdr.space`,
-    /// `herdr.tab`) are what the app groups by; only this follows renames
+    /// `<space> / <tab>`, which atc shows in its picker and `ls`.
+    /// Sub-agents get their parent's. The ids (`atrous.space`,
+    /// `atrous.tab`) are what the app groups by; only this follows renames
     /// and moves. Written only when it changes.
     fn write_where(&mut self, cx: &mut Context<Self>) {
         let m = &self.model;
@@ -1957,8 +1960,8 @@ impl AppWindow {
                 let Some(name) = machine["name"].as_str() else { continue };
                 let state = machine["state"].as_str().unwrap_or("unavailable");
                 let reason = (state != "connected").then(|| machine["why"].as_str().map(str::to_owned).unwrap_or_else(|| match state {
-                    "needs_update" => format!("{name} needs a core update; run hc machine update {name}"),
-                    "needs_login" => format!("{name} needs login; run hc machine login {name}"),
+                    "needs_update" => format!("{name} needs a core update; run atc machine update {name}"),
+                    "needs_login" => format!("{name} needs login; run atc machine login {name}"),
                     _ => format!("{name} is {state}"),
                 }));
                 self.documents.entry(name.to_owned()).or_default().connection(state == "connected", machine["since_ms"].as_u64(), reason);
@@ -1987,7 +1990,7 @@ impl AppWindow {
     /// What a terminal view takes from the core's facts: its folder, where right-clicks go.
     fn tell_term(&self, view: &Entity<TerminalView>, addr: &str, cx: &mut Context<Self>) {
         let cwd = self.cwds.get(addr).map(std::path::PathBuf::from);
-        let to_program = self.live.get(addr).and_then(|r| r.pointer("/labels/herdr.right-click")).and_then(Value::as_str) == Some("program");
+        let to_program = self.live.get(addr).and_then(|r| r.pointer("/labels/atrous.right-click")).and_then(Value::as_str) == Some("program");
         view.update(cx, |v, _| {
             v.cwd = cwd;
             v.right_click_to_program = to_program;
@@ -2043,12 +2046,12 @@ impl AppWindow {
             }
             changed |= self.model.set_word(addr, word, app, looking);
             let turn = rec.get("turn").and_then(Value::as_u64).unwrap_or(0);
-            let label = rec.pointer("/labels/herdr.seen").and_then(Value::as_str).and_then(|s| s.parse::<u64>().ok());
+            let label = rec.pointer("/labels/atrous.seen").and_then(Value::as_str).and_then(|s| s.parse::<u64>().ok());
             changed |= self.model.set_turn(addr, turn, label.max(self.written_seen.get(addr).copied()));
         }
         self.written_seen.retain(|a, _| self.live.contains_key(a));
         changed |= self.share_seen(cx);
-        // Changes already made before Herdr started aren't news.
+        // Changes already made before Atrous started aren't news.
         if self.listed_once {
             for (addr, alert, looking) in alerts {
                 self.alert(&addr, alert, looking, window, cx);
@@ -2069,7 +2072,7 @@ impl AppWindow {
         }
     }
 
-    /// Tells the person an agent needs them or finished: Herdr's sounds, and a
+    /// Tells the person an agent needs them or finished: Atrous's sounds, and a
     /// toast (drawn by the `toast` mod; click it to go there) unless they're
     /// looking at that agent.
     fn alert(&mut self, addr: &str, alert: model::Alert, looking: bool, window: &mut Window, cx: &mut Context<Self>) {
@@ -2111,7 +2114,7 @@ impl AppWindow {
 
     /// Keeps the model true to core, on every listing: drops panes whose terminal
     /// is gone (ended while hidden, or while the app was closed) and places
-    /// terminals labeled `herdr.space` that aren't shown (started by an
+    /// terminals labeled `atrous.space` that aren't shown (started by an
     /// agent, a script, or before a restart). Returns whether anything changed.
     fn reconcile(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         // No fresh shells while quitting: the next start brings them back.
@@ -2130,8 +2133,8 @@ impl AppWindow {
                 let machine = a.split_once('/').map(|(m, _)| m);
                 if !self.documents.get(machine.unwrap_or("")).is_some_and(|s| s.available) { return None; }
                 let labels = r.get("labels")?;
-                let space = labels.get("herdr.space")?.as_str().filter(|s| !s.is_empty())?;
-                let tab = labels.get("herdr.tab").and_then(Value::as_str).filter(|s| !s.is_empty());
+                let space = labels.get("atrous.space")?.as_str().filter(|s| !s.is_empty())?;
+                let tab = labels.get("atrous.tab").and_then(Value::as_str).filter(|s| !s.is_empty());
                 Some((a.clone(), crate::mirror::qualify(space, machine), tab.map(|t| crate::mirror::qualify(t, machine))))
             }).collect::<Vec<_>>();
         orphans.sort();
@@ -2172,12 +2175,12 @@ impl AppWindow {
 
     /// Puts a live terminal where its labels say, without changing what's
     /// shown. A space or tab the app doesn't know is made under the label's
-    /// id, unnamed (called Herdr's way).
+    /// id, unnamed (called Atrous's way).
     fn adopt(&mut self, addr: &str, space: &str, ctx: Option<&str>) {
         let machine = addr.split_once('/').map(|(m, _)| m.to_owned());
         let pane = self.model.fresh_id_on("p", machine.as_deref());
         let ctx_id = ctx.map(str::to_owned).unwrap_or_else(|| self.model.fresh_id_on("tb", machine.as_deref()));
-        // Found by its labels: no names, so they're called Herdr's way.
+        // Found by its labels: no names, so they're called Atrous's way.
         let new_ctx = Tab::new(&ctx_id, "", &pane, addr);
         if self.model.space(space).is_none() {
             // Its live folder may not be read yet: the core's record has it.
@@ -2294,7 +2297,7 @@ impl AppWindow {
             self.chrome.remove(block);
             self.sync(window, cx);
         }
-        // How its stream ended, for `reconcile` (`hc run --rm` leaves no record).
+        // How its stream ended, for `reconcile` (`atc run --rm` leaves no record).
         if let Some(t) = self.terms.get(block)
             && let Some(why) = t.view.read(cx).ended.clone()
         {
@@ -2333,7 +2336,7 @@ impl AppWindow {
     // ---- creating terminals ------------------------------------------------
 
     /// The folder new terminals in `space` start in: where its shown tab's focused
-    /// pane is now (Herdr's "follow"), else the folder the space was made in.
+    /// pane is now (Atrous's "follow"), else the folder the space was made in.
     fn folder_for(&self, space: &str) -> String {
         let p = self.model.space(space);
         let here = p.and_then(|p| p.active_tab()).and_then(|c| c.focused_pane()).and_then(|f| self.model.address_of(&f)).and_then(|a| self.cwds.get(&a).cloned());
@@ -2346,7 +2349,7 @@ impl AppWindow {
             Some(slot) if slot.available => Ok(()),
             Some(slot) => Err(slot.error.clone().unwrap_or_else(|| "This machine's layout is unavailable. Try again when it reconnects.".into())),
             None => Err(match machine {
-                Some(m) => format!("Herdr has no machine called {m}. See hc machine ls; machines added with --temp stay out of Herdr."),
+                Some(m) => format!("Atrous has no machine called {m}. See atc machine ls; machines added with --temp stay out of Atrous."),
                 None => "This machine's layout is unavailable. Try again when it reconnects.".into(),
             }),
         }
@@ -2363,7 +2366,7 @@ impl AppWindow {
         let argv = argv.unwrap_or_default();
         let cwd = Some(cwd).filter(|c| !c.is_empty());
         self.require_document(on)?;
-        let labels = json!({ "herdr.space": crate::mirror::local(space, on), "herdr.tab": crate::mirror::local(ctx, on), "herdr.seen": "0" });
+        let labels = json!({ "atrous.space": crate::mirror::local(space, on), "atrous.tab": crate::mirror::local(ctx, on), "atrous.seen": "0" });
         let addr = match self.core.run(argv.clone(), cwd.clone(), labels.clone(), on, size, crate::terminal::initial_display(window)) {
             // An agent on a machine without `sh` (Windows): in its PowerShell instead.
             Err(e) if on.is_some() && argv.first().map(String::as_str) == Some("sh") && format!("{e:#}").contains("not found") => {
@@ -2403,7 +2406,7 @@ impl AppWindow {
     }
 
     /// A space with its first tab and terminal, shown at once.
-    /// `machine`: another machine (`hc machine ls`); its space starts in that machine's home.
+    /// `machine`: another machine (`atc machine ls`); its space starts in that machine's home.
     fn new_space(&mut self, name: &str, folder: Option<String>, ctx_name: Option<&str>, argv: Option<Vec<String>>, task: Option<&str>, machine: Option<String>, window: &Window) -> Result<Value, String> {
         let on = machine.as_deref();
         // The focused pane's folder only means something on its own machine.
@@ -2565,9 +2568,9 @@ impl AppWindow {
         let machine = address.split_once('/').map(|(m, _)| m);
         let (keep, labels) = match &change {
             TerminalChange::Keep { space, tab, .. } => (true, json!({
-                "herdr.space":crate::mirror::local(space, machine), "herdr.tab":crate::mirror::local(tab, machine),
+                "atrous.space":crate::mirror::local(space, machine), "atrous.tab":crate::mirror::local(tab, machine),
             })),
-            TerminalChange::Park => (false, json!({"herdr.space":"","herdr.tab":""})),
+            TerminalChange::Park => (false, json!({"atrous.space":"","atrous.tab":""})),
         };
         let (tx, rx) = std::sync::mpsc::channel();
         self.changing_terminals.insert(address.clone());
@@ -2641,7 +2644,7 @@ impl AppWindow {
             let parent = doomed[i].clone();
             for (addr, rec) in &self.live {
                 let child = rec.get("parent").and_then(Value::as_str) == Some(parent.as_str());
-                let kept = rec.get("labels").and_then(|l| l.get("herdr.space")).and_then(Value::as_str).is_some_and(|w| !w.is_empty());
+                let kept = rec.get("labels").and_then(|l| l.get("atrous.space")).and_then(Value::as_str).is_some_and(|w| !w.is_empty());
                 if child && !kept && !doomed.contains(addr) {
                     doomed.push(addr.clone());
                 }
@@ -2749,7 +2752,7 @@ impl AppWindow {
                 return json!({ "ok": true });
             }
             tracing::warn!("unknown command {name:?}");
-            return json!({ "error": format!("unknown command {name:?}: see `herdr-app commands`; a mod's are <mod>.<command> and need the mod loaded") });
+            return json!({ "error": format!("unknown command {name:?}: see `atrous commands`; a mod's are <mod>.<command> and need the mod loaded") });
         };
         if let Err(error) = crate::commands::validate_args(command, &args) {
             return json!({ "error": error });
@@ -3042,7 +3045,7 @@ impl AppWindow {
                 let Some(t) = t.filter(|t| self.live.contains_key(t)) else { return self.fail("no such running terminal") };
                 // Off the UI thread: a terminal on a slow machine answers late.
                 let core = self.core.clone();
-                let params = json!({ "terminal": t, "labels": { "herdr.right-click": to } });
+                let params = json!({ "terminal": t, "labels": { "atrous.right-click": to } });
                 cx.background_executor()
                     .spawn(async move {
                         if let Err(e) = core.call("terminal.label", params) {
@@ -3058,7 +3061,7 @@ impl AppWindow {
                     return self.fail(format!("no running terminal {t:?}"));
                 }
                 let core = self.core.clone();
-                let params = json!({ "terminal": t, "labels": { "herdr.pinned": if pinned { "1" } else { "" } } });
+                let params = json!({ "terminal": t, "labels": { "atrous.pinned": if pinned { "1" } else { "" } } });
                 cx.background_executor()
                     .spawn(async move {
                         if let Err(e) = core.call("terminal.label", params) {
@@ -3176,7 +3179,7 @@ impl AppWindow {
                     Err(e) => return self.fail(format!("layout: {e}")),
                 };
                 if layout_sync::without_clicks(&self.chrome, &n) != self.chrome {
-                    return self.fail("Only supported click/look fields can change on Herdr's own layouts: clone one for other changes");
+                    return self.fail("Only supported click/look fields can change on Atrous's own layouts: clone one for other changes");
                 }
                 let mut state = layout_sync::State::between(&self.file_chrome, &n);
                 if n.look.theme == self.chrome.look.theme {
@@ -3226,7 +3229,7 @@ impl AppWindow {
             "layout.reset" => {
                 let name = Self::owned(a, "name").unwrap_or_else(|| self.layout_name.clone());
                 let Some((_, text)) = LAYOUTS.iter().find(|(n, _)| *n == name) else {
-                    return self.fail(format!("{name:?} isn't a layout Herdr ships"));
+                    return self.fail(format!("{name:?} isn't a layout Atrous ships"));
                 };
                 // Theirs is kept under a name nothing else has (never over an older one).
                 if layout_path(&name).exists() {
@@ -3315,7 +3318,7 @@ impl AppWindow {
             "app.check_updates" => crate::update::check_now(),
             "app.update_core" => {
                 if crate::update::core().ready.is_none() && crate::update::core().error.is_none() {
-                    return self.fail("herdr-core is up to date");
+                    return self.fail("atrous-core is up to date");
                 }
                 crate::update::update_core();
             }
@@ -3689,7 +3692,7 @@ impl AppWindow {
         if cmd.get("commands").is_some() {
             return crate::commands::listing();
         }
-        // Herdr was launched again: this window comes to the front instead.
+        // Atrous was launched again: this window comes to the front instead.
         if cmd.get("raise").is_some() {
             cx.activate(true);
             window.activate_window();
@@ -3726,7 +3729,7 @@ impl AppWindow {
         json!({ "error": "expected { do }, { ls }, { commands } or { status }" })
     }
 
-    /// Spaces, their tabs and terminals, for `herdr-app ls`. Sub-agents are listed
+    /// Spaces, their tabs and terminals, for `atrous ls`. Sub-agents are listed
     /// under the terminal that started them.
     fn world(&self) -> Value {
         let m = &self.model;
@@ -4124,7 +4127,7 @@ impl AppWindow {
                 .text_xs()
                 .text_color(c("blocked"))
                 .overflow_y_scroll()
-                .child(format!("{} did not load:\n\n{}\n\nFix the files; Herdr retries on save.", inst.name, error.as_deref().unwrap_or("?")))
+                .child(format!("{} did not load:\n\n{}\n\nFix the files; Atrous retries on save.", inst.name, error.as_deref().unwrap_or("?")))
                 .into_any_element(),
             None => div().into_any_element(),
         }
@@ -4323,7 +4326,7 @@ impl AppWindow {
                 .border_1().border_color(c("border")).text_size(settings::z(13.0)).text_color(c("foreground"))
                 .id("core-update-error").cursor_pointer()
                 .on_click(cx.listener(|this, _, w, cx| this.run("app.settings", json!({ "section": "updates" }), w, cx)))
-                .child(format!("herdr-core update failed: {error} · Open Updates")).into_any_element());
+                .child(format!("atrous-core update failed: {error} · Open Updates")).into_any_element());
         }
         out.extend(pill);
         out
@@ -4333,15 +4336,15 @@ impl AppWindow {
 const UPDATE_PILL_HEIGHT: f32 = 34.0;
 
 impl AppWindow {
-    /// "Herdr 0.2.0 is ready · Restart": the frame's, so no layout or mod can hide it.
+    /// "Atrous 0.2.0 is ready · Restart": the frame's, so no layout or mod can hide it.
     /// What's waiting, in words: the pill shows it until clicked or dismissed.
     fn update_label() -> Option<String> {
         let core = crate::update::core();
         let core = core.ready.filter(|_| !core.updating);
         match (crate::update::ready(), core) {
-            (Some(a), Some(c)) => Some(format!("Herdr {a} and herdr-core {c} are ready")),
-            (Some(a), None) => Some(format!("Herdr {a} is ready")),
-            (None, Some(c)) => Some(format!("herdr-core {c} is ready")),
+            (Some(a), Some(c)) => Some(format!("Atrous {a} and atrous-core {c} are ready")),
+            (Some(a), None) => Some(format!("Atrous {a} is ready")),
+            (None, Some(c)) => Some(format!("atrous-core {c} is ready")),
             (None, None) => None,
         }
     }
@@ -4505,7 +4508,7 @@ struct FolderCheck {
     repo: bool,
 }
 
-/// Changes made outside Herdr (a commit in another app): looked for this often,
+/// Changes made outside Atrous (a commit in another app): looked for this often,
 /// in repos, while the window is in front.
 const FOLDER_FALLBACK: Duration = Duration::from_secs(60);
 
@@ -4684,8 +4687,8 @@ fn running_argv(rec: &serde_json::Map<String, Value>) -> Option<&Value> {
 /// it still runs. A listing taken just before it ended still shows it running,
 /// and labels outlive the program: putting it back would show a dead pane.
 fn adoptable(record: &Value, space: &str, tab: Option<&str>, machine: Option<&str>) -> bool {
-    let label = record.pointer("/labels/herdr.space").and_then(Value::as_str);
-    let labeled_tab = record.pointer("/labels/herdr.tab").and_then(Value::as_str).filter(|s| !s.is_empty());
+    let label = record.pointer("/labels/atrous.space").and_then(Value::as_str);
+    let labeled_tab = record.pointer("/labels/atrous.tab").and_then(Value::as_str).filter(|s| !s.is_empty());
     record["state"] == "live"
         && label == Some(crate::mirror::local(space, machine))
         && labeled_tab == tab.map(|t| crate::mirror::local(t, machine))
@@ -4781,10 +4784,10 @@ impl Render for AppWindow {
         let win_tracker = self.window_tracker(cx);
         let pane_drag = self.pane_drag_layer(cx);
         div()
-            .id("herdr")
+            .id("atrous")
             .track_focus(&self.focus)
             // `layout:<name>` key sections apply while that layout shows.
-            .key_context(format!("Herdr layout = {}", self.layout_name).as_str())
+            .key_context(format!("Atrous layout = {}", self.layout_name).as_str())
             .size_full()
             .relative()
             .bg(c("background"))
@@ -4968,7 +4971,7 @@ mod tests {
     fn image_invalidation_drops_cached_atlas_tiles_without_loading_missing_assets(cx: &mut TestAppContext) {
         use gpui::{ImgResourceLoader, Resource};
         let temp = if cfg!(target_os = "linux") { std::path::PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
-        let home = temp.join(format!("herdr-image-atlas-test-{}", std::process::id()));
+        let home = temp.join(format!("atrous-image-atlas-test-{}", std::process::id()));
         std::fs::create_dir_all(&home).unwrap();
         let file = home.join("image.gif");
         let mut encoder = image::codecs::gif::GifEncoder::new(std::fs::File::create(&file).unwrap());
@@ -5005,7 +5008,7 @@ mod tests {
     #[test]
     fn directory_changes_include_nested_assets() {
         let temp = if cfg!(target_os = "linux") { std::path::PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
-        let home = temp.join(format!("herdr-image-directory-test-{}", std::process::id()));
+        let home = temp.join(format!("atrous-image-directory-test-{}", std::process::id()));
         std::fs::create_dir_all(home.join("mods/probe/nested")).unwrap();
         std::fs::write(home.join("mods/probe/nested/icon.svg"), "svg").unwrap();
         for ignored in ["node_modules/pkg", ".git"] {
@@ -5188,12 +5191,12 @@ mod tests {
     /// fresh app home: a window takes process-wide things (the app home, the
     /// mods' request channel) that tests beside it would otherwise share.
     fn in_own_process(name: &str) {
-        let home = std::path::PathBuf::from(format!("/var/tmp/herdr-window-test-{name}-{}", std::process::id()));
+        let home = std::path::PathBuf::from(format!("/var/tmp/atrous-window-test-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
         let out = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", &format!("window::tests::{name}"), "--nocapture", "--test-threads=1"])
-            .env("HERDR_APP_HOME", &home)
-            .env("HERDR_TEST_WINDOW", name)
+            .env("ATROUS_HOME", &home)
+            .env("ATROUS_TEST_WINDOW", name)
             .output()
             .unwrap();
         let _ = std::fs::remove_dir_all(&home);
@@ -5203,7 +5206,7 @@ mod tests {
 
     /// In the process `in_own_process` started for `name`: whether to go on.
     fn running_alone(name: &str) -> bool {
-        std::env::var("HERDR_TEST_WINDOW").as_deref() == Ok(name)
+        std::env::var("ATROUS_TEST_WINDOW").as_deref() == Ok(name)
     }
 
     /// The window on a core that's never there (`hc::offline`), showing
@@ -5363,7 +5366,7 @@ mod tests {
             return;
         }
         let probe = r#"import { View, div } from "gpui-kit";
-import { window, shared, setShared } from "herdr";
+import { window, shared, setShared } from "atrous";
 
 export default class Probe extends View {
   render() {
@@ -5492,7 +5495,7 @@ export default class Probe extends View {
 
     #[test]
     fn a_finished_terminal_is_not_put_back_in_its_tab() {
-        let record = |state: &str| serde_json::json!({ "state": state, "labels": { "herdr.space": "sp1", "herdr.tab": "tb1" } });
+        let record = |state: &str| serde_json::json!({ "state": state, "labels": { "atrous.space": "sp1", "atrous.tab": "tb1" } });
         assert!(super::adoptable(&record("live"), "sp1", Some("tb1"), None));
         assert!(!super::adoptable(&record("finished"), "sp1", Some("tb1"), None));
         assert!(!super::adoptable(&record("live"), "sp2", Some("tb1"), None));

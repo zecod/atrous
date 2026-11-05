@@ -8,7 +8,7 @@ struct Fixture(PathBuf);
 impl Fixture {
     fn new(source: &str) -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(0);
-        let dir = PathBuf::from(format!("/var/tmp/herdr-lifecycle-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+        let dir = PathBuf::from(format!("/var/tmp/atrous-lifecycle-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("main.js"), source).unwrap();
         Self(dir)
@@ -124,7 +124,7 @@ export default class extends View {
     let seen = Rc::new(RefCell::new(Vec::new()));
     let calls = seen.clone();
     gpui_shell::policy::set_default(Policy::new()
-        .with_host_module(module(Instance { name: "test".into(), props: Value::Null }, 0)).unwrap()
+        .with_host_module(super::alias(&module(Instance { name: "test".into(), props: Value::Null }, 0))).unwrap()
         .with_host_module(HostModule::new("fixture").function("note", move |a| {
             calls.borrow_mut().push(a.string(0)?.to_owned());
             Ok(HostValue::Null)
@@ -143,7 +143,7 @@ fn focus_command_lets_a_mod_take_arrow_keys(cx: &mut TestAppContext) {
     cx.update(gpui_shell::init);
     let fixture = Fixture::new(r#"
 import { View, div } from "gpui-kit";
-import { nextCommand } from "herdr";
+import { nextCommand } from "atrous";
 import { note } from "fixture";
 export default class extends View {
   init(_props, cx) {

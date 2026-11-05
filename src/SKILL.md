@@ -1,22 +1,22 @@
-# herdr-app: drive the person's window
+# atrous: drive the person's window
 
-Herdr shows spaces, tabs and panes. herdr-core (`hc`) runs their terminals
-and keeps them alive when the window closes. Use `herdr-app` only to change
+Atrous shows spaces, tabs and panes. atrous-core (`atc`) runs their terminals
+and keeps them alive when the window closes. Use `atrous` only to change
 what the person sees. For starting, reading, messaging, waiting on or cleaning
-up agents and programs, read `hc --skill` and use hc.
-Your terminal address is `$HC_TERMINAL_ID`; it is not a pane ID.
+up agents and programs, read `atc --skill` and use atc.
+Your terminal address is `$ATC_TERMINAL_ID`; it is not a pane ID.
 
 ## Inspect before acting
 
 ```sh
-herdr-app ls          # spaces > tabs > terminals, including pane IDs
-herdr-app status      # current layout, focus, overlays, zoom and file/mod errors
-herdr-app commands    # available commands, arguments and descriptions
+atrous ls          # spaces > tabs > terminals, including pane IDs
+atrous status      # current layout, focus, overlays, zoom and file/mod errors
+atrous commands    # available commands, arguments and descriptions
 ```
 
 `ls` and `status` talk to the running window, not a new app. `commands`
 prints the built-in command list even without an open window. Do not launch bare
-`herdr-app` to inspect it: that opens or raises the window. Do not stop,
+`atrous` to inspect it: that opens or raises the window. Do not stop,
 signal or restart the person's app or core. A window closing does not kill
 its terminals.
 
@@ -31,16 +31,16 @@ default names. Use IDs from `ls` rather than guessing or acting on the wrong
 focused pane.
 
 ```sh
-herdr-app do space.new --name api --folder /path/to/api
-herdr-app do tab.new --name "fix login" --argv '["claude"]' --task "Look at the login bug"
-herdr-app do pane.split --direction right --pane p12
-herdr-app do agent.focus --terminal t7
+atrous do space.new --name api --folder /path/to/api
+atrous do tab.new --name "fix login" --argv '["claude"]' --task "Look at the login bug"
+atrous do pane.split --direction right --pane p12
+atrous do agent.focus --terminal t7
 ```
 
 For a remote space:
 
 ```sh
-herdr-app do space.new --name "remote api" --machine vps --folder /srv/api
+atrous do space.new --name "remote api" --machine vps --folder /srv/api
 ```
 
 The folder is on that machine; tabs and splits in the space stay there.
@@ -52,8 +52,8 @@ configured PATH. Other shells keep the sh launcher.
 `terminal.open --folder /path --place down` starts the split in that folder,
 including when `--argv` supplies a program. Without `--folder`, it follows the
 focused terminal's folder.
-`hc machine ls` lists machines. Use `hc run --on vps ...`, `hc exec --on vps ...`
-and `hc file ... --on vps ...` for remote work, not your local file tools.
+`atc machine ls` lists machines. Use `atc run --on vps ...`, `atc exec --on vps ...`
+and `atc file ... --on vps ...` for remote work, not your local file tools.
 
 `do` accepts `--key value` arguments (JSON for arrays/objects) or one JSON
 object. Unknown argument names fail and list valid names. Target IDs (`id`,
@@ -62,7 +62,7 @@ the current-target default can apply. Null keeps its omitted-argument meaning.
 Use `commands` to confirm the command's exact shape:
 
 ```sh
-herdr-app do pane.split '{"direction":"right","pane":"p12"}'
+atrous do pane.split '{"direction":"right","pane":"p12"}'
 ```
 
 `terminal.search` opens a find bar in the focused terminal. It searches that
@@ -78,28 +78,28 @@ terminal was created, not that its program started correctly. If it exits
 with a nonzero code within two seconds, the window shows an error toast with
 the exit code and last output lines.
 
-A terminal started with hc opts into the window with `herdr.space=<id>`.
-`herdr.tab=<id>` chooses its tab; without it, Herdr creates a tab in that space.
+A terminal started with atc opts into the window with `atrous.space=<id>`.
+`atrous.tab=<id>` chooses its tab; without it, Atrous creates a tab in that space.
 Unlabeled workers stay hidden. Do not add labels just to run a background
 worker. Use app commands when the
-user wants to see a new tab or split, hc for orchestration that need not change
+user wants to see a new tab or split, atc for orchestration that need not change
 the screen.
 
 ## Customize layouts, keys, or mods
 
-First read `~/.config/herdr-app/AGENTS.md` (or `$HERDR_APP_HOME/AGENTS.md` if
+First read `~/.config/atrous/AGENTS.md` (or `$ATROUS_HOME/AGENTS.md` if
 set). It is the installed guide to settings, layouts, commands and mods.
 Read the generated `.d.ts` files beside it for full API details; do not edit
 those files or the generated guide. The app rewrites them on start.
 
-- Home defaults to `~/.config/herdr-app`; `HERDR_APP_HOME` selects another.
+- Home defaults to `~/.config/atrous`; `ATROUS_HOME` selects another.
 - Mods live in `mods/<name>/` with `main.js` and optional `mod.json`.
   They are trusted JavaScript with command and network access.
   `"focusable": true` in `mod.json` lets `pane.go` move onto a copy; it receives
   `"focus"` from `nextCommand()` and focuses its own keyboard handle.
-- Shipped mods belong to Herdr: duplicate with `mod.clone` before editing.
+- Shipped mods belong to Atrous: duplicate with `mod.clone` before editing.
   Shipped layouts likewise use `layout.clone` for a personal copy.
-  Discover required arguments with `herdr-app commands`.
+  Discover required arguments with `atrous commands`.
 - Save to reload. A broken save keeps the old version running and reports
   an error in `status`; a still-working screen is not proof the edit worked.
 - Make only the requested change. Don't touch unrelated mods or settings.
@@ -114,9 +114,9 @@ those files or the generated guide. The app rewrites them on start.
 After every mod change:
 
 ```sh
-herdr-app check ~/.config/herdr-app/mods/<name>
-herdr-app status
-herdr-app shot /tmp/mod.png   # then look at the picture
+atrous check ~/.config/atrous/mods/<name>
+atrous status
+atrous shot /tmp/mod.png   # then look at the picture
 ```
 
 `check` loads the mod and renders it once. It exits nonzero with the exact
@@ -124,16 +124,16 @@ error. Never call a mod done without a passing check. Then confirm it is
 shown correctly in the running window with `shot`; don't claim a visual
 check you haven't made.
 
-`herdr-app shot [file.png]` saves the window's last frame and prints its
-absolute path (default: `herdr-shot.png` in your current folder). It is the
+`atrous shot [file.png]` saves the window's last frame and prints its
+absolute path (default: `atrous-shot.png` in your current folder). It is the
 app's own rendering at full pixel size: terminals, images, overlays and
 floats included, even when the window is covered or minimized. No screen
 capture or permissions. It needs a running window that has drawn a frame;
-`HERDR_APP_HOME` selects the window, as for `status`.
+`ATROUS_HOME` selects the window, as for `status`.
 
 ## Problems and safety
 
-If Herdr misbehaves, `herdr-app feedback "<what happened>"` drafts a report.
+If Atrous misbehaves, `atrous feedback "<what happened>"` drafts a report.
 The person reviews and sends it; it does not silently send feedback.
 
 Never experiment with pointer/key automation on the person's real display.

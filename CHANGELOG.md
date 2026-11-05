@@ -1,4 +1,17 @@
-# Herdr changelog
+# Atrous changelog
+
+Atrous is a fork of herdr-app (see NOTICE). Its own releases start at 0.2.0;
+the sections below it are herdr-app's history, kept as it was.
+
+## [0.2.0] - 2026-11-05
+
+### New
+- **Atrous.** This is herdr-app 0.1.13, renamed and on its own: the app is `atrous`, its home `~/.config/atrous`, its core atrous-core (`atc`), and it runs beside herdr without either seeing the other.
+- **Your herdr-app setup comes along.** On the first start, settings, keys, programs, themes, your own layouts and mods, layout clicks and mod data are copied from `~/.config/herdr-app`, once; a note says what came. herdr-app's folder is not changed.
+- **Mods import from "atrous".** `"herdr"` still works as another name for it, and `core()` is the new name for `hc()`.
+- The built-in layouts are now called Classic, Terminals and Atrous 98.
+- Feedback opens a new GitHub issue on zecod/atrous, filled in for you to read and post.
+- No usage data: Atrous collects and sends none. Updates come from GitHub releases of zecod/atrous and zecod/atrous-core.
 
 ## [0.1.13] - 2026-11-04
 <!-- spotlight macos -->

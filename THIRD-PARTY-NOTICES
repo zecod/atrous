@@ -1,9 +1,9 @@
-Herdr third-party notices
+Atrous third-party notices
 =========================
 Regenerate with just notices. See licenses/README.md.
 
 Input-SHA256: 6a3b4177337bfb82680d2992e24b5f948c0c4ce524bafa5b1c8cf8090f45adba Cargo.lock
-Input-SHA256: 824d8d946ec207640fc5e7fcefefcbcbb2267c3e35786168fd15ec84ba87fb72 Cargo.toml
+Input-SHA256: f858af3a1274e9d59fb6d8a4fda42b8baab0102555fb43a0fd4e50475b1995cb Cargo.toml
 Input-SHA256: c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4 LICENSE
 Input-SHA256: e58cb0de2dde300bcda769ca993fde2737f42c0274082f038621ab22975a49e2 about.toml
 Input-SHA256: 84a7a98c82140fb12c37fe42b93805baa16024cb3e5acc599b7ffe612c55d847 assets/fonts/LICENSE-SymbolsNerdFont.txt
@@ -28,7 +28,7 @@ Input-SHA256: f8ac2c75e7f629a87565c80d61ff9fe5aa15cdea0bda997d52a4dc13fdbd19cb l
 Input-SHA256: 5c537d6853e005298a285d508cff9ac7192cea23576c840d485b2b586a7ff177 licenses/Zig.txt
 Input-SHA256: d25e82e26acd42ca3ccc9993622631163425b869b9e16284226d534cff6470f2 licenses/highway-BSD3.txt
 Input-SHA256: 43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1 licenses/highway.txt
-Input-SHA256: 6f440b2e11f1729f94e191d7a2c106c6cbf5b5a40bae8915f321b5f361251d79 licenses/inventory.json
+Input-SHA256: 02a886ab128e5c7e63b0a0d2efa604c784a6516f34ca0330a0e5fe06988acd7f licenses/inventory.json
 Input-SHA256: f9bc4423732350eb0b3f7ed7e91d530298476f8fec0c6c427a1c04ade22655af licenses/musl.txt
 Input-SHA256: 204bbed08ddeeecb362b4da36d3479a0167b7356a9d6024a24f9833affbe228a licenses/simdutf-TH.txt
 Input-SHA256: fc8dbc04e03ad4efc08a647ffe7f995b811a95bc04c0e85a56d5277c6593fa5f licenses/simdutf.txt
@@ -36,7 +36,7 @@ Input-SHA256: de219cece932aad5a817bf763393d8d149d378a15d2ad5320e3331eac07626dd l
 Input-SHA256: 1eda5a3b026870c737b22e8bcd4954338612c790db688242e003f41a4fa95175 licenses/uucode-LICENSE_unicode.txt
 Input-SHA256: 312e901e142be2477b4ca859e9311f9e3f80d33372991759b7921c1893605f33 licenses/uucode.txt
 Input-SHA256: d78ac01638fd241bde2eb2952e75c40e5f5fc8dce026971b547265d3845e8333 scripts/notices.hbs
-Input-SHA256: b72254346b6bb1b9bf4debda3628dd4850e6a63f633629efc3ffc3e6ba9ca90b scripts/notices.ts
+Input-SHA256: 4a69edba3d7375eef06e39bbf9bd62d5e56a1d9f14e870a2f46ad5a2806ea71e scripts/notices.ts
 Input-SHA256: 386211873e5b7a02f663ae4d7adf96285999f91608f8f9f31fecfd0f4095e6f1 vendor/ghostty/LICENSE
 Input-SHA256: b878e4fc36f9c2b6c9ad82e5ceba58c91905fde89f0ac3d3cb7ab413ea029e39 vendor/ghostty/build.zig.zon
 Input-SHA256: 57103e0424e9ca660756bb2cd0475ca3057e61e7f2d4038aba2a90eae890b932 vendor/ghostty/pkg/highway/build.zig.zon
@@ -2752,7 +2752,7 @@ Apache License 2.0 (Apache-2.0)
 
 ----------------------------------------------------------------------
 Apache License 2.0 (Apache-2.0)
-  herdr-app 0.1.12
+  atrous 0.2.0
 
                                  Apache License
                            Version 2.0, January 2004
@@ -2958,7 +2958,7 @@ Apache License 2.0 (Apache-2.0)
 
 ----------------------------------------------------------------------
 Apache License 2.0 (Apache-2.0)
-  herdr-app 0.1.12
+  atrous 0.2.0
   codespan-reporting 0.13.1 — https://github.com/brendanzab/codespan
   crypto-primes 0.7.2 — https://github.com/entropyxyz/crypto-primes
   self_cell 1.3.0 — https://github.com/Voultapher/self_cell
@@ -12014,12 +12014,12 @@ limitations under the License.
 
 ----------------------------------------------------------------------
 Apache License 2.0 (Apache-2.0)
-  herdr-app 0.1.12
-  herdr-app 0.1.12
-  herdr-app 0.1.12
-  herdr-app 0.1.12
-  herdr-app 0.1.12
-  herdr-app 0.1.12
+  atrous 0.2.0
+  atrous 0.2.0
+  atrous 0.2.0
+  atrous 0.2.0
+  atrous 0.2.0
+  atrous 0.2.0
   gpui-pre 0.3.8 — https://github.com/zed-industries/zed
   gpui-pre-apple 0.3.8 — https://github.com/zed-industries/zed
   gpui-pre-linux 0.3.8 — https://github.com/zed-industries/zed
@@ -12269,8 +12269,8 @@ Apache License
 
 ----------------------------------------------------------------------
 Apache License 2.0 (Apache-2.0)
-  herdr-app 0.1.12
-  herdr-app 0.1.12
+  atrous 0.2.0
+  atrous 0.2.0
   gpui-base 0.7.1 — https://github.com/longbridge/gpui-kit
 
 Copyright 2024 - 2026 Longbridge <https://longbridge.com>
@@ -20628,7 +20628,7 @@ SOFTWARE.
 
 
 ----------------------------------------------------------------------
-Pixelated MS Sans Serif fonts (Herdr 98)
+Pixelated MS Sans Serif fonts (Atrous 98)
 https://github.com/jdan/98.css; unchanged font conversion.
 
 --- defaults/mods/win98/fonts/LICENSE-MSSansSerif.txt ---
@@ -21007,7 +21007,7 @@ Creative Commons Notice
 
 
 ----------------------------------------------------------------------
-PxPlus IBM VGA font (Herdr 98)
+PxPlus IBM VGA font (Atrous 98)
 https://int10h.org/oldschool-pc-fonts/
 
 --- defaults/mods/win98/fonts/LICENSE-PxPlus.txt ---
@@ -21441,8 +21441,8 @@ Creative Commons may be contacted at creativecommons.org.
 
 
 ----------------------------------------------------------------------
-Herdr logo artwork
-Ram path adapted from https://github.com/herdrdev/herdr/blob/HEAD/assets/logo.svg (Apache-2.0). Herdr 98 artwork is drawn by defaults/mods/win98/art/generate.ts, under the app's Apache-2.0 license.
+Atrous logo artwork
+Drawn for Atrous (assets/brand/make_logo.py); the Atrous 98 pixel artwork is drawn by defaults/mods/win98/art/generate.ts. Both are under the app's Apache-2.0 license.
 
 --- LICENSE ---
 Apache License

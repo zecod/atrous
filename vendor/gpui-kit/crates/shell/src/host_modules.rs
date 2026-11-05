@@ -476,6 +476,14 @@ impl HostModule {
         &self.name
     }
 
+    /// The same functions, components and declarations under another name: one
+    /// module importable by two specifiers.
+    // ATROUS: Atrous's `atrous` module keeps `herdr` as an alias for herdr mods.
+    pub fn renamed(mut self, name: impl Into<String>) -> Self {
+        self.name = name.into();
+        self
+    }
+
     /// Registers one function.
     ///
     /// The body must not call back into the script engine; see the module

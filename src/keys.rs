@@ -1,4 +1,4 @@
-//! ~/.config/herdr-app/keys.json: string or object actions, reloaded live.
+//! ~/.config/atrous/keys.json: string or object actions, reloaded live.
 //!
 //! ```json
 //! {
@@ -25,7 +25,7 @@ use std::collections::BTreeMap;
 pub const ESCAPE_HATCH: &str = "ctrl-alt-shift-escape";
 
 /// The shipped keys: prefix-free; plain ctrl+letter always stays with the
-/// program. Herdr uses ctrl+shift (defaults/keys.json), or cmd on macOS
+/// program. Atrous uses ctrl+shift (defaults/keys.json), or cmd on macOS
 /// (defaults/keys.macos.json, with Mac terminal editing keys).
 #[cfg(not(target_os = "macos"))]
 pub const DEFAULTS: &str = include_str!("../defaults/keys.json");
@@ -117,7 +117,7 @@ pub fn path() -> std::path::PathBuf {
 /// `terminal` and `mod:` by order.
 fn tab(section: &str) -> Result<String, String> {
     match section {
-        "global" => Ok("Herdr".into()),
+        "global" => Ok("Atrous".into()),
         "terminal" => Ok("Terminal".into()),
         s => match (s.strip_prefix("mod:"), s.strip_prefix("layout:")) {
             (Some(p), _) if !p.is_empty() => Ok(format!("mod == {p}")),
@@ -214,7 +214,7 @@ pub fn parse(text: &str) -> Result<Vec<KeyBinding>, String> {
                 }
             }
             if keys == ESCAPE_HATCH {
-                problems.push(format!("{ESCAPE_HATCH} is reserved for resetting Herdr"));
+                problems.push(format!("{ESCAPE_HATCH} is reserved for resetting Atrous"));
                 continue;
             }
             let predicate = match KeyBindingContextPredicate::parse(&ctx) {
@@ -275,7 +275,7 @@ pub fn install(bindings: Vec<KeyBinding>, cx: &mut App) {
 mod tests {
     #[test]
     fn only_byte_identical_shipped_keys_are_upgraded() {
-        let dir = std::env::temp_dir().join(format!("herdr-keys-migration-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("atrous-keys-migration-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("keys.json");
         for (defaults, originals) in [

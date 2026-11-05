@@ -347,7 +347,7 @@ mod tests {
 
     #[test]
     fn files_resolve_only_when_they_exist() {
-        let dir = std::env::temp_dir().join(format!("herdr-links-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("atrous-links-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("src")).unwrap();
         std::fs::write(dir.join("src/main.rs"), "").unwrap();
         let file = Target::File(dir.join("src/main.rs"));

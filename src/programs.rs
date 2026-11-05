@@ -111,14 +111,14 @@ pub fn installed(commands: &[String], on: Option<&str>) -> Vec<String> {
             crate::mods::run_here(&shell, &["-ic".into(), line]).unwrap_or_default()
         }
     };
-    let found: std::collections::HashSet<&str> = out.split("herdr-has:").skip(1).filter_map(|s| s.split_whitespace().next()).collect();
+    let found: std::collections::HashSet<&str> = out.split("atrous-has:").skip(1).filter_map(|s| s.split_whitespace().next()).collect();
     commands.iter().filter(|c| found.contains(c.as_str())).cloned().collect()
 }
 
 fn installed_powershell(commands: &[String]) -> Vec<String> {
     let list = commands.iter().map(|c| powershell_quote(c)).collect::<Vec<_>>().join(",");
     let script = format!(
-        "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); foreach($c in @({list})){{ if(Get-Command $c -ErrorAction SilentlyContinue){{ \"herdr-has:$c\" }} }}"
+        "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); foreach($c in @({list})){{ if(Get-Command $c -ErrorAction SilentlyContinue){{ \"atrous-has:$c\" }} }}"
     );
     vec!["-NoLogo".into(), "-Command".into(), script]
 }
@@ -130,7 +130,7 @@ fn installed_line(commands: &[String], fish: bool) -> String {
         .map(|c| {
             let word = format!("'{}'", c.replace('\'', "'\\''"));
             let unalias = if fish { String::new() } else { format!("unalias -- {word} 2>/dev/null; ") };
-            format!("{unalias}command -v {word} >/dev/null 2>&1 && printf 'herdr-has:%s\\n' {word};")
+            format!("{unalias}command -v {word} >/dev/null 2>&1 && printf 'atrous-has:%s\\n' {word};")
         })
         .collect::<Vec<_>>()
         .join(" ")
@@ -181,27 +181,6 @@ pub fn load() -> Result<(), String> {
 /// program it runs (`argv`). `{ key, name, icon, tint, tile, color, shell, agent }`.
 pub fn of(app: Option<&str>, argv: &[String]) -> Value {
     TABLE.with(|t| resolve(&t.borrow(), app, argv))
-}
-
-/// An agent's 7501 `app` as a name Herdr ships (`claude` for `claude-code`),
-/// else `other` (`unknown` when it gave none): never the person's own words.
-pub fn agent_name(app: Option<&str>) -> String {
-    static NAMES: std::sync::OnceLock<BTreeMap<String, String>> = std::sync::OnceLock::new();
-    let names = NAMES.get_or_init(|| {
-        let table: Table = serde_json::from_str(BUILT_IN).expect("defaults/programs.json");
-        let mut names = BTreeMap::new();
-        for (key, e) in table.programs {
-            for alias in &e.also {
-                names.insert(alias.to_lowercase(), key.clone());
-            }
-            names.insert(key.to_lowercase(), key);
-        }
-        names
-    });
-    match app.map(str::trim).filter(|a| !a.is_empty()) {
-        None => "unknown".into(),
-        Some(a) => names.get(&a.to_lowercase()).cloned().unwrap_or_else(|| "other".into()),
-    }
 }
 
 fn base(s: &str) -> &str {
@@ -371,9 +350,9 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn powershell_finds_installed_commands() {
-        let out = crate::mods::run_here("powershell.exe", &installed_powershell(&["cmd.exe".into(), "herdr_missing_agent_440".into()])).unwrap();
-        assert!(out.contains("herdr-has:cmd.exe"));
-        assert!(!out.contains("herdr-has:herdr_missing_agent_440"));
+        let out = crate::mods::run_here("powershell.exe", &installed_powershell(&["cmd.exe".into(), "atrous_missing_agent_440".into()])).unwrap();
+        assert!(out.contains("atrous-has:cmd.exe"));
+        assert!(!out.contains("atrous-has:atrous_missing_agent_440"));
     }
 
     #[test]
@@ -409,7 +388,7 @@ mod tests {
             .args(["-c", &format!("issue57_function() {{ :; }}; alias issue57_alias='printf alias'; {line}")])
             .output()
             .unwrap();
-        assert_eq!(String::from_utf8(out.stdout).unwrap(), "herdr-has:issue57_function\nherdr-has:printf\n");
+        assert_eq!(String::from_utf8(out.stdout).unwrap(), "atrous-has:issue57_function\natrous-has:printf\n");
     }
 
     #[test]
