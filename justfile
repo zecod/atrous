@@ -12,7 +12,7 @@ notes-upload version:
 notes-check version:
     bun scripts/notes-media.ts check "{{version}}"
 
-check: test
+check: test test-core
 
 notices:
     bun scripts/notices.ts
@@ -39,17 +39,39 @@ pre-release: test docs-check
     fi
     echo "review: the mod guide (defaults/AGENTS.md), README.md and docs/ describe the changes above."
 
+# One build: the app and its core (core/), release builds, with atrous-core,
+# atc (and conpty on Windows) put beside target/release/atrous.
+[unix]
 build:
+    bash scripts/build
+
+[windows]
+build:
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1
+
+# The app alone, debug (what docs and quick checks run).
+build-app:
     cargo build --locked
 
 test:
     bun test scripts/files.test.ts scripts/picker.test.ts scripts/palette.test.ts scripts/agents.test.ts scripts/spaces.test.ts scripts/worktree.test.ts
     cargo test --locked
 
-docs-generate: build
+# atrous-core's own tests (core/ is its own workspace).
+[unix]
+test-core:
+    cargo test --locked --manifest-path core/Cargo.toml
+
+# Windows' own ConPTY swallows answers to programs: atc's tests need the one it ships.
+[windows]
+test-core:
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File core/scripts/fetch-conpty.ps1 -Dest core/target/debug
+    cargo test --locked --manifest-path core/Cargo.toml
+
+docs-generate: build-app
     bun scripts/docs.ts generate
 
-docs-check: build
+docs-check: build-app
     bun test scripts/docs.test.ts
     bun scripts/docs.ts check
 

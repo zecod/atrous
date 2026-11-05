@@ -1,0 +1,29 @@
+#!/bin/bash
+# One build for Atrous and its core:
+#
+#   scripts/build            release builds (what installs ship)
+#   scripts/build --debug    debug builds
+#
+# Builds the app (this workspace) and atrous-core (core/, its own
+# workspace with its own Cargo.lock), then puts the core beside the app in
+# target/<profile> (scripts/stage-core), so `target/release/atrous` runs
+# with its own core like an install. On Windows, scripts/build.ps1 does the
+# same from PowerShell; `just build` picks the right one.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+profile=release
+flags=(--release)
+if [[ ${1:-} == --debug ]]; then
+  profile=debug
+  flags=()
+fi
+
+# A clone without --recurse-submodules: fetch the two ghostty checkouts.
+for sub in vendor/ghostty core/vendor/ghostty; do
+  [[ -e $sub/build.zig ]] || git submodule update --init --depth 1 "$sub"
+done
+
+cargo build "${flags[@]}" --locked
+cargo build "${flags[@]}" --locked --manifest-path core/Cargo.toml
+scripts/stage-core "target/$profile" "core/target/$profile"

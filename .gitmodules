@@ -1,3 +1,7 @@
 [submodule "vendor/ghostty"]
 	path = vendor/ghostty
 	url = https://github.com/ghostty-org/ghostty
+[submodule "core/vendor/ghostty"]
+	path = core/vendor/ghostty
+	url = https://github.com/ghostty-org/ghostty
+	shallow = true

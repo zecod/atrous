@@ -1,0 +1,48 @@
+#!/bin/bash
+# Puts atrous-core beside a built app, the way every Atrous install holds it:
+#
+#   scripts/stage-core <app-dir> <core-dir>
+#
+# <app-dir> holds the built `atrous`; <core-dir> the built `atrous-core`
+# (core/target/<profile>). Afterwards <app-dir> also holds:
+#   atrous-core   the core (runs in the background; terminals outlive the window)
+#   atc           the core's short CLI: a hard link on Windows, a symlink elsewhere
+#   conpty/       Windows only: Microsoft's ConPTY (the system's swallows answers)
+# A core still running from <app-dir> is renamed aside, not overwritten
+# (Windows refuses to replace a running program); it keeps running.
+# macOS app bundles nest the core instead (scripts/package, install-macos).
+set -euo pipefail
+
+app=${1:?usage: scripts/stage-core <app-dir> <core-dir>}
+core=${2:?usage: scripts/stage-core <app-dir> <core-dir>}
+root=$(cd "$(dirname "$0")/.." && pwd)
+exe=
+case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) exe=.exe ;; esac
+
+[[ -f $core/atrous-core$exe ]] || { echo "stage-core: no $core/atrous-core$exe (build core/ first)" >&2; exit 1; }
+rm -f "$app"/atrous-core"$exe".old-* "$app"/atc"$exe".old-* 2>/dev/null || true
+
+# Copies unless the same bytes are there; a busy file moves aside first.
+put() {
+  local from=$1 to=$2
+  if [[ -e $to || -L $to ]]; then
+    if [[ ! -L $to ]] && cmp -s "$from" "$to"; then return 0; fi
+    rm -f "$to" 2>/dev/null || mv -f "$to" "$to.old-$$"
+  fi
+  cp "$from" "$to"
+}
+
+put "$core/atrous-core$exe" "$app/atrous-core$exe"
+if [[ -n $exe ]]; then
+  # Same file as atrous-core.exe, as the core's own installer makes it.
+  if [[ -e $app/atc.exe ]] && ! cmp -s "$app/atrous-core.exe" "$app/atc.exe"; then
+    rm -f "$app/atc.exe" 2>/dev/null || mv -f "$app/atc.exe" "$app/atc.exe.old-$$"
+  fi
+  [[ -e $app/atc.exe ]] || ln "$app/atrous-core.exe" "$app/atc.exe" 2>/dev/null || cp "$app/atrous-core.exe" "$app/atc.exe"
+  if [[ ! -f $app/conpty/conpty.dll || ! -f $app/conpty/x64/OpenConsole.exe ]]; then
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(cygpath -w "$root/core/scripts/fetch-conpty.ps1")" -Dest "$(cygpath -w "$app")"
+  fi
+else
+  ln -sfn atrous-core "$app/atc"
+fi
+echo "stage-core: $app holds atrous-core $("$app/atrous-core$exe" --version | sed 's/^atc //')"
