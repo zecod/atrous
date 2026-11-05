@@ -6,13 +6,14 @@ Atrous is a rebranded fork of [herdr-app](https://github.com/herdrdev/herdr-app)
 
 ## What changed from herdr-app
 
-- **New names, side by side with herdr.** The app is `atrous` (`atrous.exe`), its core is [atrous-core](https://github.com/zecod/atrous-core) with the short CLI `atc`, its home is `~/.config/atrous` (`ATROUS_HOME`), and every `HERDR_*` / `HC_*` variable is `ATROUS_*` / `ATC_*`. Atrous never looks at herdr's core, home, sockets or install folder, so both apps can be installed and open at the same time.
+- **One app, core inside.** Atrous ships its core, atrous-core (short CLI `atc`, built from [`core/`](core/)), in the same install and release, at the same version. The core still runs as its own background process, so terminals and agents keep running when you close or update the window. There's no separate core to install or update.
+- **New names, side by side with herdr.** The app is `atrous` (`atrous.exe`), its core is atrous-core with the short CLI `atc`, its home is `~/.config/atrous` (`ATROUS_HOME`), and every `HERDR_*` / `HC_*` variable is `ATROUS_*` / `ATC_*`. Atrous never looks at herdr's core, home, sockets or install folder, so both apps can be installed and open at the same time.
 - **Your herdr-app setup comes along once.** The first time Atrous starts and `~/.config/atrous` doesn't exist, it copies your settings, keys, programs, themes, own layouts with their clicks, own mods, shared state and mod data from `~/.config/herdr-app`, rewrites `.config/herdr-app` paths in them, and says what came in a note. herdr-app's folder is only read.
 - **Mods import from `"atrous"`.** `"herdr"` stays as another name for the same module, and `core()` is the new name for `hc()`, so herdr-app's mods load unchanged. The types are in `atrous.d.ts`.
 - **Fedra is the built-in UI** and the default layout (see [fedra/README.md](fedra/README.md)): projects and agents in a tree, session-named tabs, the quick terminal, Files, Changes and Browser panels, the usage card, and one Settings with Accounts, Skills and Usage. The other layouts are Flow, Terminals and Classic (herdr's main layout, the safe fallback); Herdr 98 is gone.
 - **No telemetry.** Atrous collects and sends no usage data, and Settings → Privacy says so.
 - **Feedback** opens a new, prefilled [GitHub issue](https://github.com/zecod/atrous/issues/new) that you post yourself.
-- **Updates** come from GitHub releases of zecod/atrous and zecod/atrous-core. Until a release exists, a check simply finds nothing. Atrous sends no requests to herdr's servers.
+- **Updates** come from GitHub releases of zecod/atrous: one download per platform holds the app and its core, and they update together (terminals keep running). Until a release exists, a check simply finds nothing. Atrous sends no requests to herdr's servers.
 - **Brand:** the Atrous mark replaces the herdr ram everywhere: app icon, setup screen, sidebar, macOS bundle and disk image.
 
 Everything else works as in herdr-app: spaces, tabs and panes, the agents list, peek, remote machines over SSH, layouts and mods.
@@ -31,57 +32,46 @@ irm https://github.com/zecod/atrous/releases/latest/download/install.ps1 | iex
 curl -fsSL https://github.com/zecod/atrous/releases/latest/download/install.sh | sh
 ```
 
-They also install atrous-core if it's missing, and Atrous offers to install or update a core it can't use.
+The core comes inside: there's nothing else to install. A core still running from an earlier, separate atrous-core install keeps its terminals; Atrous's next start moves them to its own core.
 
 ## Build and install from source
 
-Clone with submodules. You need Rust 1.95 or newer, [Zig 0.16.0](https://ziglang.org/download/), libclang (for bindgen) and [just](https://github.com/casey/just) (optional).
+One repo, one build, for every platform. You need Rust 1.95 or newer, [Zig 0.16.0](https://ziglang.org/download/) (`zig` on `PATH`, or `ZIG` set to it), libclang for bindgen (`LIBCLANG_PATH` pointing at its folder if it isn't found), git, and [just](https://github.com/casey/just) (optional). Windows also needs the Visual Studio 2022 Build Tools (C++ workload); macOS the Xcode Command Line Tools; Linux a desktop session, a working Vulkan driver and the development packages listed in [CI](.github/workflows/ci.yml).
 
 ```sh
 git clone --recurse-submodules https://github.com/zecod/atrous.git
 cd atrous
+just build        # or: scripts/build (bash), scripts\build.ps1 (PowerShell)
+just install      # or: scripts/install-linux, scripts/install-macos, scripts\install-windows.ps1
 ```
 
-### Windows
+`just build` builds the app and its core (`cargo build --release` in the repo and in `core/`) and puts the core beside the app in `target/release`: `atrous-core`, `atc`, and on Windows `conpty\`. `just install` runs the build, then installs:
 
-Also needed: the Visual Studio 2022 Build Tools (C++ workload) and LLVM (`LIBCLANG_PATH` pointing at the folder with `libclang.dll`, for example `C:\Program Files\LLVM\bin`). Put `zig` on `PATH` or set `ZIG` to `zig.exe`.
+- **Windows:** `%LOCALAPPDATA%\Programs\atrous\` with `atrous.exe`, `atrous-core.exe`, `atc.exe` (a hard link to it) and `conpty\`; an **Atrous** Start menu shortcut; that one folder on your user `PATH` (`atrous` and `atc` in a new terminal).
+- **macOS:** `~/Applications/Atrous.app`, with the core as a helper bundle inside (`Contents/Helpers/Atrous Core.app`, its own signing identity `io.github.zecod.atrous.core`), and `~/.local/bin/atrous` and `~/.local/bin/atc` links into it. Release builds are signed and packed by `scripts/package`; `scripts/mac-dmg` makes the drag-to-Applications `Atrous.dmg` (needs a Developer ID certificate).
+- **Linux:** `~/.local/bin/atrous` and `~/.local/bin/atc` pointing at `target/release`, and a launcher entry.
 
-```powershell
-cargo build --release --locked
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install-windows.ps1   # or: just install
-```
-
-This installs `%LOCALAPPDATA%\Programs\atrous\atrous.exe`, adds an **Atrous** Start menu shortcut, and adds that folder to your user `PATH` (open a new terminal to use `atrous`). It never touches an installed herdr-app (`%LOCALAPPDATA%\Programs\herdr-app`).
-
-Atrous needs atrous-core: build and install [zecod/atrous-core](https://github.com/zecod/atrous-core), which puts `atrous-core.exe` and `atc.exe` in `%LOCALAPPDATA%\Programs\atrous-core`. Without one, Atrous opens a screen that installs it or lets you pick one.
-
-### macOS
-
-Also needed: the Xcode Command Line Tools.
-
-```sh
-cargo build --release --locked
-scripts/install-macos          # or: just install
-```
-
-This makes `~/Applications/Atrous.app` (bundle id `io.github.zecod.atrous`, the Atrous icon) and links `~/.local/bin/atrous`. Install atrous-core into `~/.local/bin` (`atrous-core` and `atc`). Release builds are signed and packed by `scripts/package`; `scripts/mac-dmg` makes the drag-to-Applications `Atrous.dmg` (needs a Developer ID certificate).
-
-### Linux
-
-```sh
-cargo build --release --locked
-scripts/install-linux          # or: just install
-```
-
-Linux needs a desktop session, a working Vulkan driver and the development packages listed in [CI](.github/workflows/ci.yml).
+Atrous starts its core when it needs one and leaves it running; terminals Atrous starts find `atc` and `atrous` first on their `PATH`. Reinstalling or updating keeps terminals running: the next start moves them to the new core. Atrous never touches an installed herdr-app or its core.
 
 ### Tests
 
 ```sh
-just test        # bun tests of the shipped mods, then cargo test --locked
+just test         # bun tests of the shipped mods, then cargo test --locked
+just test-core    # atrous-core's tests (core/)
 ```
 
-Never run a bare `atrous` from `target/` on a machine where you also use the app without `ATROUS_HOME` pointing at a scratch home: it opens a second window on your real setup.
+Never run a bare `atrous` from `target/` on a machine where you also use the app without `ATROUS_HOME` and `ATC_SESSION` pointing at a scratch home and session: it opens a second window on your real setup and core.
+
+### The core and its upstreams
+
+`core/` is atrous-core, [zecod/atrous-core](https://github.com/zecod/atrous-core) brought in with `git subtree` (its history included); it keeps its own Cargo workspace and lock file. It's a fork of [herdr-core](https://github.com/herdrdev/herdr-core). To take their changes:
+
+```sh
+git subtree pull --prefix=core https://github.com/herdrdev/herdr-core master # herdr-core
+git subtree pull --prefix=core https://github.com/zecod/atrous-core main     # atrous-core, while it lives on
+```
+
+Resolve the merge in `core/` (keep Atrous's names: `atrous-core`, `atc`, `ATC_*`), keep `core/crates/atrous-core/Cargo.toml` at the app's version, and run `just test-core`. The app itself (`src/`, a fork of [herdr-app](https://github.com/herdrdev/herdr-app)) merges herdr-app as usual: `git fetch https://github.com/herdrdev/herdr-app master && git merge FETCH_HEAD`. `core/vendor/ghostty` is its own submodule entry in `.gitmodules` (pinned where atrous-core pins it); after a subtree pull moves that pin, run `git submodule update --init core/vendor/ghostty`.
 
 ## Find your work
 

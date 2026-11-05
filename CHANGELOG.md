@@ -7,13 +7,16 @@ the sections below it are herdr-app's history, kept as it was.
 
 ### New
 - **Welcome to Atrous.** A desktop app for your terminals and coding agents; they keep running in atrous-core (`atc`) when the window closes.
+- **One app.** The core comes inside Atrous: one install, one version, one update. It still runs on its own in the background, so terminals keep running when you close or update the window, and `atc` works in every terminal Atrous starts. A core left running from an earlier, separate install hands its terminals over on Atrous's next start.
 - **Fedra is the built-in UI.** Projects and their agents in a tree, tabs named after each agent's session, the quick terminal (Ctrl+`), Files, Changes and Browser panels, the usage card, and one Settings with Accounts, Skills and Usage. Flow, Terminals and Classic are the other layouts.
 - **A first-run guide** walks you through your agents, accounts, the browser skill, the look and a first project. Open it again from the command palette (Welcome / Onboarding).
 - **Your previous setup comes along.** On the first start, your settings, keys, themes, own layouts and mods, and their data are copied once from your previous app's folder, which stays as it was.
 - **Mods import from "atrous"**, and `core()` runs atc; mods written before keep working.
 - New agents from the + menu start without permission prompts (Claude Code and Codex through the account launchers); your own programs.json entries still win.
 - Feedback opens a new GitHub issue on zecod/atrous, filled in for you to read and post.
-- No usage data: Atrous collects and sends none. Updates come from GitHub releases of zecod/atrous and zecod/atrous-core.
+- No usage data: Atrous collects and sends none. Updates come from GitHub releases of zecod/atrous.
+- Agents Atrous starts are known as agents even when they never say so (OpenCode): the sidebar and Flow can show them.
+- The Terminals layout's + opens the agent picker, like Fedra's tab bar.
 
 ## [0.1.13] - 2026-11-04
 <!-- spotlight macos -->

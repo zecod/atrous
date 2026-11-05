@@ -1,9 +1,18 @@
 # Atrous app
 
-The Atrous desktop app (`atrous`): a native GPUI client of
-[atrous-core](https://github.com/zecod/atrous-core). Atrous is a rebranded
-fork of herdr-app 0.1.13 (Apache-2.0, see NOTICE); its core is a fork of
-herdr-core.
+The Atrous desktop app (`atrous`): a native GPUI client of atrous-core
+(`atc`), which ships inside it. Atrous is a rebranded fork of herdr-app
+0.1.13 (Apache-2.0, see NOTICE); its core is a fork of herdr-core.
+
+One repo, one build, one version: the app at the root, the core in `core/`
+(its own Cargo workspace and AGENTS.md, brought in with `git subtree`, see
+README "The core and its upstreams"). `just build` (`scripts/build`,
+`scripts/build.ps1`) builds both and stages the core beside the app;
+`scripts/package` packs both into one archive per platform. The app uses the
+core beside its executable (macOS: `Contents/Helpers/Atrous Core.app`) first
+(`src/core_bin.rs`), and at start restarts a core running from elsewhere or
+older into it, the planned way (terminals kept). Keep
+`core/crates/atrous-core/Cargo.toml` at the app's version.
 
 If AGENTS.local.md exists, read it too: the maintainer's local rules.
 
@@ -18,8 +27,11 @@ Keep these exact, so the app, the core and the built-in UI connect:
   app's core document is `atrous`; labels the app sets are `atrous.*`.
 - Mods import `"atrous"`; `"herdr"` stays an alias, and `hc()` an alias of
   `core()`, so herdr-app mods keep loading.
-- Updates: GitHub releases of zecod/atrous and zecod/atrous-core. No request
-  ever goes to herdr's servers, and there is no telemetry.
+- Updates: GitHub releases of zecod/atrous, one archive per platform with
+  the app and its core. No separate core update. No request ever goes to
+  herdr's servers, and there is no telemetry.
+- Terminals Atrous starts for a known agent carry `atrous.agent=<key>` (the
+  programs.json key, `src/programs.rs` `agent_of`).
 - No herdr logo or ram/sheep art anywhere (`assets/brand/` has the Atrous mark).
 - Fedra (`fedra/home/`) is the built-in UI. `build.rs` embeds its mods with
   `defaults/mods`, its layouts (`fedra`, the default; `flow` when there) beside
