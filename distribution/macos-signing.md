@@ -1,7 +1,13 @@
 # macOS release signing and notarization
 
-In herdr-core's GitHub **release** environment, add these secrets with the
-**same values as herdr-app's release environment**:
+Atrous has no Developer ID yet. Without the secrets below, `scripts/mac-sign`
+signs ad-hoc with the identifier `io.github.zecod.atrous.core`, the release
+skips notarization, and `atc update` and the installer accept an ad-hoc
+signature with that identifier (see `TEAM` in
+`crates/atrous-core/src/platform/macos_bundle.rs`).
+
+To sign releases with a Developer ID, add these secrets to atrous-core's GitHub
+**release** environment, then set `TEAM` to that certificate's team ID:
 
 - `APPLE_CERTIFICATE_P12`: base64-encoded Developer ID Application certificate
   exported as a `.p12`, including its private key.
@@ -10,13 +16,12 @@ In herdr-core's GitHub **release** environment, add these secrets with the
 - `APPLE_API_KEY_ID`: that API key's ID.
 - `APPLE_API_ISSUER`: that API key's issuer ID.
 
-Tag pushes require all five secrets. Both macOS architectures are signed with
-hardened runtime and notarized before packaging; rejection fails the release.
-Manual/untagged release builds use ad-hoc signing without production credentials.
+With them, both macOS architectures are signed with hardened runtime and
+notarized before packaging; rejection fails the release.
 
-The signature uses the stable identifier `dev.herdr.core`. The executable has
-a bound Info.plist naming **Herdr Core** and explaining privacy requests made
-by terminal programs. Existing Herdr.app grants do not transfer. Grants to
+The signature uses the stable identifier `io.github.zecod.atrous.core`. The executable has
+a bound Info.plist naming **Atrous Core** and explaining privacy requests made
+by terminal programs. Existing Atrous.app grants do not transfer. Grants to
 ad-hoc builds may need to be granted again on the first Developer ID release.
 Keep the signing team and identifier stable across updates. This does not
 guarantee that macOS's session-scoped permissions stop prompting.
@@ -29,21 +34,21 @@ debugging or unsigned-memory exceptions. Camera, audio-input and Apple Events
 entitlements permit user-approved terminal workloads; they do not grant access
 without consent. There is no App Sandbox.
 
-`scripts/mac-bundle` assembles **Herdr Core.app** with the same Info.plist as
+`scripts/mac-bundle` assembles **Atrous Core.app** with the same Info.plist as
 its executable. `scripts/mac-sign` signs the executable and then the bundle.
 `scripts/mac-notarize` submits the bundle zip, waits for acceptance, and staples
 and validates its ticket. The existing macOS archive names contain the complete
 bundle plus a root executable for released updaters. The root and bundled
 executables are independently signed and notarized.
 
-The installer and new `hc update` stage and verify the complete bundle, check
+The installer and new `atc update` stage and verify the complete bundle, check
 that it runs, then atomically exchange it with the installed bundle. They do
-not re-sign, strip, or add quarantine. Entry points in `HC_INSTALL_DIR` (default
+not re-sign, strip, or add quarantine. Entry points in `ATC_INSTALL_DIR` (default
 `~/.local/bin`) resolve to the newest bundle at the fixed physical path
-`~/.local/share/herdr-core/active/Herdr Core.app`, via the `current` symlink.
+`~/.local/share/atrous-core/active/Atrous Core.app`, via the `current` symlink.
 Previous bundles are kept aside while their cores or holders run; later installs
 reclaim unused previous bundles.
-Old updaters that copy only the executable remain compatible. Run `hc update`
+Old updaters that copy only the executable remain compatible. Run `atc update`
 to complete a bare install with the bundle, even if the version is already
 current; the app completes this during its update. Startup never downloads
 updates. Updates keep running terminals.
@@ -57,17 +62,17 @@ if privacy access is broken. Updates never kill them automatically.
 
 ## Verification
 
-The tag release is the Developer ID/notarization check. If signing,
-notarization or Gatekeeper assessment fails, the build fails and nothing
-publishes. No separate manual workflow receives Apple credentials.
+With Developer ID secrets set, the tag release is the Developer
+ID/notarization check: if signing, notarization or Gatekeeper assessment
+fails, the build fails and nothing publishes.
 
 For native scratch checks, `tests/macos.rs` verifies launchd isolation and the
-embedded identity. Compile `crates/herdr-core/tests/macos-dyld.c` with `cc`
+embedded identity. Compile `crates/atrous-core/tests/macos-dyld.c` with `cc`
 for a non-Apple probe: with no arguments it checks that DYLD_LIBRARY_PATH equals
-`/herdr-identity-test`; with core PID and caller PID arguments it checks their
+`/atrous-identity-test`; with core PID and caller PID arguments it checks their
 coalitions differ. Start only an isolated core with scratch XDG paths and
-HC_SESSION, set that DYLD value on startup, then run the probe using both
-`hc exec` and `hc run`. Reject a smoke if its core.log contains
+ATC_SESSION, set that DYLD value on startup, then run the probe using both
+`atc exec` and `atc run`. Reject a smoke if its core.log contains
 `launchd startup failed`, even if child commands succeed.
 
 These checks do not attempt LAN access or trigger privacy prompts. A GUI Mac

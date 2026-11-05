@@ -1,6 +1,17 @@
-# herdr-core changelog
+# atrous-core changelog
+
+Atrous core is a fork of [herdr-core](https://github.com/herdrdev/herdr-core).
+The entries from 0.1.18 down are herdr-core's history, kept as they were.
 
 ## Unreleased
+
+### New
+- Atrous core: herdr-core rebranded for Atrous. Its commands are `atrous-core` and `atc`, its folders, sockets and pipes are named `atrous-core`, and its variables start with `ATC_`, so it runs beside an installed herdr-core without sharing anything with it.
+- `atc update` and the installers use the GitHub releases of zecod/atrous-core. Nothing is sent to herdr's servers and there is no download counter.
+- A core started from inside an upstream core's terminal no longer ends when that terminal closes.
+
+### Fixed
+- Planned restarts and updates keep the core's environment for new terminals (herdr-core#21, the one fix after 0.1.18).
 
 ## [0.1.18] - 2026-11-04
 
