@@ -3780,8 +3780,9 @@ impl AppWindow {
         if cmd.get("commands").is_some() {
             return crate::commands::listing();
         }
-        // Atrous was launched again: this window comes to the front instead.
-        if cmd.get("raise").is_some() {
+        // Atrous was launched again: this window comes to the front instead
+        // (not one opened in the background, ATROUS_BACKGROUND).
+        if cmd.get("raise").is_some() && crate::opens_in_front() {
             cx.activate(true);
             window.activate_window();
             return json!({ "ok": true });

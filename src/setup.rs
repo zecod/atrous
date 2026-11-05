@@ -41,12 +41,15 @@ pub fn open(need: Need, requests: async_channel::Receiver<Request>, cx: &mut App
         window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(620.0), px(460.0)), cx))),
         titlebar: Some(TitlebarOptions { title: Some(crate::brand::NAME.into()), ..Default::default() }),
         app_id: Some(crate::app_id()),
+        focus: crate::opens_in_front(),
         ..Default::default()
     };
     let icon = Arc::new(Image::from_bytes(ImageFormat::Png, ICON.to_vec()));
     cx.open_window(options, |_, cx| cx.new(|_| Setup { need, state: State::Ready, requests: Some(requests), icon }))
         .expect("cannot open the Atrous window");
-    cx.activate(true);
+    if crate::opens_in_front() {
+        cx.activate(true);
+    }
 }
 
 impl Setup {

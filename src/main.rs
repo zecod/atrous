@@ -214,6 +214,12 @@ fn main() {
         });
 }
 
+/// `ATROUS_BACKGROUND=1`: the window opens behind the others and never takes
+/// the foreground (tests and scripts running Atrous beside someone at work).
+pub fn opens_in_front() -> bool {
+    std::env::var_os("ATROUS_BACKGROUND").is_none_or(|v| v.is_empty() || v == "0")
+}
+
 /// The main window, on a connected core.
 pub fn open_main(core: std::sync::Arc<hc::Core>, requests: async_channel::Receiver<mods::Request>, cx: &mut App) {
             let (window_bounds, display_id) = place::initial(cx);
@@ -231,9 +237,12 @@ pub fn open_main(core: std::sync::Arc<hc::Core>, requests: async_channel::Receiv
                 app_owns_titlebar_drag: cfg!(target_os = "macos"),
                 // Side-by-side builds (ATROUS_ID) get their own dock icon.
                 app_id: Some(app_id()),
+                focus: opens_in_front(),
                 ..Default::default()
             };
             cx.open_window(options, |window, cx| cx.new(|cx| window::AppWindow::new(core, requests, window, cx)))
                 .expect("cannot open the Atrous window");
-            cx.activate(true);
+            if opens_in_front() {
+                cx.activate(true);
+            }
 }

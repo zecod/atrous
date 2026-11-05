@@ -142,4 +142,6 @@ builds every platform and publishes the GitHub release with `manifest.json`,
 the tarballs, `changelog.md` and the installers.
 
 Never stop, signal, or restart someone else's app or core. Use an isolated
-app home and core session for testing.
+app home and core session for testing (`ATROUS_HOME`, `ATC_SESSION`), and
+`ATROUS_BACKGROUND=1` so the window opens behind the others and never takes
+the foreground from the person at the keyboard.
