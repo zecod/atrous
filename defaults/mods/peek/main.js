@@ -1,24 +1,27 @@
-// The bar on top of a peeked agent (an overlay the agents list opens for a
-// sub-agent, or a terminal address link): who it is and how it's doing, ↗ to
-// go to its pane (or, without one, keep it as a tab of the shown space), ✕ to
+// The bar on top of a peeked agent (an overlay the agents list opens for a sub-agent, or a
+// terminal address link), drawn like Fedra's pane header: who it is, where it works and how
+// it's doing; "Go to" its pane (or, without one, "Keep as tab" in the shown space), ✕ to
 // close. Props: { terminal, overlay }.
 
 import { View, div, image, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { agents, terminals, panes, run, theme, props, closeOverlay } from "atrous";
+import { agents, terminals, panes, run, theme, props, closeOverlay, home } from "atrous";
 
-const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const I = (name) => `mods/peek/${name}.svg`;
+
 // The icon from the app's program table: a one-color glyph or a picture.
 function icon(p, size, color) {
   if (!p?.icon) return null;
   return p.tint ? svg(p.icon).size(size).flex_none().text_color(color) : image(p.icon).w(size).h(size).flex_none();
 }
-const WORDS = { working: "working", blocked: "needs you", done: "finished", idle: "idle" };
+
+function folder(cwd) {
+  if (!cwd) return "";
+  const h = home();
+  return cwd === h ? "~" : cwd.startsWith(h + "/") ? "~" + cwd.slice(h.length) : cwd;
+}
 
 export default class Peek extends View {
-  init(_props, cx) {
-  }
-
   term() {
     return terminals().find((t) => t.address === props()?.terminal);
   }
@@ -28,17 +31,23 @@ export default class Peek extends View {
     return agents().find((a) => a.address === addr)?.status ?? this.term()?.status ?? null;
   }
 
-  button(t, id, label, onClick) {
-    return div()
+  button(t, id, iconName, label, tip, onClick) {
+    return h_flex()
       .id(id)
-      .px(8)
-      .py(2)
-      .rounded(5)
+      .h(24)
+      .px(label ? 8 : 5)
+      .gap(5)
+      .flex_none()
+      .items_center()
+      .rounded(6)
+      .text_size(12)
       .text_color(t.muted)
       .cursor_pointer()
       .hover((s) => s.bg(t.hover).text_color(t.foreground))
+      .tooltip(tip)
       .on_click(onClick)
-      .child(label);
+      .child(svg(I(iconName)).size(14).flex_none())
+      .when(Boolean(label), (el) => el.child(label));
   }
 
   render() {
@@ -46,31 +55,32 @@ export default class Peek extends View {
     const { terminal, overlay } = props() ?? {};
     const k = this.term();
     const st = this.status();
-    const pic = icon(k?.program, 14, t.foreground);
+    const pic = icon(k?.program, 14, t.dim);
     const parent = k?.parent ? terminals().find((p) => p.address === k.parent) : null;
-    const home = panes().some((p) => p.terminal === terminal);
-    const glyph = st === "working" ? SPIN[0] : st === "idle" ? "○" : st ? "●" : "·";
+    const inPane = panes().some((p) => p.terminal === terminal);
+    const name = k?.name || k?.template || k?.program?.name || terminal || "";
     return h_flex()
       .size_full()
-      .px(12)
+      .px(10)
       .gap(8)
       .items_center()
-      .bg(t.surface)
+      .bg(t.background)
       .border_b(1)
       .border_color(t.border)
       .text_size(12)
-      .child(div().w(12).flex_none().text_color(t[st] ?? t.dim).when(st === "working", (el) => el.frames(SPIN, 90)).child(glyph))
       .when(Boolean(pic), (el) => el.child(pic))
-      .child(div().truncate().font_semibold().text_color(t.foreground).child(k?.name || k?.template || k?.program?.name || terminal || ""))
-      .when(Boolean(st), (el) => el.child(div().flex_none().text_color(t[st] ?? t.dim).child(WORDS[st] ?? st)))
-      .when(Boolean(parent), (el) => el.child(div().truncate().text_color(t.dim).child(`from ${parent.name || parent.address}`)))
-      .child(div().flex_1())
+      .child(div().flex_none().max_w(260).truncate().font_medium().text_color(t.foreground).child(name))
+      .when(Boolean(parent), (el) => el.child(div().flex_none().max_w(180).truncate().text_color(t.dim).child(`from ${parent.name || parent.address}`)))
+      .child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(folder(k?.cwd)))
+      .when(st === "working", (el) => el.child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)))
+      .when(st === "blocked", (el) => el.child(div().flex_none().px(6).h(18).flex().items_center().rounded(5).bg(t.blocked + "26").text_size(10.5).font_semibold().text_color(t.blocked).child("Needs you")))
+      .when(st === "done", (el) => el.child(div().size(7).flex_none().rounded(4).bg(t.done)))
       .child(
-        this.button(t, "keep", home ? "↗ go to" : "↗ keep", () => {
-          run(home ? "pane.focus" : "terminal.keep", { terminal });
+        this.button(t, "keep", inPane ? "arrow-up-right" : "panel-top", inPane ? "Go to" : "Keep as tab", inPane ? "Go to its pane" : "Keep it as a tab of this space", () => {
+          run(inPane ? "pane.focus" : "terminal.keep", { terminal });
           closeOverlay(overlay);
         }),
       )
-      .child(this.button(t, "close", "✕", () => closeOverlay(overlay)));
+      .child(this.button(t, "close", "x", null, "Close (it keeps running)", () => closeOverlay(overlay)));
   }
 }

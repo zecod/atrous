@@ -1,7 +1,9 @@
 // Worktree dialog: { space, action: "new" | "open" | "remove" } or
 // { folder, machine } for a repo without a space; optional { branch, tab, argv }.
+// Drawn like Fedra's dialogs: the title and what it does, the field, then a footer with the
+// keys and the buttons (Remove in red); while git works, a spinner and its step.
 
-import { View, div } from "gpui-kit";
+import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Scrollbar } from "gpui-base";
 import { run, props, closeOverlay, theme, spaces, panes, exec, home } from "atrous";
 
@@ -148,7 +150,15 @@ export default class Worktree extends View {
         if (repo && this.opening) this.list = await checkouts(repo, this.on);
         this.repo = repo;
         cx.notify();
-        if (props().branch) await this.work(cx);
+        if (props().branch) return await this.work(cx);
+        // Enter pressed while the repo was still being read: do it now.
+        if (this.queued) { this.queued = false; if (repo) return await this.work(cx); }
+        // What a new branch starts from: this checkout's branch (or commit).
+        if (repo && !this.opening && props().action !== "remove") {
+          const head = await git(repo.top, ["rev-parse", "--abbrev-ref", "HEAD"], this.on);
+          this.from = head.ok && head.out !== "HEAD" ? head.out : (await git(repo.top, ["rev-parse", "--short", "HEAD"], this.on)).out || "HEAD";
+          cx.notify();
+        }
       } catch (error) { this.repo = null; this.error = String(error); cx.notify(); }
     });
   }
@@ -163,7 +173,11 @@ export default class Worktree extends View {
   }
 
   go(cx) {
-    if (this.busy || !this.repo) return;
+    // The open list's filter submits too: its Enter is the list's (key()), never a create.
+    if (this.busy || this.opening) return;
+    // Still reading the repo: keep the Enter for when it's known, instead of dropping it.
+    if (this.repo === undefined) { this.queued = true; cx.notify(); return; }
+    if (!this.repo) return;
     cx.spawn(async (cx) => this.work(cx));
   }
 
@@ -226,7 +240,8 @@ export default class Worktree extends View {
   }
 
   key(e, cx) {
-    if (e.key === "escape") return this.close();
+    // Not while git works: closing then would leave a checkout behind with no space.
+    if (e.key === "escape") { if (this.busy) return cx.stop_propagation(); return this.close(); }
     if (this.opening) {
       const n = this.shown().length;
       if (e.key === "enter") this.open(this.shown()[this.at]);
@@ -263,45 +278,76 @@ export default class Worktree extends View {
             .gap(8)
             .items_center()
             .child(div().flex_1().min_w(0).truncate().text_color(t.foreground).child(c.branch ?? "detached"))
-            .when(c.main, (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child("main checkout")))
+            .when(c.main, (el) => el.child(div().flex_none().px(5).h(16).flex().items_center().rounded(4).border_1().border_color(t.border).text_size(10).text_color(t.dim).child("main checkout")))
             .when(Boolean(there), (el) => el.child(div().flex_none().text_size(11).text_color(t.accent).child("open")))
             .when(!there && c.at > 0, (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(ago(c.at)))),
         )
         .child(div().truncate().text_size(11.5).text_color(t.dim).child(tilde(c.path, this.userHome ?? "")));
     };
-    const count = rows.length === all.length ? `${all.length} checkouts` : `${rows.length}/${all.length} checkouts`;
+    const plural = all.length === 1 ? "" : "s";
+    const count = rows.length === all.length ? `${all.length} checkout${plural}` : `${rows.length} of ${all.length} checkout${plural}`;
     return v_flex()
       .id("worktree")
       .track_focus(this.handle)
       .on_key_down((e, cx) => this.key(e, cx))
       .size_full()
-      .p(16)
-      .gap(10)
       .bg(t.popover)
       .text_size(13)
-      .child(h_flex().child(div().flex_1().font_semibold().text_color(t.foreground).child(`Open worktree${r ? ` of ${r.name}` : ""}`)).child(div().text_size(11).text_color(t.dim).child(r ? count : "")))
-      .when(r === undefined || (r && this.list === undefined), (el) => el.child(div().text_color(t.muted).child("\u2026")))
-      .when(r === null, (el) => el.child(div().text_color(t.muted).child(`${this.folder ? tilde(this.folder, this.userHome ?? "") : "This folder"} is not in a git repository.`)))
-      .when(Boolean(r && this.list), (el) =>
-        el
-          .child(Input.new(this.input).h(32).px(10).items_center().rounded(6).border(1).border_color(this.inputFocused ? t.accent : t.input).bg(t.background).text_color(t.foreground))
-          .child(
-            div()
-              .relative()
-              .flex_1()
-              .min_h(0)
+      .child(
+        v_flex()
+          .flex_1()
+          .min_h(0)
+          .px(18)
+          .pt(18)
+          .pb(12)
+          .gap(10)
+          .child(h_flex().items_center().child(div().flex_1().text_size(15).font_semibold().text_color(t.foreground).child(`Open worktree${r ? ` of ${r.name}` : ""}`)).child(div().text_size(11).text_color(t.dim).child(r && this.list ? count : "")))
+          .when(r === undefined || (r && this.list === undefined), (el) => el.child(div().text_color(t.muted).child("Reading the repository\u2026")))
+          .when(r === null, (el) => el.child(div().text_color(t.muted).child(`${this.folder ? tilde(this.folder, this.userHome ?? "") : "This folder"} is not in a git repository.`)))
+          .when(Boolean(r && this.list), (el) =>
+            el
+              .child(Input.new(this.input).h(34).px(10).items_center().rounded(8).border(1).border_color(this.inputFocused ? t.accent : t.input).bg(t.background).text_color(t.foreground))
               .child(
-                v_flex()
-                  .id("wt-list")
-                  .size_full()
-                  .overflow_y_scroll()
-                  .children(rows.map(row))
-                  .when(rows.length === 0, (el) => el.child(div().p(10).text_color(t.dim).child("No matching worktrees."))),
-              )
-              .child(Scrollbar.vertical("wt-list").absolute().inset_0()),
+                div()
+                  .relative()
+                  .flex_1()
+                  .min_h(0)
+                  .child(
+                    v_flex()
+                      .id("wt-list")
+                      .size_full()
+                      .overflow_y_scroll()
+                      .children(rows.map(row))
+                      .when(rows.length === 0, (el) => el.child(div().p(10).text_color(t.dim).child("No matching worktrees."))),
+                  )
+                  .child(Scrollbar.vertical("wt-list").absolute().inset_0()),
+              ),
           ),
       )
-      .child(h_flex().justify_end().text_size(11).text_color(t.dim).child("\u2191\u2193 choose \u00b7 \u21b5 open \u00b7 esc close"));
+      .child(
+        h_flex()
+          .flex_none()
+          .px(16)
+          .py(12)
+          .gap(8)
+          .items_center()
+          .border_t(1)
+          .border_color(t.border)
+          .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.dim).child("Enter to open \u00b7 Esc to close")),
+      );
+  }
+
+  // Fedra's button: h32, rounded 8, solid (primary) or raised (secondary).
+  // danger: the destructive primary (Remove), in the theme's needs-you red.
+  button(id, label, primary, enabled, action, t, busy = false, danger = false) {
+    const fill = danger ? t.blocked : t.solid, ink = danger ? t.background : t.solid_foreground;
+    return h_flex().id(id).h(32).px(14).gap(7).flex_none().items_center().rounded(8).border_1()
+      .border_color(primary ? fill : t.input).bg(primary ? fill : t.raised)
+      .text_color(primary ? ink : t.foreground).text_size(12.5).font_medium()
+      .when(!enabled && !busy, (el) => el.opacity(0.45)) // busy: full strength, just not clickable
+      .when(enabled, (el) => el.cursor_pointer().hover((s) => s.opacity(0.88)).on_click(action))
+      .when(busy, (el) => el.child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(primary ? ink : t.foreground).spin(900)))
+      .child(label);
   }
 
   render(cx) {
@@ -311,51 +357,73 @@ export default class Worktree extends View {
     const s = this.space();
     const r = this.repo;
     const title = remove ? `Remove worktree ${s?.name ?? ""}?` : `New worktree${r ? ` of ${r.name}` : ""}`;
-    const detail =
+    const line =
       r === undefined
-        ? "…"
+        ? "Reading the repository\u2026"
         : r === null
           ? `${this.folder ? tilde(this.folder, this.userHome) : "This folder"} is not in a git repository.`
           : remove
             ? !r.linked
               ? "This is the repository's main checkout, not a worktree."
               : `Closes the space and deletes ${tilde(r.top, this.userHome)}. The branch stays.`
-            : `A new space on a checkout in ${tilde(ROOT(this.userHome), this.userHome)}/${r.name}/. A branch that exists is checked out; a new one starts from here.`;
-    const blocked = !r || (remove && !r.linked);
+            : `A checkout in ${tilde(ROOT(this.userHome), this.userHome)}/${r.name}/, opened as its own space. A branch that exists is checked out; a new one starts from here.`;
+    const typed = this.text.trim().length > 0;
+    const showGo = !(r === null || (remove && r && !r.linked));
+    const canGo = !this.busy && (remove ? Boolean(r?.linked) : r !== null && typed);
+    // Cancel stays off while git runs: closing then would leave a checkout behind with no space.
+    const cancel = this.button("wt-cancel", showGo ? "Cancel" : "Close", false, !this.busy, () => this.close(), t);
+    const go = this.button("wt-go", this.busy ? (remove ? "Removing\u2026" : "Creating\u2026") : remove ? "Remove" : "Create worktree", true, canGo, (_e, cx) => this.go(cx), t, this.busy, remove);
+    const hint = this.busy ? "Keep this open until it's done" : this.queued ? "Reading the repository\u2026" : showGo ? (remove ? "Enter to remove \u00b7 Esc to cancel" : "Enter to create \u00b7 Esc to cancel") : "Esc to close";
+    // The content above may shrink and scroll; the footer below never leaves the dialog.
     return v_flex()
       .id("worktree")
       .track_focus(this.handle)
       .on_key_down((e, cx) => this.key(e, cx))
-      .size_full()
-      .p(16)
-      .gap(10)
+      .w_full()
+      .max_h_full()
       .bg(t.popover)
       .text_size(13)
-      .child(div().font_semibold().text_color(t.foreground).child(title))
-      .child(div().text_color(t.muted).child(detail))
-      .when(remove && this.dirty, (el) => el.child(div().text_color(t.blocked).child("It has uncommitted changes: they will be lost.")))
-      .when(remove && this.unpushed.length > 0, (el) => el.child(div().text_color(t.blocked).child(`Submodule ${this.unpushed.join(", ")} has commits that aren't pushed anywhere: they will be lost.`)))
-      .when(!remove && !blocked, (el) =>
-        el.child(
-          Input.new(this.input)
-            .h(32)
-            .px(10)
-            .items_center()
-            .rounded(6)
-            .border(1)
-            .border_color(this.inputFocused ? t.accent : t.input)
-            .bg(t.background)
-            .text_color(t.foreground),
-        ),
+      .child(
+        v_flex()
+          .id("wt-body")
+          .flex_shrink(1)
+          .min_h(0)
+          .overflow_y_scroll()
+          .px(18)
+          .pt(18)
+          .pb(14)
+          .gap(10)
+          .child(div().text_size(15).font_semibold().text_color(t.foreground).child(title))
+          .child(div().text_size(12.8).line_height("18px").text_color(t.muted).child(line))
+          .when(remove && this.dirty && Boolean(r?.linked), (el) => el.child(div().text_color(t.blocked).child("It has uncommitted changes: they will be lost.")))
+          .when(remove && this.unpushed.length > 0 && Boolean(r?.linked), (el) => el.child(div().text_color(t.blocked).child(`Submodule ${this.unpushed.join(", ")} has commits that aren't pushed anywhere: they will be lost.`)))
+          // Shown while the repo is still being read too, so it has the keyboard from the start.
+          .when(!remove && r !== null, (el) =>
+            el.child(
+              v_flex()
+                .gap(6)
+                .child(Input.new(this.input).h(34).px(10).items_center().rounded(8).border(1).border_color(this.inputFocused ? t.accent : t.input).bg(t.background).text_color(t.foreground))
+                .when(Boolean(r), (el) => el.child(div().text_size(11.5).text_color(t.dim).truncate().child(`from ${this.from ?? "\u2026"} \u00b7 ${r.name}`))),
+            ),
+          )
+          .when(this.busy, (el) => el.child(h_flex().gap(6).items_center().text_size(12).text_color(t.muted)
+            .child(svg("mods/workspace-chrome/spinner.svg").size(11).flex_none().text_color(t.working).spin(900))
+            .child(div().flex_1().min_w(0).truncate().child(remove ? "Removing the checkout\u2026" : "Checking out the branch\u2026"))))
+          .when(Boolean(this.error), (el) => el.child(div().text_color(t.blocked).child(this.error))),
       )
-      .when(Boolean(this.error), (el) => el.child(div().text_color(t.blocked).child(this.error)))
-      .child(div().flex_1())
       .child(
         h_flex()
-          .justify_end()
-          .text_size(11)
-          .text_color(t.dim)
-          .child(this.busy ? "working…" : blocked ? "esc close" : remove ? "↵ remove · esc cancel" : "↵ create · esc cancel"),
+          .flex_none()
+          .w_full()
+          .px(16)
+          .py(12)
+          .gap(8)
+          .items_center()
+          .border_t(1)
+          .border_color(t.border)
+          .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.dim).child(hint))
+          .child(cancel)
+          .when(showGo, (el) => el.child(go)),
       );
   }
 }

@@ -3,8 +3,9 @@
 // something first (atrous-core installed there, a password, a new host
 // key), the same command opens in a small terminal window where you answer
 // it; the list sees the machine once it's added. Opened as a dialog
-// (`mod.open machine-add`); the sidebars' Add machine and the welcome
-// open it.
+// (`mod.open machine-add`); the sidebars' Add machine, Settings > Machines and the
+// welcome open it. Drawn like Fedra's Add a project: a title with ✕, the hosts on a card,
+// and the field to type one.
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
@@ -224,38 +225,39 @@ export default class MachineAdd extends View {
     if (e.key === "escape") { this.close(); cx.stop_propagation(); }
   }
 
-  // The terminal window's title bar.
+  // The terminal window's title bar, like Fedra's quick-terminal header.
   bar(t) {
     return h_flex()
       .size_full()
-      .px(12)
-      .gap(8)
+      .px(10)
+      .gap(7)
       .items_center()
-      .bg(t.chrome)
+      .bg(t.background)
       .border_b(1)
       .border_color(t.border)
-      .text_size(12.5)
+      .text_size(12)
       .text_color(t.muted)
-      .child(svg(I("server")).size(14))
-      .child(div().flex_1().child(`Adding ${props().target}: answer it here`))
+      .child(svg(I("server")).size(13).text_color(t.muted))
+      .child(div().flex_1().min_w(0).truncate().child(`Adding ${props().target}: answer it here`))
       .child(
         div()
           .id("ma-bar-close")
-          .w(22)
-          .h(22)
-          .rounded(6)
+          .size(20)
+          .rounded(5)
           .flex()
           .items_center()
           .justify_center()
+          .text_color(t.dim)
           .cursor_pointer()
-          .hover((s) => s.bg(t.hover))
+          .hover((s) => s.bg(t.hover).text_color(t.foreground))
+          .tooltip("Close")
           .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
           .on_click(() => closeOverlay(props().overlay))
           .child(svg(I("x")).size(12)),
       );
   }
 
-  row(t, target, label, sub) {
+  row(t, target, label, sub, first) {
     const st = this.state[target];
     const done = this.isAdded(target);
     const right = done
@@ -266,39 +268,40 @@ export default class MachineAdd extends View {
           ? div().text_size(12).text_color(t.blocked).child("Waiting in its terminal")
           : div()
               .id(`ma-add-${target}`)
-              .px(10)
-              .h(26)
+              .px(12)
+              .h(28)
               .flex()
               .items_center()
               .rounded(7)
               .border_1()
               .border_color(t.input)
-              .bg(t.raised)
+              .bg(t.popover)
               .text_size(12)
               .font_medium()
+              .text_color(t.foreground)
               .cursor_pointer()
-              .hover((s) => s.bg(t.hover))
+              .hover((s) => s.opacity(0.88))
               .on_click((_e, cx) => this.add(target, cx))
               .child("Add");
     const idle = !done && !st;
     return v_flex()
       .flex_none()
+      .when(!first, (el) => el.border_t(1).border_color(t.border))
       .child(
         h_flex()
           .id(`ma-row-${target}`)
-          .h(40)
-          .px(10)
-          .gap(10)
+          .h(48)
+          .px(14)
+          .gap(12)
           .items_center()
-          .rounded(8)
           .hover((s) => s.bg(t.hover))
           .when(idle, (el) => el.cursor_pointer().on_click((_e, cx) => this.add(target, cx)))
-          .child(svg(I("server")).size(15).text_color(t.muted))
-          .child(div().flex_none().text_size(13).text_color(t.foreground).child(label))
+          .child(svg(I("server")).size(16).min_w(16).text_color(t.muted))
+          .child(div().flex_none().text_size(13.5).font_semibold().text_color(t.foreground).child(label))
           .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.dim).child(sub ?? ""))
           .child(right),
       )
-      .when(typeof st === "string" && !["adding", "terminal"].includes(st), (el) => el.child(div().px(35).pb(6).text_size(12).text_color(t.blocked).child(st)))
+      .when(typeof st === "string" && !["adding", "terminal"].includes(st), (el) => el.child(div().pl(42).pr(14).pb(10).text_size(12).text_color(t.blocked).child(st)))
       .when(Boolean(this.macs[target]), (el) => el.child(this.macCard(t, target)));
   }
 
@@ -306,39 +309,68 @@ export default class MachineAdd extends View {
     const t = theme();
     if (props()?.part === "bar") return this.bar(t);
     const hosts = this.hosts ?? [];
+    const label = (text) => div().pt(20).pb(8).text_size(11).font_semibold().text_color(t.dim).child(text.toUpperCase());
     return v_flex()
       .id("machine-add")
       .track_focus(this.handle)
       .on_key_down((e, cx) => this.key(e, cx))
       .w_full()
       .min_h(0)
-      .p(18)
+      .px(20)
+      .pt(16)
+      .pb(20)
       .bg(t.popover)
       .text_color(t.foreground)
-      .child(h_flex().items_center().child(div().flex_1().text_size(15).font_semibold().child("Add a machine")).child(div().text_size(11).text_color(t.dim).child("Esc")))
+      .text_size(13)
+      .child(
+        h_flex()
+          .items_center()
+          .gap(6)
+          .child(div().flex_1().text_size(17).font_bold().child("Add a machine"))
+          .child(
+            div()
+              .id("ma-close")
+              .size(28)
+              .flex()
+              .items_center()
+              .justify_center()
+              .rounded(7)
+              .text_color(t.muted)
+              .cursor_pointer()
+              .hover((s) => s.bg(t.hover).text_color(t.foreground))
+              .tooltip("Close (Esc)")
+              .on_click(() => this.close())
+              .child(svg(I("x")).size(16)),
+          ),
+      )
       .child(
         div()
-          .pt(6)
+          .pt(8)
           .text_size(12.8)
           .line_height("19px")
           .text_color(t.muted)
           .child("A VPS, a Mac mini, a box at home: Atrous reaches it over ssh, and agents there keep running while your laptop sleeps."),
       )
-      .child(div().pt(16).pb(6).text_size(11.5).font_medium().text_color(t.dim).child(hosts.length ? "From your ssh config" : "Your ssh config lists no hosts"))
-      .child(
+      .when(this.hosts !== null && hosts.length === 0, (el) => el.child(div().pt(16).text_size(12.5).text_color(t.dim).child("Your ssh config (~/.ssh/config) lists no hosts yet.")))
+      .when(this.hosts === null || hosts.length > 0, (el) => el.child(label("From your ssh config")))
+      .when(this.hosts === null || hosts.length > 0, (el) => el.child(
         v_flex()
           .id("ma-hosts")
           .max_h(280)
           .min_h(0)
           .flex_shrink(1)
           .overflow_y_scroll()
+          .rounded(10)
+          .border_1()
+          .border_color(t.border)
+          .bg(t.raised)
           .children(
             this.hosts === null
-              ? [div().px(10).py(8).text_size(12.5).text_color(t.dim).child("Reading ~/.ssh/config…")]
-              : hosts.map((h) => this.row(t, h.alias, h.alias, [h.user, h.hostname].filter(Boolean).join("@") || (h.aliases.length ? `also ${h.aliases.join(", ")}` : ""))),
+              ? [div().px(14).py(12).text_size(12.5).text_color(t.dim).child("Reading ~/.ssh/config…")]
+              : hosts.map((h, i) => this.row(t, h.alias, h.alias, [h.user, h.hostname].filter(Boolean).join("@") || (h.aliases.length ? `also ${h.aliases.join(", ")}` : ""), i === 0)),
           ),
-      )
-      .child(div().pt(14).pb(6).text_size(11.5).font_medium().text_color(t.dim).child("Or type how ssh reaches it"))
+      ))
+      .child(label(hosts.length ? "Or type how ssh reaches it" : "Type how ssh reaches it"))
       .child(
         h_flex()
           .gap(8)
@@ -364,12 +396,14 @@ export default class MachineAdd extends View {
               .flex()
               .items_center()
               .rounded(8)
+              .border_1()
+              .border_color(t.solid)
               .bg(t.solid)
               .text_color(t.solid_foreground)
               .text_size(12.5)
               .font_medium()
-              .when(!this.typed.trim(), (el) => el.opacity(0.4))
-              .cursor_pointer()
+              .when(!this.typed.trim(), (el) => el.opacity(0.45))
+              .when(Boolean(this.typed.trim()), (el) => el.cursor_pointer().hover((s) => s.opacity(0.88)))
               .on_click((_e, cx) => this.add(this.typed, cx))
               .child("Add"),
           ),

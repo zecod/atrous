@@ -7,7 +7,7 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { commands, layouts, keys, run, theme, props, closeOverlay, openOverlay, shared, window as win } from "atrous";
+import { commands, layouts, layout, keys, run, theme, props, closeOverlay, openOverlay, shared, window as win } from "atrous";
 
 // The list keeps one height while you move: rows and group titles have fixed
 // heights, and the window shows as many as fit in LIST_H.
@@ -51,16 +51,32 @@ const NAMED = [
   ["window.maximize", {}, "Window", "Maximize window", "restore"],
   ["window.close", {}, "Window", "Close window", "quit"],
   ["app.settings", {}, "App", "Settings", "preferences options config look font theme sound"],
-  ["app.help", {}, "App", "Keys", "keybindings shortcuts help"],
-  ["app.welcome", {}, "App", "Welcome", "intro start onboarding"],
+  ["app.help", {}, "App", "Keys and help", "keybindings shortcuts help about readme issues"],
+  ["app.welcome", {}, "App", "Welcome / Onboarding", "intro start onboarding setup tour"],
   ["app.whats_new", {}, "App", "What's new", "release changes news update"],
   ["app.reset", {}, "App", "Reset to the default screen", "escape hatch broken restore"],
   ["app.zoom_in", {}, "App", "Zoom in", "bigger font size"],
   ["app.zoom_out", {}, "App", "Zoom out", "smaller font size"],
   ["app.zoom_reset", {}, "App", "Reset zoom", "font size"],
   ["app.quit", {}, "App", "Quit Atrous", "exit"],
-  ...["graphite", "ink", "moss", "atom-one-dark"].map((n) => ["app.theme", { name: n }, "App", `Theme: ${n.replace(/-/g, " ")}`, "colors look"]),
+  ...["moss", "paper", "graphite", "ink", "atom-one-dark"].map((n) => ["app.theme", { name: n }, "App", `Theme: ${n.replace(/-/g, " ")}`, "colors look light dark"]),
 ];
+
+// Fedra's own commands: shown when the layout has the mod that answers them.
+const MOD_NAMED = [
+  ["my-status.toggle", {}, "Terminal", "Quick terminal", "toggle bottom panel shell console", "my-status"],
+];
+
+// A command whose key is bound under another action (Fedra's Settings key opens its own mod).
+const SAME_KEY = { "app.settings": ["mod.open:my-settings"] };
+
+// The layout's mods by name.
+function modsIn(node, out = new Set()) {
+  if (node?.content?.mod) out.add(node.content.mod);
+  for (const child of node?.children ?? []) modsIn(child, out);
+  for (const child of node?.floating ?? []) modsIn(child, out);
+  return out;
+}
 
 // Commands that act on something you point at (ids, terminals): not for a list.
 const HIDDEN = new Set([
@@ -83,8 +99,10 @@ function entries() {
   const list = NAMED.filter(([n]) => known.has(n))
     .filter(([n]) => !(mac && n.startsWith("window.")))
     .map(([name, args, group, title, words]) => ({ name, args, group, title, words }));
+  const shown = modsIn(layout());
+  for (const [name, args, group, title, words, mod] of MOD_NAMED) if (shown.has(mod)) list.push({ name, args, group, title, words });
   for (const l of layouts()) {
-    const t = { main: "Classic", terminals: "Terminals", win98: "Atrous 98" }[l] ?? l.charAt(0).toUpperCase() + l.slice(1);
+    const t = { main: "Classic", terminals: "Terminals", fedra: "Fedra", flow: "Flow" }[l] ?? l.charAt(0).toUpperCase() + l.slice(1);
     list.push({ name: "layout.switch", args: { name: l }, group: "Layout", title: `Layout: ${t}`, words: `look ${l}` });
   }
   // Anything new in the app shows up too, until it gets a better name here.
@@ -99,14 +117,24 @@ function entries() {
 // The key bound to an entry: `name` or `name:value` in keys.json.
 function keyOf(e, bound) {
   const v = Object.values(e.args)[0];
-  const want = v === undefined ? e.name : `${e.name}:${v}`;
-  const k = bound.find((b) => b.section === "global" && b.action === want);
+  const want = [v === undefined ? e.name : `${e.name}:${v}`, ...(v === undefined ? SAME_KEY[e.name] ?? [] : [])];
+  const k = want.map((w) => bound.find((b) => b.section === "global" && b.action === w)).find(Boolean);
   return k ? k.keys : null;
 }
 
-// "ctrl-shift-p" -> ["ctrl", "shift", "p"]; "ctrl--" -> ["ctrl", "-"].
+// "ctrl-shift-p" -> ["Ctrl", "Shift", "P"]; "ctrl--" -> ["Ctrl", "-"]; ⌘ ⌥ ⇧ ⌃ on macOS,
+// as the status bar writes keys.
+const KEY_NAMES = { pageup: "PgUp", pagedown: "PgDn", escape: "Esc", backspace: "Backspace", enter: "Enter", tab: "Tab", space: "Space", left: "←", right: "→", up: "↑", down: "↓" };
 function keyParts(k) {
-  return k.endsWith("--") ? [...k.slice(0, -2).split("-"), "-"] : k.split("-");
+  const mac = win()?.platform === "macos";
+  const parts = k.split("-");
+  let key = parts.pop();
+  if (key === "") { key = "-"; parts.pop(); }
+  const names = mac ? { ctrl: "⌃", alt: "⌥", shift: "⇧", cmd: "⌘", fn: "fn" } : { ctrl: "Ctrl", alt: "Alt", shift: "Shift", cmd: "Super", fn: "Fn" };
+  const alias = { secondary: mac ? "cmd" : "ctrl", super: "cmd", win: "cmd", platform: "cmd", control: "ctrl", option: "alt" };
+  const held = new Set(parts.map((m) => alias[m.toLowerCase()] ?? m.toLowerCase()));
+  const name = KEY_NAMES[key.toLowerCase()] ?? (key.length === 1 ? key.toUpperCase() : key[0].toUpperCase() + key.slice(1));
+  return [...Object.keys(names).filter((m) => held.has(m)).map((m) => names[m]), name];
 }
 
 // Fuzzy score of `q` in `text`, with the matched positions; null: no match.
@@ -228,7 +256,7 @@ export default class Palette extends View {
     }
     this.scroll = Math.max(0, Math.min(this.scroll, this.maxScroll));
     const key = (k) =>
-      h_flex().gap(3).children(keyParts(k).map((p) => div().px(5).rounded(4).border_1().border_color(t.border).bg(t.raised).text_size(11).text_color(t.dim).child(p)));
+      h_flex().gap(3).flex_none().children(keyParts(k).map((p) => div().min_w(20).h(20).px(5).flex().items_center().justify_center().rounded(5).border_1().border_color(t.border).bg(t.raised).text_size(11).text_color(t.muted).child(p)));
     // In a scrolling list each item is placed at its edges from the model
     // above, not stacked: GPUI rounds every height to whole pixels, and a
     // stack of rounded heights drifts away from the model (19 px at zoom 1.3

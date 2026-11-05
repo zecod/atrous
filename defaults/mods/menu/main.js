@@ -2,10 +2,12 @@
 // props { tab: "pane" | "tab" | "space" | "global", target }.
 // ↑/↓ move, Enter runs, Esc closes. An item is [label, command, args];
 // a command "worktree" opens the worktree dialog instead.
+// Drawn like Fedra's menus: what it's for on a dim first line, an icon per item, and the
+// item's key as the status bar writes it (Ctrl+Shift+O, ⌘D on macOS).
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { run, props, closeOverlay, openOverlay, theme, keys, terminals, spaces, panes, exec } from "atrous";
+import { run, props, closeOverlay, openOverlay, theme, keys, terminals, spaces, panes, exec, window } from "atrous";
 
 // Where a space is now: its first terminal's live folder, else where it was made.
 function place(s) {
@@ -63,13 +65,33 @@ function items(p, git) {
     default:
       return [
         ["New space", "space.new", {}],
-        ["Keybinds", "app.help", {}],
+        ["Keys and help", "app.help", {}],
+        ["Theme: moss", "app.theme", { name: "moss" }],
+        ["Theme: paper", "app.theme", { name: "paper" }],
         ["Theme: graphite", "app.theme", { name: "graphite" }],
         ["Theme: ink", "app.theme", { name: "ink" }],
-        ["Theme: moss", "app.theme", { name: "moss" }],
         ["Theme: atom one dark", "app.theme", { name: "atom-one-dark" }],
       ];
   }
+}
+
+// What the menu is about, for its dim first line: the pane's program, the tab, the space.
+function about(p) {
+  const tg = p?.target ?? {};
+  if (p?.tab === "pane") {
+    const term = terminals().find((t) => t.address === tg.terminal);
+    const name = term?.name || term?.program?.name || term?.title;
+    return name ? `${name} · ${term.address}` : null;
+  }
+  if (p?.tab === "tab") {
+    const tab = spaces().flatMap((s) => s.tabs ?? []).find((c) => c.id === tg.id);
+    return tab ? (tab.named ? tab.name : `Tab ${tab.index}`) : null;
+  }
+  if (p?.tab === "space") {
+    const space = spaces().find((s) => s.id === tg.id);
+    return space ? `${space.name}${space.machine ? ` · ${space.machine}` : ""}` : null;
+  }
+  return null;
 }
 
 function menuIcon(command) {
@@ -77,12 +99,23 @@ function menuIcon(command) {
   return `mods/workspace-chrome/${name}.svg`;
 }
 
-// The key bound to a command, for the hint on the right.
+// The key bound to a command, for the hint on the right, written as the status bar does.
 function shortcut(name, args) {
   // `pane.split:right` binds pane.split with { direction: "right" }.
   const value = args && Object.values(args)[0];
   const k = keys().find((b) => b.section === "global" && (b.action === name || b.action === `${name}:${value}`));
-  return k ? k.keys : "";
+  if (!k?.keys.trim()) return "";
+  const mac = window()?.platform === "macos";
+  const names = mac ? { ctrl: "⌃", alt: "⌥", shift: "⇧", cmd: "⌘", fn: "fn" } : { ctrl: "Ctrl", alt: "Alt", shift: "Shift", cmd: "Super", fn: "Fn" };
+  const alias = { secondary: mac ? "cmd" : "ctrl", super: "cmd", win: "cmd" };
+  return k.keys.trim().split(/\s+/).map((stroke) => {
+    const parts = stroke.split("-");
+    let key = parts.pop();
+    if (key === "") { key = "-"; parts.pop(); }
+    const held = new Set(parts.map((m) => alias[m.toLowerCase()] ?? m.toLowerCase()));
+    const label = key.length === 1 ? key.toUpperCase() : key[0].toUpperCase() + key.slice(1).toLowerCase();
+    return [...Object.keys(names).filter((m) => held.has(m)).map((m) => names[m]), label].join(mac ? "" : "+");
+  }).join(" ");
 }
 
 export default class Menu extends View {
@@ -105,13 +138,14 @@ export default class Menu extends View {
     const it = items(props(), this.git)[i];
     if (!it) return;
     closeOverlay(props()?.overlay);
-    if (it[1] === "worktree") openOverlay({ mod: "worktree", kind: "dialog", ...(it[2].action === "open" ? { width: 560, height: 480 } : { width: 440, height: 260 }), props: it[2] });
+    if (it[1] === "worktree") openOverlay({ mod: "worktree", kind: "dialog", ...(it[2].action === "open" ? { width: 560, height: 480 } : { width: 460 }), props: it[2] });
     else run(it[1], it[2]);
   }
 
   render(cx) {
     const t = theme();
     const list = items(props(), this.git);
+    const head = about(props());
     return v_flex()
       .id("menu")
       .track_focus(this.handle)
@@ -128,6 +162,7 @@ export default class Menu extends View {
         else return;
         cx.notify();
       })
+      .when(Boolean(head), (el) => el.child(div().px(8).pt(4).pb(6).text_size(11).text_color(t.dim).truncate().child(head)))
       .children(
         list.map((it, i) =>
           v_flex()
@@ -140,13 +175,14 @@ export default class Menu extends View {
             .rounded(7)
             .items_center()
             .justify_between()
+            .cursor_pointer()
             .text_color(t.foreground)
             .when(i === this.at, (el) => el.bg(t.selected))
-            .hover((s) => s.bg(t.hover))
+            .when(i !== this.at, (el) => el.hover((s) => s.bg(t.hover)))
             .on_click((_e, cx) => this.choose(i, cx))
             .child(svg(menuIcon(it[1])).size(14).flex_none().text_color(t.muted))
-            .child(div().flex_1().child(it[0]))
-            .child(div().text_size(11).text_color(t.dim).child(shortcut(it[1], it[2])))),
+            .child(div().flex_1().min_w(0).truncate().child(it[0]))
+            .child(div().flex_none().text_size(11).text_color(t.dim).child(shortcut(it[1], it[2])))),
         ),
       );
   }
