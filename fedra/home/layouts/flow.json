@@ -1,0 +1,149 @@
+{
+  "id": "root",
+  "preview": "layouts/flow.svg",
+  "type": "column",
+  "children": [
+    {
+      "id": "flow-bar",
+      "type": "block",
+      "content": {
+        "mod": "flow-canvas",
+        "props": {
+          "part": "bar"
+        }
+      },
+      "size": {
+        "px": 40
+      },
+      "window_drag": true
+    },
+    {
+      "id": "work-split",
+      "type": "column",
+      "children": [
+        {
+          "id": "flow-body",
+          "type": "row",
+          "divider": {
+            "width": 1,
+            "color": "border"
+          },
+          "children": [
+            {
+              "id": "canvas",
+              "type": "block",
+              "content": {
+                "mod": "flow-canvas"
+              },
+              "min": 320
+            },
+            {
+              "id": "flow-terminal",
+              "type": "column",
+              "size": {
+                "px": 560
+              },
+              "min": 300,
+              "max": 1200,
+              "background": "background",
+              "children": [
+                {
+                  "id": "flow-terminal-header",
+                  "type": "block",
+                  "content": {
+                    "mod": "flow-canvas",
+                    "props": {
+                      "part": "terminal"
+                    }
+                  },
+                  "size": {
+                    "px": 36
+                  }
+                },
+                {
+                  "id": "flow-terminal-agent",
+                  "type": "block",
+                  "content": {
+                    "agent": "focused"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "quick-terminal",
+          "type": "column",
+          "hidden": true,
+          "size": {
+            "px": 260
+          },
+          "min": 120,
+          "max": 700,
+          "padding": 8,
+          "children": [
+            {
+              "id": "quick-terminal-card",
+              "type": "column",
+              "radius": 10,
+              "border": {
+                "width": 1,
+                "color": "border"
+              },
+              "background": "background",
+              "children": [
+                {
+                  "id": "quick-terminal-header",
+                  "type": "block",
+                  "content": {
+                    "mod": "my-status",
+                    "props": {
+                      "part": "terminal-header"
+                    }
+                  },
+                  "size": {
+                    "px": 30
+                  }
+                },
+                {
+                  "id": "quick-terminal-term",
+                  "type": "block",
+                  "content": {
+                    "mod": "my-status",
+                    "props": {
+                      "part": "terminal-empty"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "status",
+      "type": "block",
+      "content": {
+        "mod": "my-status"
+      },
+      "size": {
+        "px": 28
+      }
+    }
+  ],
+  "background": "canvas",
+  "theme": {
+    "light": "paper",
+    "dark": "moss"
+  },
+  "terminal_padding": [
+    14,
+    12
+  ],
+  "titlebar": "none",
+  "traffic_lights": [
+    12,
+    14
+  ]
+}

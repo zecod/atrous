@@ -34,7 +34,7 @@ const SECTIONS = [
 // the heatmap is laid out for it before its first measurement.
 const USAGE_WIDTH = 713;
 
-const LOOKS = { fedra: "Fedra", terminals: "Terminals", win98: "Atrous 98", main: "Classic" };
+const LOOKS = { fedra: "Fedra", flow: "Flow", terminals: "Terminals", main: "Classic" };
 // Layouts left out of the picker unless shown now (Classic, the stock layout Fedra replaces).
 // Still reachable with Ctrl+Shift+L.
 const HIDDEN_LOOKS = new Set(["main"]);

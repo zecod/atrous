@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Spun behind a small window far from its centre, the window brightens and dims once a turn: a pulse. -->
+  <path d="M50 50L100.00 49.48A50 50 0 0 1 98.16 63.45Z" fill="#fff" fill-opacity="1.00"/>
+  <path d="M50 50L98.43 62.43A50 50 0 0 1 93.04 75.45Z" fill="#fff" fill-opacity="0.97"/>
+  <path d="M50 50L93.56 74.55A50 50 0 0 1 84.98 85.72Z" fill="#fff" fill-opacity="0.92"/>
+  <path d="M50 50L85.72 84.98A50 50 0 0 1 74.55 93.56Z" fill="#fff" fill-opacity="0.85"/>
+  <path d="M50 50L75.45 93.04A50 50 0 0 1 62.43 98.43Z" fill="#fff" fill-opacity="0.76"/>
+  <path d="M50 50L63.45 98.16A50 50 0 0 1 49.48 100.00Z" fill="#fff" fill-opacity="0.66"/>
+  <path d="M50 50L50.52 100.00A50 50 0 0 1 36.55 98.16Z" fill="#fff" fill-opacity="0.56"/>
+  <path d="M50 50L37.57 98.43A50 50 0 0 1 24.55 93.04Z" fill="#fff" fill-opacity="0.46"/>
+  <path d="M50 50L25.45 93.56A50 50 0 0 1 14.28 84.98Z" fill="#fff" fill-opacity="0.37"/>
+  <path d="M50 50L15.02 85.72A50 50 0 0 1 6.44 74.55Z" fill="#fff" fill-opacity="0.30"/>
+  <path d="M50 50L6.96 75.45A50 50 0 0 1 1.57 62.43Z" fill="#fff" fill-opacity="0.25"/>
+  <path d="M50 50L1.84 63.45A50 50 0 0 1 0.00 49.48Z" fill="#fff" fill-opacity="0.22"/>
+  <path d="M50 50L0.00 50.52A50 50 0 0 1 1.84 36.55Z" fill="#fff" fill-opacity="0.22"/>
+  <path d="M50 50L1.57 37.57A50 50 0 0 1 6.96 24.55Z" fill="#fff" fill-opacity="0.25"/>
+  <path d="M50 50L6.44 25.45A50 50 0 0 1 15.02 14.28Z" fill="#fff" fill-opacity="0.30"/>
+  <path d="M50 50L14.28 15.02A50 50 0 0 1 25.45 6.44Z" fill="#fff" fill-opacity="0.37"/>
+  <path d="M50 50L24.55 6.96A50 50 0 0 1 37.57 1.57Z" fill="#fff" fill-opacity="0.46"/>
+  <path d="M50 50L36.55 1.84A50 50 0 0 1 50.52 0.00Z" fill="#fff" fill-opacity="0.56"/>
+  <path d="M50 50L49.48 0.00A50 50 0 0 1 63.45 1.84Z" fill="#fff" fill-opacity="0.66"/>
+  <path d="M50 50L62.43 1.57A50 50 0 0 1 75.45 6.96Z" fill="#fff" fill-opacity="0.76"/>
+  <path d="M50 50L74.55 6.44A50 50 0 0 1 85.72 15.02Z" fill="#fff" fill-opacity="0.85"/>
+  <path d="M50 50L84.98 14.28A50 50 0 0 1 93.56 25.45Z" fill="#fff" fill-opacity="0.92"/>
+  <path d="M50 50L93.04 24.55A50 50 0 0 1 98.43 37.57Z" fill="#fff" fill-opacity="0.97"/>
+  <path d="M50 50L98.16 36.55A50 50 0 0 1 100.00 50.52Z" fill="#fff" fill-opacity="1.00"/>
+</svg>
