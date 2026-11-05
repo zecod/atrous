@@ -21,17 +21,23 @@
 // never by editing the layout file. my-tabs remembers the panel per space from what it sees, so
 // putting it back also puts back that memory.
 //
+// As a dialog, for layouts that show no tabs (Flow: flow-canvas opens it when a start tab
+// appears): props { tab, space, pending? } name the start tab it stands for. It closes the space's
+// fresh shell tab the same way (once per start tab, only when the space holds just the two), a
+// pick replaces the start tab, and `pending` (Flow's "flow.pending") hands the new terminal over
+// so the canvas shows it at once. Esc or the x closes it and leaves the project as it is.
+//
 // Props: { folder?, machine?, fresh?, existing?, panel? } (folder: else the space's). Keys while it has the
 // keyboard: 1-9 start the agent with that number, T a terminal. Commands (`start.<name>`):
 // focus, start:<agent key>, terminal.
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { run, theme, props, spaces, panes, focused, shared, setShared, layout, nextCommand, openOverlay, window } from "atrous";
+import { run, theme, props, spaces, panes, terminals, shared, setShared, layout, nextCommand, openOverlay, closeOverlay, window } from "atrous";
 import { agentOrder, noteAgentUse, cachedAgents, loadAgents } from "./agent-order.js";
 
 const MOD = "start";
-const CLEANED = "start.cleaned"; // shared: { "<fresh token>": ms }, the shell tabs already closed
+const CLEANED = "start.cleaned"; // shared: { "<fresh token>" | "tab:<start tab>": ms }, the shell tabs already closed
 const I = (name) => `mods/start/${name}.svg`;
 const GAP = 12;
 const CARD_MIN = 140; // px: the narrowest a card gets before a column goes
@@ -60,13 +66,15 @@ function sidePanel() {
 
 export default class ProjectStart extends View {
   init(_props, cx) {
-    this.machine = props()?.machine ?? null;
+    const p = props() ?? {};
+    this.dialog = Boolean(p.overlay && p.tab && p.space); // standing in for a start tab the layout can't show
+    this.machine = p.machine ?? (this.dialog ? spaces().find((s) => s.id === p.space)?.machine : null) ?? null;
     this.agents = cachedAgents(this.machine); // the last list, at once; checked again below
     this.loaded = false;
     this.starting = false;
     this.handle = cx.focus_handle();
     this.handle.focus();
-    this.hidePanel();
+    if (!this.dialog) this.hidePanel();
     this.settle(cx, 0);
     cx.spawn(async (cx) => {
       try {
@@ -91,35 +99,60 @@ export default class ProjectStart extends View {
     });
   }
 
-  // This pane's tab and space. A tab's mod starts the first time it shows, so at the start it's
-  // the shown tab; kept from then on.
+  // This pane's tab and space, once settle() found them (null until then).
   whoAmI() {
-    if (this.me) return this.me;
-    const mine = panes().filter((p) => p.mod === MOD);
-    const shown = focused()?.tab;
-    const pane = mine.find((p) => p.tab === shown) ?? (mine.length === 1 ? mine[0] : null);
-    const space = pane && spaces().find((s) => (s.tabs ?? []).some((t) => t.id === pane.tab));
-    if (!space) return null;
-    this.me = { tab: pane.tab, space: space.id };
-    return this.me;
+    return this.me ?? null;
   }
 
-  // Finds itself (a few tries while the window catches up), then closes the shell tab space.new made.
+  // Which start pane this is, or null if the live data can't tell yet: when a copy starts, the
+  // spaces and panes it reads can still be the ones from before its space existed. A new project's
+  // (props.existing): the one start pane in a space that wasn't there before, in its folder, and
+  // nothing else. Otherwise (a start tab after a restart) the active space's active tab: a tab's mod
+  // starts the first time it shows. Never focused(), which lags behind a new space too.
+  identify() {
+    const p = props() ?? {};
+    if (this.dialog) return { tab: p.tab, space: p.space };
+    const mine = panes().filter((x) => x.mod === MOD);
+    const spaceOf = (tab) => spaces().find((s) => (s.tabs ?? []).some((t) => t.id === tab));
+    let pane = null;
+    if (Array.isArray(p.existing)) {
+      const fits = mine.filter((x) => {
+        const s = spaceOf(x.tab);
+        return s && !p.existing.includes(s.id) && (!p.folder || samePath(s.folder, p.folder));
+      });
+      pane = fits.length === 1 ? fits[0] : null;
+    } else {
+      const shown = spaces().find((s) => s.active);
+      const tab = (shown?.tabs ?? []).find((t) => t.active)?.id;
+      pane = mine.find((x) => x.tab === tab) ?? null;
+    }
+    const space = pane && spaceOf(pane.tab);
+    return space ? { tab: pane.tab, space: space.id } : null;
+  }
+
+  // Finds itself (tries for 3 s while the live data catches up), then closes the shell tab
+  // space.new made. The first look waits a moment for the same reason.
   settle(cx, tries) {
-    if (this.whoAmI()) return this.cleanUp();
-    if (tries < 20) cx.timer.after(100, (cx) => { this.settle(cx, tries + 1); cx.notify(); });
+    const me = tries > 0 || this.dialog ? this.identify() : null;
+    if (me) {
+      this.me = me;
+      this.cleanUp();
+      return;
+    }
+    if (tries < 30) cx.timer.after(100, (cx) => { this.settle(cx, tries + 1); cx.notify(); });
   }
 
   cleanUp() {
     const p = props() ?? {};
-    const token = p.fresh;
+    const token = p.fresh ?? (this.dialog ? `tab:${p.tab}` : null);
     if (!token) return;
     const done = shared(CLEANED) ?? {};
     if (done[token]) return;
     const me = this.me;
     const space = spaces().find((s) => s.id === me.space);
     const others = (space?.tabs ?? []).filter((t) => t.id !== me.tab);
-    const made = Array.isArray(p.existing) && !p.existing.includes(me.space);
+    // The dialog can't see the start tab's props: the space holding just it and a plain shell says enough.
+    const made = this.dialog || (Array.isArray(p.existing) && !p.existing.includes(me.space));
     const here = !p.folder || samePath(space?.folder, p.folder);
     const lone = others.length === 1 ? panes().filter((x) => x.tab === others[0].id) : [];
     const plainShell = lone.length === 1 && Boolean(lone[0].terminal) && !lone[0].status && !lone[0].app;
@@ -163,10 +196,16 @@ export default class ProjectStart extends View {
     if (this.starting || !me) return;
     this.starting = true;
     const folder = this.folder();
+    const pending = props()?.pending;
+    if (this.dialog && pending) {
+      const before = terminals().filter((k) => k.labels?.["atrous.space"] === me.space).map((k) => k.address);
+      setShared(pending, { space: me.space, before, at: Date.now() });
+    }
     run("tab.new", { space: me.space, ...(folder ? { folder } : {}), ...(agent ? { name: agent.name, argv: agent.run } : {}) });
     if (agent) noteAgentUse(agent.key);
     run("tab.close", { id: me.tab });
-    this.restorePanel();
+    if (this.dialog) closeOverlay(props().overlay);
+    else this.restorePanel();
     // Still here a moment later (the tab couldn't start): the buttons work again.
     cx.timer.after(3000, (cx) => { this.starting = false; cx.notify(); });
     cx.notify();
@@ -307,6 +346,7 @@ export default class ProjectStart extends View {
         : h_flex().gap(8).items_center().py(10)
             .child(svg(I("spinner")).size(13).text_color(t.muted).spin(900))
             .child(div().text_size(12.5).text_color(t.dim).child("Looking for your agents…"));
+    const name = this.space()?.name || "this project";
     return v_flex()
       .id("start-root")
       .track_focus(this.handle)
@@ -315,11 +355,8 @@ export default class ProjectStart extends View {
         this.width = size.width;
         cx.notify();
       })
-      .size_full()
-      .bg(t.background)
-      .items_center()
-      .justify_center()
-      .p(24)
+      .when(!this.dialog, (el) => el.size_full().bg(t.background).items_center().justify_center().p(24))
+      .when(this.dialog, (el) => el.w_full().bg(t.popover).items_center().px(24).pt(18).pb(22))
       .on_key_down((e, cx) => {
         const m = e.modifiers ?? {};
         if (m.control || m.alt || m.platform) return;
@@ -334,8 +371,31 @@ export default class ProjectStart extends View {
         v_flex()
           // As wide as the buttons in a row, so a few stay centered.
           .w(Math.max(1, Math.min(cols, installed.length || cols)) * (cardW + GAP) - GAP)
-          .pb(40)
-          .child(div().pb(12).text_size(11.5).font_semibold().text_color(t.dim).child("START AN AGENT"))
+          .when(!this.dialog, (el) => el.pb(40).child(div().pb(12).text_size(11.5).font_semibold().text_color(t.dim).child("START AN AGENT")))
+          .when(this.dialog, (el) =>
+            el.child(
+              h_flex()
+                .pb(14)
+                .gap(8)
+                .items_center()
+                .child(div().flex_1().min_w(0).truncate().text_size(15).font_semibold().text_color(t.foreground).child(`Start an agent in ${name}`))
+                .child(
+                  div()
+                    .id("ps-close")
+                    .size(26)
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(7)
+                    .cursor_pointer()
+                    .text_color(t.muted)
+                    .hover((s) => s.bg(t.hover).text_color(t.foreground))
+                    .on_click(() => closeOverlay(props().overlay))
+                    .child(svg(I("x")).size(13)),
+                ),
+            ),
+          )
           .child(body)
           .child(h_flex().pt(18).child(this.terminalButton(t))),
       );

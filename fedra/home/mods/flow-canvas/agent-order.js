@@ -1,6 +1,6 @@
 // The order of every agent list in Atrous (the project start screen, my-new-menu's "+", the
 // onboarding's Agents step, Flow's "+"), and which agents are installed. Mods can't import across
-// folders: copy this file as it is (the same file is in mods/project-start, mods/my-new-menu and
+// folders: copy this file as it is (the same file is in mods/start, mods/my-new-menu and
 // mods/onboarding). The rule:
 //   1. installed agents first: Claude Code, Codex, Pi, OpenCode in that order (the ones installed),
 //      then the other installed agents by how often the person started them (shared "agents.uses",

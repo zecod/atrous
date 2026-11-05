@@ -3,7 +3,27 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Scrollbar } from "gpui-base";
-import { run, props, closeOverlay, theme, spaces, panes, exec, core, home, appHome, readTextFile, writeTextFile } from "atrous";
+import { run, props, closeOverlay, theme, spaces, panes, exec, core, home, appHome, readTextFile, writeTextFile, layout } from "atrous";
+
+// The side panel as it is now (Fedra's Files / Changes / Browser; null: closed; undefined: the
+// layout has none). The start screen closes it while it shows and puts this back after a pick.
+function panelNow() {
+  const find = (n, id) => (n?.id === id ? n : (n?.children ?? []).reduce((f, c) => f ?? find(c, id), null));
+  const panel = find(layout(), "panel");
+  if (!panel) return undefined;
+  return panel.hidden ? null : find(panel, "panel-body")?.active ?? null;
+}
+
+// A worktree's new space opens on the start screen (mods/start: a button per installed agent),
+// not on a bare shell: space.new always starts a terminal, and the start tab, queued right after
+// it into the space it made, closes that terminal's tab when it first shows.
+function openProject(folder, machine) {
+  const existing = spaces().map((s) => s.id);
+  const panel = panelNow();
+  run("space.new", { folder, machine: machine ?? "" });
+  const fresh = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  run("tab.new", { name: "Start", mod: "start", props: { folder, machine: machine || null, fresh, existing, panel } });
+}
 
 // What each dialog did, newest last (data/: Atrous doesn't reload mods for writes there).
 function trace(line) {
@@ -255,8 +275,10 @@ export default class Worktree extends View {
       break;
     }
     const p = props();
-    // Leave spaces unnamed so they follow the checkout folder and nest under the repo.
-    run("space.new", { folder: path, machine: this.on, tab: p.tab, argv: p.argv });
+    // Leave spaces unnamed so they follow the checkout folder and nest under the repo. Asked for
+    // an agent (props argv): it starts there; else the start screen offers them.
+    if (p.argv) run("space.new", { folder: path, machine: this.on, tab: p.tab, argv: p.argv });
+    else openProject(path, this.on);
     return "";
   }
 
@@ -271,7 +293,7 @@ export default class Worktree extends View {
     this.close();
     const s = spaceOf(c.path, this.list, this.on);
     if (s) run("space.select", { id: s.id });
-    else run("space.new", { folder: c.path, machine: this.on });
+    else openProject(c.path, this.on);
   }
 
   async remove() {

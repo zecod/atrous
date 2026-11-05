@@ -7,7 +7,8 @@
 //   { "tab": "active", "pane": { "header": { "content": { "mod": "my-pane" } } } }
 // Shows the program's icon (the app's program table), the agent's name or
 // the terminal's title, the folder, and the agent's status; buttons split, zoom and close
-// this pane. Props from the app: { pane, terminal }. Click: focus the pane.
+// this pane. Props from the app: { pane, terminal }. Click: focus the pane. The start screen of a
+// new project (mods/start) gets no header.
 
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
@@ -51,6 +52,9 @@ export default class Pane extends View {
     const t = theme();
     const p = this.me();
     if (!p) return div();
+    // The new-project start screen (mods/start) has nothing to name, split or zoom: no header,
+    // just its own background over the header's room.
+    if (p.mod === "start") return div().size_full().bg(t.background);
     const name = ((p.program?.agent || p.program?.shell) && p.program.name) || p.title || p.program?.name || "shell";
     const pic = icon(p.program, 14, t.dim);
     const st = p.status;

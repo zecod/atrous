@@ -8,6 +8,9 @@
 //   "terminal" the header over the focused agent's live terminal (layout block { agent: "focused" })
 //   "add"      the popup a space's "+" node opens: start an agent there (agent-order.js -> tab.new),
 //              then the canvas shows it at once, before it reports (trust.js)
+// A project opened while Flow shows (add-project, a worktree, the "+" menu) gets the start screen
+// as a tab (mods/start), which this layout has no place for: the canvas offers it as a dialog,
+// once per new start tab (mods/start in its dialog role: { tab, space, pending }).
 //
 // The canvas
 // - Pan: drag the background (or anywhere with the middle button), or the wheel (shift+wheel:
@@ -99,7 +102,7 @@ import * as G from "./graph.js";
 import * as SA from "./subagents.js";
 import { claudeSessionDir } from "./session.js";
 import * as T from "./trust.js";
-import { agentOrder, noteAgentUse, cachedAgents, loadAgents } from "./agent-order.js"; // shared with my-new-menu, onboarding, project-start
+import { agentOrder, noteAgentUse, cachedAgents, loadAgents } from "./agent-order.js"; // shared with my-new-menu, onboarding, start
 
 const I = (n) => `mods/flow-canvas/${n}.svg`;
 const RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
@@ -257,6 +260,15 @@ export default class Flow extends View {
           todo.push((cx) => this.trust(address, cx, true));
         }
       }
+    }
+    // A start tab that appeared since the canvas started (not the ones already there): its dialog.
+    const starts = panes().filter((x) => x.mod === "start").map((x) => x.tab);
+    if (!this.startSeen) this.startSeen = new Set(starts);
+    for (const tab of starts) {
+      if (this.startSeen.has(tab)) continue;
+      this.startSeen.add(tab);
+      const space = spaces().find((s) => (s.tabs ?? []).some((c) => c.id === tab));
+      if (space) todo.push(() => openOverlay({ mod: "start", kind: "dialog", width: 720, props: { tab, space: space.id, pending: PENDING } }));
     }
     if (todo.length) cx.spawn(async (cx) => { await cx.sleep(0); for (const f of todo) f(cx); });
   }
