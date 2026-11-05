@@ -1,14 +1,14 @@
-# Installs the Atrous app on Windows, and atrous-core if there's none yet:
+# Installs Atrous on Windows, with its core inside:
 #
 #   powershell -c "irm https://github.com/zecod/atrous/releases/latest/download/install.ps1 | iex"
 #
-# The app into %LOCALAPPDATA%\Programs\atrous (added to your PATH for
-# `atrous`), Atrous in the Start menu. The core, with its own installer,
-# only if none is there yet; the app keeps it current after that. Running it
-# again updates the app (an open one keeps running until it quits). No admin
-# needed. Releases are GitHub releases of zecod/atrous and zecod/atrous-core;
-# ATROUS_RELEASES_URL points at a test server for the app (<url>/app),
-# ATC_RELEASES_URL at one for the core (laid out like GitHub's releases).
+# Into %LOCALAPPDATA%\Programs\atrous: atrous.exe, atrous-core.exe, atc.exe
+# (a hard link to it) and conpty\; that folder goes on your PATH (`atrous`,
+# `atc`) and Atrous in the Start menu. Running it again updates both (an
+# open Atrous and its core keep running from the old folder; the core
+# moves to the new one on Atrous's next start, terminals kept). No admin
+# needed. Releases are GitHub releases of zecod/atrous; ATROUS_RELEASES_URL
+# points at a test server (<url>/app).
 
 # Its own scope: under `irm | iex` it would otherwise set the caller's variables.
 & {
@@ -20,8 +20,6 @@ function Fail($why) { throw "atrous: $why" }
 
 $releases = if ($env:ATROUS_RELEASES_URL) { $env:ATROUS_RELEASES_URL.TrimEnd("/") } else { $null }
 $appLatest = if ($releases) { "$releases/app" } else { "https://github.com/zecod/atrous/releases/latest/download" }
-# The core's own override (laid out like GitHub's releases), as its installer reads it.
-$coreLatest = if ($env:ATC_RELEASES_URL) { "$($env:ATC_RELEASES_URL.TrimEnd('/'))/latest/download" } else { "https://github.com/zecod/atrous-core/releases/latest/download" }
 $dir = Join-Path $env:LOCALAPPDATA "Programs\atrous"
 $arch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
 if ($arch -ne "AMD64") { Fail "no build for $arch Windows yet (x64 only)" }
@@ -51,15 +49,27 @@ try {
     try { $got = -join ([Security.Cryptography.SHA256]::Create().ComputeHash($stream) | ForEach-Object { $_.ToString("x2") }) } finally { $stream.Close() }
     if ($got -ne $t.sha256) { Fail "the download is damaged (checksum mismatch); try again" }
     & $tar -xzf "$tmp\app.tar.gz" -C $tmp
-    if ($LASTEXITCODE -or -not (Test-Path "$tmp\atrous\atrous.exe")) { Fail "the download holds no complete app" }
+    if ($LASTEXITCODE -or -not (Test-Path "$tmp\atrous\atrous.exe") -or -not (Test-Path "$tmp\atrous\atrous-core.exe")) { Fail "the download holds no complete app" }
+    # atc.exe: the same file as atrous-core.exe.
+    if (-not (Test-Path "$tmp\atrous\atc.exe")) {
+        try { New-Item -ItemType HardLink -Path "$tmp\atrous\atc.exe" -Target "$tmp\atrous\atrous-core.exe" | Out-Null }
+        catch { Copy-Item "$tmp\atrous\atrous-core.exe" "$tmp\atrous\atc.exe" }
+    }
 
-    # A running app's folder can be renamed, not deleted: the old one goes
-    # now if it can, else on the next install.
+    # A running app's folder can be renamed, not deleted. A previous one
+    # goes now unless something still runs from it (a core starts its
+    # terminals with the conpty\ beside it): then it moves aside whole.
     New-Item -ItemType Directory -Force (Split-Path $dir) | Out-Null
-    Remove-Item -Recurse -Force "$dir.old" -ErrorAction SilentlyContinue
+    function Remove-Previous($old) {
+        if (-not (Test-Path $old)) { return }
+        $busy = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith("$old\", [StringComparison]::OrdinalIgnoreCase) }
+        if ($busy) { Rename-Item $old "$(Split-Path $old -Leaf)-$([guid]::NewGuid().ToString('N').Substring(0, 8))" }
+        else { Remove-Item -Recurse -Force $old -ErrorAction SilentlyContinue }
+    }
+    Remove-Previous "$dir.old"
     if (Test-Path $dir) { Rename-Item $dir "$dir.old" }
     Move-Item "$tmp\atrous" $dir
-    Remove-Item -Recurse -Force "$dir.old" -ErrorAction SilentlyContinue
+    Remove-Previous "$dir.old"
 
     $exe = Join-Path $dir "atrous.exe"
     $menu = Join-Path ([Environment]::GetFolderPath("Programs")) "Atrous.lnk"
@@ -82,17 +92,6 @@ try {
     }
     $key.Close()
     if (($env:Path -split ";") -notcontains $dir) { $env:Path += ";$dir" }
-
-    # The core: installed only if there's none yet. One that's already there
-    # is left alone; the app updates it.
-    $core = Join-Path $env:LOCALAPPDATA "Programs\atrous-core\atrous-core.exe"
-    if (-not (Test-Path $core) -and -not (Get-Command atrous-core -ErrorAction SilentlyContinue)) {
-        try {
-            Invoke-RestMethod "$coreLatest/install.ps1" | Invoke-Expression
-        } catch {
-            Write-Host "atrous-core didn't install; Atrous will offer it when it opens."
-        }
-    }
 
     Write-Host "Atrous is installed. Open it from the Start menu, or run: atrous"
 } finally {

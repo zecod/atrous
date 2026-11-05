@@ -1,28 +1,25 @@
 #!/bin/sh
-# Installs the Atrous app, and atrous-core if there's none yet:
+# Installs Atrous, with its core inside:
 #
 #   curl -fsSL https://github.com/zecod/atrous/releases/latest/download/install.sh | sh
 #
-# Linux: the app into ~/.local/share/atrous, `atrous` in ~/.local/bin,
-# a launcher entry and icon. macOS: Atrous.app into ~/Applications, keeping
-# its release signature intact (ad hoc for unsigned/dev builds). The core, with its
-# own installer, into ~/.local/bin/atrous-core (and `atc`) only if none is
-# there yet; the app
-# keeps it current after that. Running it again updates the app.
+# Linux: the app and its core (atrous, atrous-core, atc) into
+# ~/.local/share/atrous, `atrous` and `atc` in ~/.local/bin, a launcher
+# entry and icon. macOS: Atrous.app into ~/Applications (the core inside it,
+# Contents/Helpers/Atrous Core.app), keeping its release signature intact
+# (ad hoc for unsigned/dev builds), `atrous` and `atc` links in
+# ~/.local/bin. Running it again updates both; a running core keeps its
+# terminals and moves to the new one on Atrous's next start.
 set -eu
 
-# GitHub releases of zecod/atrous and zecod/atrous-core; ATROUS_RELEASES_URL
-# points at a test server for the app (<url>/app), ATC_RELEASES_URL at one for
-# the core (laid out like GitHub's releases).
+# GitHub releases of zecod/atrous; ATROUS_RELEASES_URL points at a test
+# server (<url>/app).
 releases=${ATROUS_RELEASES_URL:-}
 if [ -n "$releases" ]; then
   app_latest="$releases/app"
 else
   app_latest=https://github.com/zecod/atrous/releases/latest/download
 fi
-# The core's own override (laid out like GitHub's releases), as its installer reads it.
-core_latest="${ATC_RELEASES_URL:-https://github.com/zecod/atrous-core/releases}"
-core_latest="${core_latest%/}/latest/download"
 bin="$HOME/.local/bin"
 
 say() { printf '%s\n' "$*"; }
@@ -86,6 +83,7 @@ if [ "$os" = linux ]; then
   rm -rf "$home"
   mv "$home.new" "$home"
   ln -sfn "$home/atrous" "$bin/atrous"
+  core="$home/atrous-core"
   mkdir -p "$data/applications" "$data/icons/hicolor/scalable/apps"
   cp "$home/atrous.svg" "$data/icons/hicolor/scalable/apps/atrous.svg"
   cat > "$data/applications/atrous.desktop" <<EOF
@@ -128,13 +126,15 @@ else
   rm -rf "$app"
   mv "$tmp/Atrous.app" "$app"
   ln -sfn "$app/Contents/MacOS/Atrous" "$bin/atrous"
+  core="$app/Contents/Helpers/Atrous Core.app/Contents/MacOS/atrous-core"
   /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$app" 2>/dev/null || true
 fi
 
-# The core: installed only if there's none yet. One that's already there
-# (yours, or from a package manager) is left alone; the app updates it.
-if [ ! -e "$bin/atrous-core" ] && ! command -v atrous-core >/dev/null 2>&1; then
-  curl -fsSL "$core_latest/install.sh" | ATC_INSTALL_DIR="$bin" sh || say "atrous-core didn't install; Atrous will offer it when it opens."
+# atc for shells outside Atrous (terminals Atrous starts find it first on
+# their PATH). A link is ours to point here, even one a separately installed
+# atrous-core made; a file someone put there is left alone.
+if [ ! -e "$bin/atc" ] || [ -L "$bin/atc" ]; then
+  ln -sfn "$core" "$bin/atc"
 fi
 
 say "Atrous is installed. Open it from your apps, or run: atrous"

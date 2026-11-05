@@ -22,6 +22,18 @@ try {
     Assert ((Get-Content "$destination\atrous.exe") -eq "new build") "Replacement kept the old binary"
     Assert ((Get-ChildItem (Split-Path $destination)).Count -eq 1) "Replacement left temporary files"
 
+    # With the core: atrous-core.exe, atc.exe (the same file) and conpty\ beside the app.
+    $core = Join-Path $tmp "core"
+    New-Item -ItemType Directory -Path "$core\conpty\x64" | Out-Null
+    Set-Content -LiteralPath "$core\atrous-core.exe" -Value "core build"
+    Set-Content -LiteralPath "$core\conpty\conpty.dll" -Value "conpty"
+    Set-Content -LiteralPath "$core\conpty\x64\OpenConsole.exe" -Value "console"
+    Install-AtrousFiles $binary $icon $destination $core
+    Assert ((Get-Content "$destination\atrous-core.exe") -eq "core build") "Install lost the core"
+    Assert ((Get-Content "$destination\atc.exe") -eq "core build") "Install lost atc"
+    Assert ((Get-Content "$destination\conpty\x64\OpenConsole.exe") -eq "console") "Install lost conpty"
+    Assert ((Get-ChildItem (Split-Path $destination)).Count -eq 1) "Install with the core left temporary files"
+
     # Fail the promotion, then the rollback too, using real moves otherwise.
     function Rename-Item {
         param($LiteralPath, $NewName)

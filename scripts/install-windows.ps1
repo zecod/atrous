@@ -1,5 +1,10 @@
-# Builds this checkout and installs it for the current Windows user.
-function Install-AtrousFiles($Binary, $Icon, $Destination) {
+# Builds this checkout (the app and its core, scripts/build.ps1) and installs
+# it for the current Windows user into %LOCALAPPDATA%\Programs\atrous:
+# atrous.exe, atrous-core.exe, atc.exe (a hard link to it), conpty\.
+# A running Atrous and its core keep running from the folder moved aside;
+# the next start restarts the core into the new one, terminals kept.
+# $Core: the folder holding the built atrous-core.exe and conpty\ (none: app only).
+function Install-AtrousFiles($Binary, $Icon, $Destination, $Core = $null) {
     $ErrorActionPreference = "Stop"
     $Destination = [IO.Path]::GetFullPath($Destination)
     $stage = "$Destination.install-$([guid]::NewGuid().ToString('N'))"
@@ -9,6 +14,13 @@ function Install-AtrousFiles($Binary, $Icon, $Destination) {
         New-Item -ItemType Directory -Path $stage -Force | Out-Null
         Copy-Item -LiteralPath $Binary -Destination "$stage\atrous.exe"
         Copy-Item -LiteralPath $Icon -Destination "$stage\atrous.svg"
+        if ($Core) {
+            Copy-Item -LiteralPath (Join-Path $Core "atrous-core.exe") -Destination "$stage\atrous-core.exe"
+            # atc.exe: the same file, as the core's own installer makes it.
+            try { New-Item -ItemType HardLink -Path "$stage\atc.exe" -Target "$stage\atrous-core.exe" | Out-Null }
+            catch { Copy-Item -LiteralPath "$stage\atrous-core.exe" -Destination "$stage\atc.exe" }
+            Copy-Item -LiteralPath (Join-Path $Core "conpty") -Destination "$stage\conpty" -Recurse
+        }
         # Renaming the folder leaves an already running app alive.
         if (Test-Path -LiteralPath $Destination) {
             Rename-Item -LiteralPath $Destination -NewName (Split-Path $backup -Leaf)
@@ -32,8 +44,15 @@ function Install-AtrousFiles($Binary, $Icon, $Destination) {
             Remove-Item -LiteralPath $stage -Recurse -Force
         }
         if ($installed -and (Test-Path -LiteralPath $backup)) {
-            try { Remove-Item -LiteralPath $backup -Recurse -Force }
-            catch { Write-Warning "Previous build remains at $backup. Remove it after quitting Atrous." }
+            # Never half of it: a core still running from there starts its
+            # terminals with the conpty\ beside it.
+            $running = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith("$backup\", [StringComparison]::OrdinalIgnoreCase) }
+            if ($running) {
+                Write-Warning "Previous build remains at $backup while $(@($running | ForEach-Object { $_.ProcessName } | Sort-Object -Unique) -join ', ') runs from it. Remove it after quitting Atrous; the core moves to the new build on Atrous's next start."
+            } else {
+                try { Remove-Item -LiteralPath $backup -Recurse -Force }
+                catch { Write-Warning "Previous build remains at $backup. Remove it after quitting Atrous." }
+            }
         }
     }
 }
@@ -45,10 +64,9 @@ if ($env:OS -ne "Windows_NT") { throw "This installer requires Windows." }
 
 Push-Location "$PSScriptRoot\.."
 try {
-    cargo build --release --locked --target-dir target
-    if ($LASTEXITCODE) { throw "Atrous build failed (exit $LASTEXITCODE)." }
+    & "$PSScriptRoot\build.ps1"
     $dir = Join-Path $env:LOCALAPPDATA "Programs\atrous"
-    Install-AtrousFiles "target\release\atrous.exe" "assets\brand\atrous.svg" $dir
+    Install-AtrousFiles "target\release\atrous.exe" "assets\brand\atrous.svg" $dir "target\release"
 } finally {
     Pop-Location
 }
@@ -75,4 +93,4 @@ try {
     $key.Close()
 }
 if (($env:Path -split ";") -notcontains $dir) { $env:Path += ";$dir" }
-Write-Host "Installed atrous. Quit and reopen Atrous to use the new build."
+Write-Host "Installed atrous with atrous-core and atc in $dir. Quit and reopen Atrous to use the new build; its terminals keep running."

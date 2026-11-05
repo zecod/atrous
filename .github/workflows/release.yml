@@ -1,8 +1,9 @@
-# A release of the app: push a tag `v<version>` matching Cargo.toml. Each
-# platform builds and packs the app (scripts/package; no core inside, people
-# get the core's own release); then everything goes to the GitHub release
-# v<version> of this repo, published only once every file is uploaded, so
-# nobody sees a version whose files aren't there yet.
+# A release of Atrous: push a tag `v<version>` matching Cargo.toml (and
+# core/crates/atrous-core/Cargo.toml: one version). Each platform builds and
+# packs the app with its core inside (scripts/package: one archive per
+# platform); then everything goes to the GitHub release v<version> of this
+# repo, published only once every file is uploaded, so nobody sees a version
+# whose files aren't there yet.
 #
 # Caches: a tag's own cache is visible only to that tag, so tags restore
 # master's. Master keeps them warm by building (without publishing) when
@@ -28,7 +29,15 @@ on:
       - Cargo.toml
       - vendor/**
       - crates/**
+      - core/Cargo.lock
+      - core/Cargo.toml
+      - core/crates/**
+      - core/vendor/**
+      - core/scripts/mac-bundle
+      - core/scripts/mac-sign
+      - core/scripts/fetch-conpty.ps1
       - scripts/package
+      - scripts/stage-core
       - scripts/notices.*
       - tests/notices.rs
       - about.toml
@@ -96,10 +105,11 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: release-v2-${{ matrix.target }}-${{ env.RUST_TOOLCHAIN }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('Cargo.lock') }}-${{ github.sha }}
+            core/target
+          key: release-v3-${{ matrix.target }}-${{ env.RUST_TOOLCHAIN }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('Cargo.lock', 'core/Cargo.lock') }}-${{ github.sha }}
           restore-keys: |
-            release-v2-${{ matrix.target }}-${{ env.RUST_TOOLCHAIN }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('Cargo.lock') }}-
-            release-v2-${{ matrix.target }}-${{ env.RUST_TOOLCHAIN }}-zig${{ env.ZIG_VERSION }}-
+            release-v3-${{ matrix.target }}-${{ env.RUST_TOOLCHAIN }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('Cargo.lock', 'core/Cargo.lock') }}-
+            release-v3-${{ matrix.target }}-${{ env.RUST_TOOLCHAIN }}-zig${{ env.ZIG_VERSION }}-
       - name: Linux build dependencies
         if: runner.os == 'Linux'
         # A stuck package mirror fails here in minutes, not at the job's limit.
@@ -120,6 +130,8 @@ jobs:
         run: |
           want="v$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
           [ "$want" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME but Cargo.toml says $want"; exit 1; }
+          core="v$(sed -n 's/^version = "\(.*\)"/\1/p' core/crates/atrous-core/Cargo.toml | head -1)"
+          [ "$core" = "$want" ] || { echo "the core is $core, the app $want: one version for both"; exit 1; }
       - name: Keep unchanged sources fresh
         run: scripts/ci-sources restore
       - name: Build and pack
@@ -146,7 +158,7 @@ jobs:
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: *cache-paths
-          key: release-v2-${{ matrix.target }}-${{ env.RUST_TOOLCHAIN }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('Cargo.lock') }}-${{ github.sha }}
+          key: release-v3-${{ matrix.target }}-${{ env.RUST_TOOLCHAIN }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('Cargo.lock', 'core/Cargo.lock') }}-${{ github.sha }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: atrous-${{ matrix.target }}
@@ -215,15 +227,22 @@ jobs:
           endpoint: https://eus.codesigning.azure.net/
           signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
           certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
-          files: ${{ github.workspace }}\dist\atrous\atrous.exe
+          files: |
+            ${{ github.workspace }}\dist\atrous\atrous.exe
+            ${{ github.workspace }}\dist\atrous\atrous-core.exe
           description: Atrous
           description-url: https://github.com/zecod/atrous
       - name: Check the signature
         shell: pwsh
         run: |
-          $sig = Get-AuthenticodeSignature dist\atrous\atrous.exe
-          $sig | Format-List Status, StatusMessage, SignerCertificate
-          if ($sig.Status -ne 'Valid') { exit 1 }
+          foreach ($exe in "atrous.exe", "atrous-core.exe") {
+            $sig = Get-AuthenticodeSignature "dist\atrous\$exe"
+            $sig | Format-List Status, StatusMessage, SignerCertificate
+            if ($sig.Status -ne 'Valid') { exit 1 }
+          }
+          # atc.exe is the same file as atrous-core.exe: the signed one.
+          Remove-Item dist\atrous\atc.exe
+          New-Item -ItemType HardLink -Path dist\atrous\atc.exe -Target dist\atrous\atrous-core.exe | Out-Null
       - run: tar -czf dist/atrous-windows-x86_64.tar.gz -C dist atrous
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

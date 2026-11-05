@@ -1,9 +1,14 @@
 #!/bin/bash
+# Builds this checkout (the app and its core: scripts/build) and installs
+# ~/Applications/Atrous.app with the core inside as a helper bundle,
+# Contents/Helpers/Atrous Core.app, plus ~/.local/bin/atrous and atc links
+# into it. A running core keeps running; Atrous's next start restarts it
+# into this one, terminals kept.
 set -euo pipefail
 
 [[ $(uname -s) == Darwin ]] || { echo 'This installer requires macOS.' >&2; exit 1; }
 cd "$(dirname "$0")/.."
-cargo build --release
+scripts/build
 
 app="$HOME/Applications/Atrous.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$HOME/.local/bin"
@@ -34,7 +39,24 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
 PLIST
 # Finder does not inherit a login shell's PATH; atc must still be discoverable.
 /usr/libexec/PlistBuddy -c "Add :LSEnvironment:PATH string $HOME/.local/bin:/opt/homebrew/bin:$PATH" "$app/Contents/Info.plist"
+# The core: built fresh beside, then swapped in whole (a running core keeps
+# its old files), signed before the app seals it.
+helper="$app/Contents/Helpers/Atrous Core.app"
+mkdir -p "$app/Contents/Helpers"
+rm -rf "$helper.new"
+sh core/scripts/mac-bundle core/target/release/atrous-core "$helper.new"
+ln -s atrous-core "$helper.new/Contents/MacOS/atc"
+bash core/scripts/mac-sign "$helper.new"
+rm -rf "$helper.old"
+[[ -e $helper ]] && mv "$helper" "$helper.old"
+mv "$helper.new" "$helper"
+rm -rf "$helper.old" 2>/dev/null || true
 codesign --force --sign - "$app"
 ln -sfn "$app/Contents/MacOS/Atrous" "$HOME/.local/bin/atrous"
+# atc for shells outside Atrous (terminals Atrous starts have it on PATH);
+# a file someone put there is left alone.
+if [[ ! -e $HOME/.local/bin/atc || -L $HOME/.local/bin/atc ]]; then
+  ln -sfn "$helper/Contents/MacOS/atrous-core" "$HOME/.local/bin/atc"
+fi
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$app"
 echo "Installed $app. Quit and reopen Atrous to use the new build."

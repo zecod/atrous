@@ -1,15 +1,21 @@
 #!/bin/bash
-# Points ~/.local/bin/atrous at this checkout's release build and adds the
-# launcher entry with the Atrous icon. Re-run after moving the checkout.
+# Builds this checkout (the app and its core: scripts/build), points
+# ~/.local/bin/atrous (and atc) at the release build, which holds the core
+# beside the app, and adds the launcher entry with the Atrous icon. Re-run
+# after moving the checkout.
 set -euo pipefail
 
 [[ $(uname -s) == Linux ]] || { echo 'This installer is for Linux.' >&2; exit 1; }
 cd "$(dirname "$0")/.."
-cargo build --release
+scripts/build
 
 data=${XDG_DATA_HOME:-$HOME/.local/share}
 mkdir -p "$HOME/.local/bin" "$data/applications" "$data/icons/hicolor/scalable/apps"
 ln -sfn "$PWD/target/release/atrous" "$HOME/.local/bin/atrous"
+# atc for shells outside Atrous; a file someone put there is left alone.
+if [[ ! -e $HOME/.local/bin/atc || -L $HOME/.local/bin/atc ]]; then
+  ln -sfn "$PWD/target/release/atrous-core" "$HOME/.local/bin/atc"
+fi
 cp assets/brand/atrous.svg "$data/icons/hicolor/scalable/apps/atrous.svg"
 cat > "$data/applications/atrous.desktop" <<EOF
 [Desktop Entry]
