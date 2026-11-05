@@ -25,7 +25,8 @@ import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { spaces, machines, panes, agents, terminals, setAgentOrder, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, layout } from "herdr";
 import { smartPress, smartMove, smartRelease } from "./smart-split.js"; // smart split: drag an agent onto the shown tab
-import { lastTurnSpeed, peekSpeed, speedNeedsRefresh, formatSpeed } from "./speed.js"; // tokens/s of each finished turn
+import { lastTurnSpeed, peekSpeed, speedNeedsRefresh, formatSpeed, claudeSessionDir } from "./speed.js"; // tokens/s of each finished turn
+import * as SA from "./subagents.js"; // Claude Code subagents: mini rows under their agent
 
 const clean = (s) => (s ?? "").replace(/^[^\p{L}\p{N}]+/u, "").trim();
 const isPath = (s) => /^[~/]|^[A-Za-z]:\\/.test(s) || s.includes("@");
@@ -134,6 +135,17 @@ export default class Spaces extends View {
     cx.timer.every(5000, (cx) => this.checkNew(cx));
     // Tokens per second of each agent's last finished turn (speed.js); work only when a state changed.
     cx.timer.every(1500, (cx) => this.speeds(cx));
+    // Claude Code subagents (subagents.js): sessions and new ones by folder reads; changes by watchFolder.
+    this.subDirs = new Map(); // agent address -> { dir, pid, at }
+    this.subWatching = new Set();
+    this.subDirty = new Map(); // dir -> changed transcripts
+    this.subsOpen = new Set(); // agents whose subagents are all shown
+    cx.timer.every(4000, (cx) => {
+      if (window().active === false && this.subAt && Date.now() - this.subAt < 20000) return; // slower in the background
+      this.subAt = Date.now();
+      this.subScan(cx);
+    });
+    this.subScan(cx);
   }
 
   // After a redraw (live data changed), once: what that change makes due.
@@ -516,6 +528,180 @@ export default class Spaces extends View {
       props: { address, title, program, pane, pinned, cwd, sessionId: r?.sessionId ?? null, source: r?.source ?? null } });
   }
 
+  // ---- Claude Code subagents (subagents.js): mini rows under their agent ----
+
+  // Every few seconds (cheap: reading folders, no process): which session each Claude Code agent
+  // is in, and new subagents there. A changed transcript is noticed by watchFolder (subWatch),
+  // which batches into subFlush; time alone (a stale one, a finished one leaving) by the
+  // signature check here.
+  subScan(cx) {
+    if (this.subBusy) return;
+    this.subBusy = true;
+    cx.spawn(async (cx) => {
+      try {
+        const now = Date.now();
+        const live = new Set();
+        for (const a of agents()) {
+          const term = this.terms.get(a.address);
+          if (!term || a.address.includes("/")) continue;
+          live.add(a.address);
+          const known = this.subDirs.get(a.address);
+          const test = shared("subagents.test"); // testing only: one session folder for every agent
+          if (typeof test === "string") this.subDirs.set(a.address, { dir: test, pid: term.pid, at: now });
+          // Re-linked now and then: a /clear or a resumed session moves it to another folder.
+          else if (!known || known.pid !== term.pid || now - known.at > 30000) {
+            const dir = await claudeSessionDir(a, term).catch(() => null);
+            this.subDirs.set(a.address, { dir, pid: term.pid, at: now });
+          }
+          const dir = this.subDirs.get(a.address)?.dir;
+          if (!dir) continue;
+          const { exists, fresh } = await SA.list(dir);
+          if (exists) this.subWatch(dir, cx);
+          if (fresh.length) await SA.refresh(dir, fresh);
+        }
+        for (const k of [...this.subDirs.keys()]) if (!live.has(k)) this.subDirs.delete(k);
+      } finally {
+        this.subBusy = false;
+        const sig = this.subSignature();
+        if (sig !== this.subSig) { this.subSig = sig; cx.notify(); }
+      }
+    });
+  }
+
+  // What the mini rows show, minute-rounded: a change means a redraw.
+  subSignature() {
+    const now = Date.now();
+    const out = [];
+    for (const [addr, { dir }] of this.subDirs) {
+      if (!dir) continue;
+      for (const s of SA.shown(dir, now)) out.push([addr, s.id, s.state, SA.activityText(s), s.state === "running" && s.startAt ? Math.floor((now - s.startAt) / 60000) : 0]);
+    }
+    return JSON.stringify(out);
+  }
+
+  // One watch per subagents/ folder; a change marks its transcripts to read again.
+  subWatch(dir, cx) {
+    if (this.subWatching.has(dir)) return;
+    this.subWatching.add(dir);
+    cx.spawn(async (cx) => {
+      try {
+        for (;;) {
+          const paths = await watchFolder(`${dir}/subagents`);
+          if (![...this.subDirs.values()].some((d) => d.dir === dir)) break; // its agent is gone
+          const set = this.subDirty.get(dir) ?? new Set();
+          for (const p of paths ?? []) {
+            const n = SA.norm(p);
+            if (n.endsWith(".jsonl")) set.add(n);
+            else if (n.endsWith(".meta.json")) set.add("*new");
+            else set.add("*all"); // the folder itself: look at everything
+          }
+          this.subDirty.set(dir, set);
+          if (!this.subFlushQueued) {
+            this.subFlushQueued = true;
+            cx.timer.after(2000, (cx) => this.subFlush(cx)); // at most one read every 2 s
+          }
+        }
+      } catch {} finally {
+        this.subWatching.delete(dir);
+      }
+    });
+  }
+
+  subFlush(cx) {
+    this.subFlushQueued = false;
+    const work = [...this.subDirty];
+    this.subDirty.clear();
+    cx.spawn(async (cx) => {
+      let changed = false;
+      for (const [dir, set] of work) {
+        const { fresh } = await SA.list(dir);
+        const files = set.has("*all") ? null : [...set].filter((f) => !f.startsWith("*")).concat(fresh);
+        if (await SA.refresh(dir, files)) changed = true;
+      }
+      const sig = this.subSignature();
+      if (changed || sig !== this.subSig) { this.subSig = sig; cx.notify(); }
+    });
+  }
+
+  // A mini row: shorter and quieter than an agent's, for what works under it.
+  miniRow(t, { id, lines, base, first, mark, title, right, tip, action, menu, faded, drag }) {
+    const H = 20;
+    const x = base + (lines.length - 1) * LEVEL;
+    return h_flex().relative().id(id).h(H).flex_none().items_center().text_size(11.5)
+      .children(this.connectors(lines, base, first, t, H))
+      .child(h_flex().id(`${id}-body`).ml(x + 11).flex_1().min_w(0).h(H - 2).pl(6).pr(8).gap(6).items_center().rounded(6)
+        .hover((s) => s.bg(t.hover)).cursor_pointer()
+        .when(Boolean(tip), (el) => el.tooltip(tip))
+        .when(Boolean(action), (el) => el.on_click(action))
+        .when(Boolean(menu), (el) => el.on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); menu(); }))
+        .when(Boolean(drag), (el) => el.on_mouse_down("left", (e) => smartPress(this, drag, e))) // smart split
+        .when(Boolean(faded), (el) => el.opacity(0.6))
+        .child(div().w(12).flex_none().flex().items_center().justify_center().child(mark))
+        .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(title))
+        .when(Boolean(right), (el) => el.child(div().flex_none().text_size(10.5).text_color(t.dim).child(right))));
+  }
+
+  // The mark of a mini row: a small spinner, a check, or a dot.
+  miniMark(t, state) {
+    if (state === "working" || state === "running") return svg("mods/workspace-chrome/spinner.svg").size(10).text_color(t.working).spin(900);
+    if (state === "done") return svg("mods/my-spaces/check.svg").size(10).text_color(t.done ?? t.ansi2);
+    if (state === "blocked") return div().size(6).rounded(3).bg(t.blocked);
+    return div().size(5).rounded(3).bg(t.dim);
+  }
+
+  // Claude Code subagents of agent `a`, as mini rows: running ones, and finished ones a little
+  // while. More than three fold into "+N more" (click: show all).
+  ccSubRows(t, a, lead, base, hasMore) {
+    const dir = this.subDirs.get(a.address)?.dir;
+    if (!dir) return [];
+    const now = Date.now();
+    let list = SA.shown(dir, now);
+    if (!list.length) return [];
+    const open = this.subsOpen.has(a.address);
+    const hidden = !open && list.length > 3 ? list.length - 3 : 0;
+    if (hidden) list = [...list.filter((s) => s.state === "running"), ...list.filter((s) => s.state !== "running")].slice(0, 3);
+    const rows = list.map((s, j) => {
+      const last = j === list.length - 1 && !hidden && !hasMore;
+      const doing = SA.activityText(s);
+      const tip = [
+        s.description,
+        [s.type, s.background ? "background" : null].filter(Boolean).join(" · ") || null,
+        s.state === "running" ? `Now: ${doing ?? "working"}${SA.runningFor(s, now) ? ` · running ${SA.runningFor(s, now)}` : ""}`
+          : s.state === "done" ? `Done ${SA.ago(now - s.lastAt)} ago${s.result ? `: ${s.result.split("\n")[0].slice(0, 140)}` : ""}`
+          : `Stopped ${SA.ago(now - s.lastAt)} ago`,
+      ].filter(Boolean).join("\n");
+      return this.miniRow(t, {
+        id: `cc-${a.address}-${s.id}`, lines: [...lead, last ? "└" : "├"], base, first: j === 0, tip,
+        mark: this.miniMark(t, s.state), title: s.description,
+        right: SA.runningFor(s, now),
+        faded: s.state !== "running",
+        action: () => run("pane.focus", { pane: a.pane }),
+      });
+    });
+    if (hidden) {
+      rows.push(this.miniRow(t, {
+        id: `cc-more-${a.address}`, lines: [...lead, hasMore ? "├" : "└"], base, first: false,
+        mark: div(), title: `+${hidden} more`, tip: "Show all subagents",
+        action: (_e, cx) => { this.subsOpen.add(a.address); cx.notify(); },
+      }));
+    } else if (open && list.length > 3) {
+      rows.push(this.miniRow(t, {
+        id: `cc-less-${a.address}`, lines: [...lead, hasMore ? "├" : "└"], base, first: false,
+        mark: div(), title: "Show less",
+        action: (_e, cx) => { this.subsOpen.delete(a.address); cx.notify(); },
+      }));
+    }
+    return rows;
+  }
+
+  // Working subagents of an agent (Claude Code's and herdr's), for the rail badge.
+  busySubs(address) {
+    const dir = this.subDirs.get(address)?.dir;
+    const cc = dir ? SA.runningCount(dir) : 0;
+    const hc = [...this.terms.values()].filter((k) => k.parent === address && k.state === "live").length;
+    return cc + hc;
+  }
+
   // ---- agents under their space ----
 
   // Where a space row's icon sits (px from the row's left): the tree lines start there.
@@ -618,21 +804,25 @@ export default class Spaces extends View {
         menu: () => this.agentMenu(a.address, title, a.program?.name, a.pane, a.pinned),
         drag: a.address, // smart split
       });
-      const subs = this.subTree(a.address, [...lead, last ? "" : "│"]).map(({ k, lines }) => {
+      const under = [...lead, last ? "" : "│"];
+      const hcSubs = this.subTree(a.address, under);
+      const ccRows = this.ccSubRows(t, a, under, base, hcSubs.length > 0);
+      const subs = hcSubs.map(({ k, lines }, j) => {
         const listed = this.agentList.find((x) => x.address === k.address);
         const raw = listed?.status ?? stateOf(k);
         const status = raw === "error" ? "blocked" : raw === "done" ? "idle" : raw;
         const name = k.name || k.template || clean(k.title) || k.program?.name || k.address;
-        return this.treeRow(t, {
-          id: `sub-${k.address}`, lines, base, first: false, on: false,
-          pic: programIcon(k.program, 13, t.foreground), title: name, status,
-          tip: [name, msgOf(k)].filter(Boolean).join(" · "), muted: true,
+        return this.miniRow(t, {
+          id: `sub-${k.address}`, lines, base, first: j === 0 && !ccRows.length,
+          mark: this.miniMark(t, status), title: name,
+          tip: [name, msgOf(k), "Click: peek at it"].filter(Boolean).join("\n"),
+          faded: status === "idle",
           action: () => run("terminal.peek", { terminal: k.address }),
           menu: () => this.agentMenu(k.address, name, k.program?.name, null, false),
           drag: k.address, // smart split
         });
       });
-      return [row, ...subs];
+      return [row, ...ccRows, ...subs];
     });
   }
 
@@ -725,6 +915,14 @@ export default class Spaces extends View {
       .tooltip(w.name)
       .on_click(() => run("space.select", { id: w.id }))
       .child(svg(`mods/${tree ? "workspace-chrome/branch" : "my-spaces/folder"}.svg`).size(tree ? 13 : 15).text_color(w.active ? t.foreground : t.muted));
+    // A small count on the tile: subagents working under it (Claude Code's and herdr's).
+    const badge = (a, el) => {
+      const n = this.busySubs(a.address);
+      if (!n) return el;
+      return div().id(`rail-subs-${a.address}`).relative().flex_none().child(el)
+        .child(div().absolute().right(-5).bottom(-4).min_w(13).h(13).px(3).rounded(7).bg(t.chrome).border_1().border_color(t.working)
+          .flex().items_center().justify_center().text_size(8.5).font_semibold().text_color(t.working).child(String(n)));
+    };
     const tile = (a) => {
       const color = t[a.status] ?? t.dim;
       const pic = programIcon(a.program, 12, a.status === "idle" ? t.muted : color);
@@ -734,14 +932,14 @@ export default class Spaces extends View {
           .tooltip(`${agentTitle(a)} · working`)
           .on_click(() => run("pane.focus", { pane: a.pane }))
           .on_mouse_down("left", (e) => smartPress(this, a.address, e)) // smart split
-          .child(this.beam(t, h_flex().items_center().justify_center().bg(t.chrome).child(pic ?? div().size(6).rounded(3).bg(color)),
-            { id: `rail-tile-${a.address}`, w: 22, h: 22, radius: 6 }));
+          .child(badge(a, this.beam(t, h_flex().items_center().justify_center().bg(t.chrome).child(pic ?? div().size(6).rounded(3).bg(color)),
+            { id: `rail-tile-${a.address}`, w: 22, h: 22, radius: 6 })));
       }
       return h_flex().id(`rail-${a.address}`).h(26).flex_none().justify_center().items_center()
         .tooltip(`${agentTitle(a)} · ${a.status === "blocked" ? "needs you" : a.status === "done" ? "just finished" : a.status}`)
         .on_click(() => run("pane.focus", { pane: a.pane }))
         .on_mouse_down("left", (e) => smartPress(this, a.address, e)) // smart split
-        .child(h_flex().id(`rail-tile-${a.address}`).size(22).flex_none().items_center().justify_center().rounded(6)
+        .child(badge(a, h_flex().id(`rail-tile-${a.address}`).size(22).flex_none().items_center().justify_center().rounded(6)
           .border_1()
           .border_color(a.status === "idle" ? t.border : color)
           .bg(a.status === "idle" ? t.chrome : color + "2e")
@@ -750,7 +948,7 @@ export default class Spaces extends View {
           .when(a.status === "working" && this.windowActive !== false, (el) => el.loop("opacity", { from: 0.55, to: 1, period: 1400 }))
           .when(a.status === "blocked" && this.windowActive !== false, (el) => el.loop("opacity", { from: 0.35, to: 1, period: 900 }))
           .hover((s) => s.opacity(1))
-          .child(pic ?? div().size(6).rounded(3).bg(color)));
+          .child(pic ?? div().size(6).rounded(3).bg(color))));
     };
     return [head, ...mine.map(tile)];
   }

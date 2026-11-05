@@ -114,6 +114,17 @@ export function speedNeedsRefresh(agent, terminal) {
   return !((agent.status === "working" || agent.status === "blocked") && m.pid === terminal?.pid);
 }
 
+/** A Claude Code agent's session folder (~/.claude/projects/<cwd slug>/<sessionId>, where Claude
+ *  keeps subagents/), or null when it isn't a local Claude Code agent or can't be linked. */
+export async function claudeSessionDir(agent, terminal) {
+  if (!agent || !terminal || String(terminal.address ?? agent.address).includes("/")) return null;
+  const app = `${agent.app ?? ""} ${terminal.report?.app ?? ""} ${agent.program?.key ?? ""}`.toLowerCase();
+  if (!app.includes("claude")) return null;
+  const link = await claudeLink(agent, terminal).catch(() => null);
+  const info = link?.info;
+  return info?.sessionId && info.cwd ? `${CLAUDE}/projects/${slug(info.cwd)}/${info.sessionId}` : null;
+}
+
 export function whySpeedNull(address) {
   return memo.get(address)?.reason ?? null;
 }
@@ -339,7 +350,7 @@ function helperSource() {
   return helperB64;
 }
 
-function b64(str) {
+export function b64(str) {
   const bytes = [];
   for (const ch of str) {
     const c = ch.codePointAt(0);
