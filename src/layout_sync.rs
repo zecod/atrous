@@ -326,7 +326,7 @@ mod tests {
         let file = node(json!({
             "id":"root", "type":"column", "font_size":16, "background":"#008080",
             "children":[{"id":"main", "type":"block", "content":{"tab":"active","pane":{
-                "header":{"content":{"mod":"win98"},"height":18},
+                "header":{"content":{"mod":"my-pane"},"height":18},
                 "border":{"width":3,"color":"#c0c0c0"}, "focus":{"width":3,"color":"#c0c0c0"}
             }}}]
         }));

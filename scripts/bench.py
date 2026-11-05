@@ -390,7 +390,7 @@ def main():
             return
         do(bin, "space.new", {"name": "bench", "folder": ROOT})
         rows.append(measure("idle-shell", app.pid, a.seconds, a.sample))
-        for layout in ("terminals", "win98", "main"):
+        for layout in ("terminals", "main"):
             do(bin, "layout.switch", {"name": layout})
             rows.append(measure(f"idle-{layout}", app.pid, a.seconds, a.sample))
         do(bin, "tab.new", {"name": "agent", "argv": agent})

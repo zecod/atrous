@@ -171,23 +171,8 @@
       ]
     },
     {
-      "name": "Pixelated MS Sans Serif fonts (Atrous 98)",
-      "source": "https://github.com/jdan/98.css; unchanged font conversion.",
-      "files": [
-        "defaults/mods/win98/fonts/LICENSE-MSSansSerif.txt",
-        "licenses/CC-BY-SA-3.0.txt"
-      ]
-    },
-    {
-      "name": "PxPlus IBM VGA font (Atrous 98)",
-      "source": "https://int10h.org/oldschool-pc-fonts/",
-      "files": [
-        "defaults/mods/win98/fonts/LICENSE-PxPlus.txt"
-      ]
-    },
-    {
       "name": "Atrous logo artwork",
-      "source": "Drawn for Atrous (assets/brand/make_logo.py); the Atrous 98 pixel artwork is drawn by defaults/mods/win98/art/generate.ts. Both are under the app's Apache-2.0 license.",
+      "source": "Drawn for Atrous (assets/brand/make_logo.py), under the app's Apache-2.0 license.",
       "files": [
         "LICENSE"
       ]
