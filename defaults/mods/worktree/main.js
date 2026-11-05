@@ -3,7 +3,7 @@
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Scrollbar } from "gpui-base";
-import { run, props, closeOverlay, theme, spaces, panes, exec, home } from "herdr";
+import { run, props, closeOverlay, theme, spaces, panes, exec, home } from "atrous";
 
 // Where a space is now: its first terminal's live folder, else where it was made.
 function place(s, all = panes()) {
@@ -13,7 +13,7 @@ function place(s, all = panes()) {
 }
 
 // Checkouts go to <ROOT>/<repo>/<branch, slashes as dashes>.
-const ROOT = (home) => `${home}/.herdr/worktrees`;
+const ROOT = (home) => `${home}/.atrous/worktrees`;
 // Home as ~ (git says C:/Users/x where Windows says C:\Users\x).
 const tilde = (path, userHome) => {
   const [p, h] = [path, userHome].map((s) => s.replace(/\\/g, "/"));

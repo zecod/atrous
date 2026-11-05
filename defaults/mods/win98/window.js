@@ -4,7 +4,7 @@
 // window menu.
 
 import { div } from "gpui-kit";
-import { panes, props, run, home } from "herdr";
+import { panes, props, run, home } from "atrous";
 import { C, unit, root, titleBar, programIcon, icon, dosPath, openMenu } from "./kit.js";
 
 export function paneTitle(p) {

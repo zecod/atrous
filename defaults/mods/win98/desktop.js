@@ -6,7 +6,7 @@
 
 import { div } from "gpui-kit";
 import { v_flex } from "gpui-base";
-import { spaces, run } from "herdr";
+import { spaces, run } from "atrous";
 import { C, unit, root, icon, openMenu, openDialog, perform, sfx } from "./kit.js";
 import { closeSpaceAsk } from "./taskbar.js";
 
