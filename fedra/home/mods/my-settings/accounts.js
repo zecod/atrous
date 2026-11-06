@@ -343,6 +343,13 @@ export class AccountsPage extends View {
     });
   }
 
+  toggleResume(cx) {
+    cx.spawn(async (cx) => {
+      await updateState((s) => { s.auto.resume = !s.auto.resume; });
+      cx.notify();
+    });
+  }
+
   // The threshold is written once the clicks stop (one write, not one per click).
   bumpThreshold(d, cx) {
     const now = this.thDraft ?? currentState().auto.threshold;
@@ -593,10 +600,16 @@ export class AccountsPage extends View {
       })
       .child(this.heading(t, "Accounts"))
       .child(div().pb(16).text_size(12.5).line_height("18px").text_color(t.dim)
-        .child("Use more than one Claude Code or Codex login. New agents start on the account picked here; agents already running keep theirs."))
+        .child("Use more than one Claude Code or Codex login. Pick the account for new agents, and optionally resume quota-limited conversations on another account."))
       .child(v_flex().w_full().gap(16).children(TOOL_KEYS.map((tool) => this.card(t, st, tool, usage, running))))
       .child(div().h(22))
       .child(this.heading(t, "Switching"))
-      .child(this.autoRow(t, st));
+      .child(this.autoRow(t, st))
+      .child(h_flex().w_full().gap(16).py(12).items_center()
+        .child(v_flex().flex_1().min_w(0).gap(3)
+          .child(div().text_size(14).text_color(t.foreground).child("Resume running agents after a quota limit"))
+          .child(div().text_size(12.5).line_height("18px").text_color(t.dim)
+            .child("Codex and Claude Code started through Atrous resume the same conversation on another account with room. Requires automatic switching; the warning threshold never interrupts active work.")))
+        .child(this.toggle(t, "ac-resume", st.auto.enabled && st.auto.resume, (_e, cx) => { if (st.auto.enabled) this.toggleResume(cx); } ).when(!st.auto.enabled, el => el.opacity(0.45))));
   }
 }

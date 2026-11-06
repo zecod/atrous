@@ -36,7 +36,7 @@
 
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { readTextFile, writeTextFile, appHome, theme, layout, run, openOverlay, shared, setShared, notify, nextCommand } from "atrous";
+import { readTextFile, writeTextFile, appHome, theme, layout, run, openOverlay, shared, setShared, notify, nextCommand, terminals } from "atrous";
 import * as fs from "fs/promises";
 import { TOOLS, TOOL_KEYS, keyOf, cap, readState, updateState, publish, currentState, setActive, accountsOf, activeOf, homeOf, readLogin, readEmail, binding, limitName, pairRows, displayName, shortName } from "./accounts-core.js";
 
@@ -151,6 +151,7 @@ export default class UsageCard extends View {
         // The file is the truth: an edit from outside the app shows within 5 s too.
         // (A change is broadcast as shared state, which redraws every mod by itself.)
         if (!this.loading) publish((await readState()).st);
+        if (this.leaseUntil > Date.now()) await this.handoffs();
         const active = JSON.stringify(currentState().active);
         if (active !== this.lastActive) {
           this.lastActive = active;
@@ -223,6 +224,7 @@ export default class UsageCard extends View {
     if (l && l.copy && l.copy !== this.copy && l.until > now) return false;
     try {
       await writeTextFile(LEASE(), JSON.stringify({ copy: this.copy, until: now + LEASE_MS }), raw);
+      this.leaseUntil = now + LEASE_MS;
       return true;
     } catch {
       return false;
@@ -231,6 +233,27 @@ export default class UsageCard extends View {
 
   publishUsage(usage) {
     if (JSON.stringify(shared("accounts.usage")) !== JSON.stringify(usage)) setShared("accounts.usage", { ...usage });
+  }
+
+  async handoffs() {
+    this.handoffSeen ??= new Set();
+    for (const terminal of terminals()) {
+      if (terminal.state !== "live") continue;
+      let event;
+      try { event = JSON.parse(terminal.labels?.["atrous.account.handoff"] ?? "null"); } catch { continue; }
+      if (!event?.id || !TOOLS[event.tool] || !["waiting", "resumed"].includes(event.phase)) continue;
+      const key = `${event.id}:${event.phase}`;
+      if (this.handoffSeen.has(key)) continue;
+      this.handoffSeen.add(key);
+      while (this.handoffSeen.size > 150) this.handoffSeen.delete(this.handoffSeen.values().next().value);
+      if (event.phase === "resumed") {
+        await setActive(event.tool, event.to, "auto", event.from);
+        notify({ title: `${TOOLS[event.tool].name} resumed on ${event.name}`, body: "The same saved conversation continues in its terminal.", timeout: 9000 });
+      } else {
+        notify({ title: `${TOOLS[event.tool].name}: account quota reached`, body: "No linked account has fresh, available quota. The conversation is still open in its terminal.", level: "warning", timeout: 12000,
+          action: { name: "mod.open", args: { name: "accounts" } } });
+      }
+    }
   }
 
   // Looks at every account; asks the services for those that are due (lease holder only).
@@ -297,6 +320,11 @@ export default class UsageCard extends View {
         }
         for (const k of Object.keys(usage)) if (!st.accounts.some((a) => keyOf(a) === k)) delete usage[k];
         this.publishUsage(usage);
+        // A read-only, credential-free snapshot for account launchers. One atomic write per
+        // completed fetch pass; an expired snapshot never authorizes a running-agent handoff.
+        const snapshot = Object.fromEntries(Object.entries(usage).map(([key, u]) => [key,
+          { login: u.login, rows: u.rows, blocked: u.blocked, at: u.at, stale: Boolean(u.stale), error: Boolean(u.error) }]));
+        await writeTextFile(`${appHome().replace(/\\/g, "/")}/accounts/usage.json`, JSON.stringify(snapshot)).catch(() => {});
         if (Object.keys(emails).length) {
           await updateState((s) => {
             let changed = false;
@@ -369,7 +397,7 @@ export default class UsageCard extends View {
       const pickName = displayName(pick, usage[keyOf(pick)]?.who);
       notify({
         title: `${TOOLS[tool].name}: switched to ${pickName}`,
-        body: `${curName} ${why}. New agents start on ${pickName}; running ones keep ${curName}.`,
+        body: `${curName} ${why}. New agents start on ${pickName}; running agents continue until their own quota is exhausted.`,
         level: "warning",
         timeout: 15000,
         icon: TOOLS[tool].icon,

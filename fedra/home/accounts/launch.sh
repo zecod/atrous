@@ -18,6 +18,11 @@ case "$tool" in
   *) echo "Atrous: unknown tool '$tool'" >&2; exit 2 ;;
 esac
 
+program=$(command -v "$tool" 2>/dev/null || true)
+if command -v node >/dev/null 2>&1 && [ -f "$program" ]; then
+  exec node "$here/launch.mjs" "$tool" --command "$program" -- "$@"
+fi
+
 label() {
   [ -n "$ATC_TERMINAL_ID" ] && command -v atc >/dev/null 2>&1 && atc label "$ATC_TERMINAL_ID" "atrous-account=$1" >/dev/null 2>&1
   return 0

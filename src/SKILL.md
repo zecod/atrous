@@ -23,6 +23,15 @@ its terminals.
 `app.check_updates` checks for newer releases. Settings reports "Up to date"
 only after a successful check; on failure, check the connection and retry.
 
+Settings > Accounts controls the account for new Codex and Claude Code launches.
+With automatic switching and "Resume running agents after a quota limit" enabled,
+new interactive launches through Atrous can resume their exact saved conversation
+on another linked account after a confirmed quota error. The warning threshold
+does not interrupt work. Claude Code requires 2.1.318 or newer; unsupported launch
+modes keep their original behavior. Manual exits never trigger a handoff.
+The terminal's `atrous-account` label follows its current account; the JSON label
+`atrous.account.handoff` reports `switching`, `waiting` or `resumed`.
+
 ## Show something when asked
 
 New spaces and tabs are shown immediately: only create them when asked.

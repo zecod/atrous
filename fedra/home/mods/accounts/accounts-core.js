@@ -57,7 +57,7 @@ export function normalize(raw) {
     if (!a || a.pending) st.active[tool] = "default";
   }
   const th = Number(st.auto?.threshold);
-  st.auto = { enabled: st.auto?.enabled === undefined ? true : Boolean(st.auto.enabled), threshold: Number.isFinite(th) ? Math.max(50, Math.min(100, Math.round(th))) : 95 };
+  st.auto = { enabled: st.auto?.enabled === undefined ? true : Boolean(st.auto.enabled), resume: st.auto?.resume !== false, threshold: Number.isFinite(th) ? Math.max(50, Math.min(100, Math.round(th))) : 95 };
   st.picked = st.picked && typeof st.picked === "object" ? st.picked : {};
   return st;
 }

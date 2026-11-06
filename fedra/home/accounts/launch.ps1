@@ -8,7 +8,8 @@
 #   active account of each tool. The main account ("default") runs exactly as before: nothing set.
 # - Another account: CLAUDE_CONFIG_DIR / CODEX_HOME is set to its folder for this launch only and
 #   put back when the program exits, so the shell that stays open (-NoExit) is unchanged. Agents
-#   already running keep the account they started with.
+#   already running keep their account until a confirmed quota stop, when the Node launcher
+#   can resume the exact conversation if automatic account switching and resume are enabled.
 # - Before starting, that folder's copies of your main settings are refreshed when a main file is
 #   newer than its marker (node profile.mjs sync).
 # - While it runs, the terminal carries the label atrous-account=<tool>:<id> (Settings counts the
@@ -32,6 +33,13 @@ function Set-AtrousLabel([string]$Value) {
 }
 
 function Start-AtrousAccount([string]$Tool, $Rest) {
+  # The Node supervisor preserves native terminal stdio and resumes this CLI only after a
+  # confirmed quota stop. Old/custom shell functions keep the original launcher below.
+  $program = Get-Command $Tool -ErrorAction SilentlyContinue
+  if ((Get-Command node -ErrorAction SilentlyContinue) -and $program.Source -and (Test-Path -LiteralPath $program.Source)) {
+    & node (Join-Path $PSScriptRoot 'launch.mjs') $Tool --command $program.Source -- @Rest
+    return
+  }
   $var = @{ claude = 'CLAUDE_CONFIG_DIR'; codex = 'CODEX_HOME' }[$Tool]
   $here = $PSScriptRoot
   $acc = $null
