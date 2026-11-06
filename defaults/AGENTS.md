@@ -915,6 +915,11 @@ Rules:
   on the root `div()`, `h_flex()` or `v_flex()`. It reports `{width, height}`
   in logical pixels after the first layout and whenever the size changes,
   even with the pointer elsewhere. It does not change `props()`.
+- Position: `.id("page").on_bounds_change((bounds, cx) => { … })` reports
+  `{x, y, width, height}` in window-client logical pixels after layout, including
+  moves without a size change. The Browser panel uses it to place its native page
+  during reopening and resizing. Large Elements selections show a short HTML preview;
+  choose **Load HTML** to edit the full selection (up to 250,000 characters).
 - Cleanup: an optional `async close(cx)` on the exported `View` gets one final
   call when its pane, tab, layout-owned slot or overlay goes, and on app quit.
   It is not called for a hidden copy or an inactive tab. Start cleanup inside

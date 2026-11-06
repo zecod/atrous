@@ -4,8 +4,8 @@
 // borderless window owned by Atrous's and kept exactly over this panel's page area, at the
 // display's refresh rate, with the page's own mouse, keyboard, IME, clipboard and scrolling.
 // This panel says how big the area is and whether it shows (POST /place on the host, every
-// change and each second); the host finds where it is in Atrous's own frame (two marker squares
-// this panel draws under the page). While something of this panel's (a menu, the note popover,
+// change and each second), including its exact layout bounds. While something of this panel's
+// (a menu, the note popover,
 // a dialog) or Atrous's (an overlay) must draw over the page, the host hides it and this panel
 // shows a still of the page in its place. Everything else is the same in both modes.
 //
@@ -206,7 +206,7 @@ export default class Browser extends View {
     cx.timer.every(100, (cx) => {
       if (!this.wantNative()) return;
       const shown = this.isShown();
-      if (shown !== this.visible) { this.visible = shown; this.wake(cx); cx.notify(); }
+      if (shown !== this.visible) { this.updateVisibility(shown); this.wake(cx); cx.notify(); }
       this.sendPlace(cx);
     });
     if (this.wantNative()) cx.spawn(async (cx) => {
@@ -240,10 +240,11 @@ export default class Browser extends View {
     const a = this.area;
     const keys = this.atrousKeyActions();
     return {
-      visible: Boolean(this.visible && this.isNative() && !this.stopped && !this.importing && this.connected && a),
+      visible: Boolean(this.visible && this.isNative() && !this.stopped && !this.importing && this.connected && this.bounds && a),
       frozen: this.freezeNeeded(),
       w: a ? Math.round(a.width * 100) / 100 : 0, h: a ? Math.round(a.height * 100) / 100 : 0,
       sig: this.layoutSig(), keys, stillShown: this.stillShown?.path ?? null, pid: this.atrousPid || undefined,
+      bounds: this.bounds ?? undefined,
     };
   }
 
@@ -253,7 +254,20 @@ export default class Browser extends View {
     if (!force && key === this.lastPlaceKey && Date.now() - (this.lastPlaceAt ?? 0) < 1000) return;
     this.lastPlaceKey = key;
     this.lastPlaceAt = Date.now();
-    cx.spawn(async () => { try { await fetch(`${HOST}/place`, post(st)); } catch {} });
+    // Serialize placement: a slow older request must never overtake a resize or hide.
+    this.pendingPlace = st;
+    if (!this.placing) {
+      this.placing = true;
+      cx.spawn(async () => {
+        try {
+          while (this.pendingPlace) {
+            const latest = this.pendingPlace;
+            this.pendingPlace = null;
+            try { await fetch(`${HOST}/place`, post(latest)); } catch {}
+          }
+        } finally { this.placing = false; }
+      });
+    }
     if (st.visible && !this.hostLooping) this.hostLoop(cx);
   }
 
@@ -334,10 +348,17 @@ export default class Browser extends View {
   }
 
   wake(cx) {
-    this.visible = this.isShown();
+    this.updateVisibility(this.isShown());
     this.fitPanel();
     if (this.visible && this.area && this.os && !this.looping && !this.stopped) this.loop(cx);
     if (this.wantNative()) this.watchFrames(cx); // stills arrive through the frames folder too
+  }
+
+  updateVisibility(shown) {
+    if (shown === this.visible) return;
+    this.visible = shown;
+    this.bounds = null;
+    this.boundsEpoch = (this.boundsEpoch ?? 0) + 1;
   }
 
   // A page needs room: while the browser shows, a side panel narrower than WIDE is widened,
@@ -939,12 +960,14 @@ export default class Browser extends View {
 
   viewport(t) {
     const fit = this.fit();
-    let view = div().id("bp-view").relative().flex_1().min_h(0).w_full().overflow_hidden().bg(t.background)
+    let view = div().id(`bp-view-${this.boundsEpoch ?? 0}`).relative().flex_1().min_h(0).w_full().overflow_hidden().bg(t.background)
       .track_focus(this.handle)
       .on_key_down((e, cx) => this.key(e, cx))
-      .on_size_change((size, cx) => {
+      .on_bounds_change((size, cx) => {
         const old = this.area;
         this.area = size;
+        this.bounds = size;
+        if (this.wantNative()) this.sendPlace(cx);
         if (!old || Math.abs(old.width - size.width) >= 0.5 || Math.abs(old.height - size.height) >= 0.5) {
           this.resize(cx);
           this.wake(cx);
@@ -1093,7 +1116,7 @@ export default class Browser extends View {
   renderPanel(cx) {
     const shown = this.isShown();
     if (shown !== this.visible) {
-      this.visible = shown;
+      this.updateVisibility(shown);
       cx.spawn(async () => this.fitPanel()); // run() is ignored during render
     }
     if (this.visible && this.area && this.os && !this.looping && !this.stopped && !this.importing) this.loop(cx);

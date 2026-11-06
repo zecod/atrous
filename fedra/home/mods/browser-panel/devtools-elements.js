@@ -15,7 +15,7 @@ import { apiGet, apiPost, iconBtn, textBtn, notice, windowed, scrollInto, mono, 
 
 const RH = 20; // tree row height
 const WIN = 400, MARGIN = 120; // rows fetched around the view, and how close to its edge before fetching more
-const PREVIEW_MAX = 60_000, EDIT_MAX = 250_000;
+const PREVIEW_MAX = 12_000, EDIT_MAX = 250_000;
 const VOID = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"]);
 
 // One tree row as colored pieces: <tag attr="value">…</tag>, "text", <!-- comment -->.
@@ -53,7 +53,7 @@ export const Elements = {
       html: { id: null, original: "", label: "", kind: 0, total: 0, truncated: false, preview: false, dirty: false, error: null, applying: false, loadingFor: null },
     };
     this.dteFocus = cx.focus_handle();
-    this.dteEd = EditorState.new({ language: "html", value: "", font_family: mono(), font_size: 12, soft_wrap: true, syntax: syntax(theme()) });
+    this.dteEd = EditorState.new({ language: "html", value: "", font_family: mono(), font_size: 12, soft_wrap: false, syntax: syntax(theme()) });
     this.dteEd.on("change", (_e, cx) => {
       const h = this.dte.html;
       const dirty = this.dteEd.value() !== h.original;
@@ -78,6 +78,8 @@ export const Elements = {
     const d = this.dte;
     if (!d.active) return;
     d.active = false; d.gen++; d.looping = false;
+    d.htmlRequest = (d.htmlRequest ?? 0) + 1;
+    d.html.scheduledFor = null;
     d.inspecting = false; d.hover = null; d.ver = -1; d.tver = -1;
     cx.spawn(async () => { await apiPost("/dom/close"); });
   },
@@ -163,10 +165,18 @@ export const Elements = {
     if (!d.focus || h.dirty) return;
     const preview = d.inspecting && d.hover === d.focus;
     if (d.focus === h.id && (preview || !h.preview)) return;
-    this.dteLoadHtml(cx);
+    if (h.scheduledFor === d.focus && h.scheduledPreview === preview) return;
+    const request = d.htmlRequest = (d.htmlRequest ?? 0) + 1;
+    const id = d.focus;
+    h.scheduledFor = id; h.scheduledPreview = preview;
+    // Pointing across a page should load only the node the pointer settles on.
+    cx.timer.after(preview ? 120 : 40, (cx) => {
+      if (request === d.htmlRequest) h.scheduledFor = null;
+      if (request === d.htmlRequest && id === d.focus && !h.dirty && this.dteShown()) this.dteLoadHtml(cx);
+    });
   },
 
-  dteLoadHtml(cx, force) {
+  dteLoadHtml(cx, force, full = false) {
     const d = this.dte, h = d.html;
     if (h.loadingFor) { h.again = true; return; }
     const id = d.focus;
@@ -175,13 +185,13 @@ export const Elements = {
     h.loadingFor = id;
     cx.spawn(async (cx) => {
       try {
-        const r = await apiGet(`/dom/html?id=${id}&max=${preview ? PREVIEW_MAX : EDIT_MAX}`);
+        const r = await apiGet(`/dom/html?id=${id}&max=${full ? EDIT_MAX : PREVIEW_MAX}`);
         if ((h.dirty && !force) || d.focus !== id) return;
         if (!r.ok) { h.error = r.error; h.id = id; h.preview = preview; cx.notify(); return; }
         const more = r.total - r.html.length;
-        const text = r.truncated ? `${r.html}\n<!-- … ${more.toLocaleString("en-US")} more characters${preview ? "" : ": too big to edit here"} -->` : r.html;
+        const text = r.truncated ? `${r.html}\n<!-- … ${more.toLocaleString("en-US")} more characters -->` : r.html;
         Object.assign(h, { id, original: text, label: r.label, kind: r.kind, total: r.total, truncated: r.truncated, preview, dirty: false, error: null });
-        this.dteEd.set_value(text);
+        if (this.dteEd.value() !== text) this.dteEd.set_value(text);
         cx.notify();
       } finally {
         h.loadingFor = null;
@@ -402,7 +412,9 @@ export const Elements = {
     const title = !h.id ? "" : h.kind === 1 ? `<${h.label}>` : h.label;
     let status;
     if (h.preview && d.inspecting) status = "Pointing: click the element in the page to lock it and edit";
-    else if (h.truncated) status = `${h.total.toLocaleString("en-US")} characters: too big to edit here, select something smaller`;
+    else if (h.truncated) status = h.total <= EDIT_MAX
+      ? `${h.total.toLocaleString("en-US")} characters: preview shown; load HTML to edit`
+      : `${h.total.toLocaleString("en-US")} characters: preview shown; select something smaller to edit`;
     else if (h.dirty) status = d.focus !== h.id ? "Unsaved edits to the node shown here: Apply or Revert" : "Edited: Apply changes the page (Ctrl+Z in the page won't undo it)";
     else if (h.id) status = `${h.total.toLocaleString("en-US")} characters`;
     else status = "Select a node";
@@ -410,6 +422,8 @@ export const Elements = {
       .child(h_flex().h(28).flex_none().pl(8).pr(4).gap(4).items_center().border_b(1).border_color(t.border)
         .child(div().flex_1().min_w(0).truncate().text_size(11.5).font_family(mono()).text_color(h.preview && d.inspecting ? t.muted : t.ansi4).child(title))
         .when(h.dirty, (el) => el.child(textBtn("dte-revert", "Revert", (_e, cx) => this.dteRevert(cx), t, { tip: "Put the HTML back as the page has it" })))
+        .when(h.truncated && h.total <= EDIT_MAX && !d.inspecting, (el) => el.child(textBtn("dte-load-html", "Load HTML", (_e, cx) => this.dteLoadHtml(cx, false, true), t,
+          { disabled: Boolean(h.loadingFor) || h.dirty, tip: "Load this element's complete HTML for editing" })))
         .child(textBtn("dte-apply", h.applying ? "Applying…" : "Apply", (_e, cx) => this.dteApply(cx), t,
           { primary: canApply, disabled: !canApply, tip: editable ? "Replace this node in the page with the HTML here" : "This node can't be edited here" }))
         .child(iconBtn("dte-copy", "copy", h.dirty ? "Copy the edited HTML" : "Copy this node's HTML", (_e, cx) => this.dteCopy(cx, false), t, { disabled: !h.id })))

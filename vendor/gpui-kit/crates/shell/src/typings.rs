@@ -1397,6 +1397,9 @@ const ELEMENT_METHODS: &str = r#"    /**
     /** div/h_flex/v_flex: initial size and changed layout size, in logical pixels.
      * Runs after layout, even without pointer movement. Use a stable id. */
     on_size_change<Self extends Element>(this: Self, handler: (size: { width: number; height: number }, cx: Context) => void): Self;
+    /** Initial and changed layout rectangle, in window-client logical pixels.
+     * Includes moves without a size change; runs after layout. Use a stable id. */
+    on_bounds_change<Self extends Element>(this: Self, handler: (bounds: { x: number; y: number; width: number; height: number }, cx: Context) => void): Self;
     /** GPUI `InteractiveElement::on_hover`; reports both pointer entry and exit. */
     on_hover<Self extends Element>(this: Self, handler: (hovered: boolean, cx: Context) => void): Self;
     /**

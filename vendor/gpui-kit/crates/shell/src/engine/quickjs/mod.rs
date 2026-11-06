@@ -4070,10 +4070,11 @@ impl ShellRuntime {
         self.callbacks.borrow().get(id)?.application.as_ref().map(|app| app.id())
     }
 
-    pub(crate) fn dispatch_size_change(
+    pub(crate) fn dispatch_layout_change(
         self: &Rc<Self>,
         id: CallbackId,
-        size: gpui::Size<gpui::Pixels>,
+        bounds: gpui::Bounds<gpui::Pixels>,
+        report_origin: bool,
         window: &mut Window,
         cx: &mut App,
     ) {
@@ -4090,12 +4091,16 @@ impl ShellRuntime {
         let result = self.with_js(|ctx| {
             let handler = entry.value.clone().restore(ctx)?;
             let payload = Object::new(ctx.clone())?;
-            payload.set("width", f32::from(size.width))?;
-            payload.set("height", f32::from(size.height))?;
+            payload.set("width", f32::from(bounds.size.width))?;
+            payload.set("height", f32::from(bounds.size.height))?;
+            if report_origin {
+                payload.set("x", f32::from(bounds.origin.x))?;
+                payload.set("y", f32::from(bounds.origin.y))?;
+            }
             handler.call::<_, ()>((payload, context_object(ctx, ContextBinding::Call(generation))?))
         });
         if let Err(error) = result {
-            tracing::error!("error in size change handler: {error}");
+            tracing::error!("error in layout change handler: {error}");
         }
         scheduler::drain_runtime_jobs(self, window, cx);
     }
@@ -7230,6 +7235,7 @@ impl ShellRuntime {
                 "controls_right",
                 "on_resize",
                 "on_size_change",
+                "on_bounds_change",
                 "set_position",
                 "pressed",
                 "start",
@@ -8179,6 +8185,7 @@ impl ShellRuntime {
             | "on_link_click"
             | "on_resize"
             | "on_size_change"
+            | "on_bounds_change"
             | "on_change"
             | "token"
             | "on_token_click"
@@ -10178,6 +10185,7 @@ fn callback_op_name(method: &str) -> Option<&'static str> {
         "on_item_secondary_click" => "on_item_secondary_click",
         "on_resize" => "on_resize",
         "on_size_change" => "on_size_change",
+        "on_bounds_change" => "on_bounds_change",
         "tab_bar" => "tab_bar",
         "empty_group" => "empty_group",
         "drop_indicator" => "drop_indicator",
