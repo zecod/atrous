@@ -74,9 +74,12 @@ test("shared account normalization copies remain identical", async () => {
 test("Windows custom cmd launchers retain the original shell fallback", { skip: process.platform !== "win32" }, async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "atrous-custom-launcher-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
-  await fs.writeFile(path.join(root, "codex.cmd"), "@echo fixture-custom-launcher\r\n");
+  const bin = path.join(root, "bin"); await fs.mkdir(bin);
+  await fs.writeFile(path.join(bin, "codex.cmd"), "@echo fixture-custom-launcher\r\n");
   for (const file of ["launch.ps1", "codex.ps1"]) await fs.copyFile(new URL(`../fedra/home/accounts/${file}`, import.meta.url), path.join(root, file));
-  const env = { ...process.env, Path: root + path.delimiter + process.env.Path };
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) if (key.toLowerCase() === "path") delete env[key];
+  env.PATH = bin + path.delimiter + process.env.PATH;
   delete env.ATC_TERMINAL_ID;
   const result = spawnSync("powershell.exe", ["-NoProfile", "-File", path.join(root, "codex.ps1")], { env, encoding: "utf8", windowsHide: true });
   assert.equal(result.status, 0, result.stderr);
