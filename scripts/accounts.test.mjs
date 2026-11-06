@@ -98,7 +98,7 @@ async function fixture(t, tool, mode = "handoff") {
   const env = { ...process.env, ATC_TERMINAL_ID: "fixture:1", FIXTURE_TOOL: tool, FIXTURE_ROOT: root, FIXTURE_MODE: mode, FIXTURE_CWD: worktree };
   for (const key of ["OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_ACCESS_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX"]) delete env[key];
   const labels = []; let keys = 0;
-  const control = async args => { if (args[0] === "keys") { keys++; await fs.writeFile(path.join(root, "stop"), ""); } else labels.push(args[2]); return { code: 0 }; };
+  const control = async args => { if (args[0] === "keys") { assert.equal(args[2], "ctrl+d"); keys++; await fs.writeFile(path.join(root, "stop"), ""); } else labels.push(args[2]); return { code: 0 }; };
   const args = tool === "codex" ? ["--sandbox", "workspace-write", "original task"] : ["--permission-mode", "acceptEdits", "--settings", JSON.stringify({ fixture: true, hooks: { SessionStart: [] } }), "original task"];
   const code = await supervise({ tool, args, accounts, env, interactive: true, executor: { command: process.execPath, prefix: [fileURLToPath(new URL("./fixtures/account-agent.mjs", import.meta.url))] }, control });
   const rows = (await fs.readFile(path.join(root, "runs.jsonl"), "utf8")).trim().split("\n").map(JSON.parse);

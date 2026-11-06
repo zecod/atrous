@@ -298,11 +298,12 @@ export async function supervise({ tool, command, args, accounts = HERE, env = pr
               failed.set(account.id, { at: Date.now(), resets: binding(tool, snapshot?.[`${tool}:${account.id}`], model).resets });
               await label("atrous.account.handoff", JSON.stringify({ id: `${runId}-${currentGeneration}`, phase: "switching", tool, from: account.id, to: next.id, name: title(next) }));
               if (exited || stopped) break;
-              // Normal TUI exit, never taskkill/SIGKILL or stopping the terminal/core. If the
-              // CLI doesn't exit, leave it alone rather than starting a second writer.
-              await core(["keys", terminal, "ctrl+c"]);
+              // Use the TUI's exit shortcut. Ctrl+C can reach the parent Node/npm shim when
+              // Windows restores console mode during shutdown and cancel the handoff itself.
+              // If the CLI doesn't exit, leave it alone rather than starting a second writer.
+              await core(["keys", terminal, "ctrl+d"]);
               await Promise.race([running.done, sleep(350)]);
-              if (!exited) await core(["keys", terminal, "ctrl+c"]);
+              if (!exited) await core(["keys", terminal, "ctrl+d"]);
               await Promise.race([running.done, sleep(4000)]);
               if (exited && !stopped) handoff = { next, resumed };
               break;
