@@ -154,13 +154,20 @@ fn sync_defaults(mods: &Path, installed_path: &Path, shipped_mods: &[(&str, &[u8
                 std::fs::rename(&target, mods.join(&clone))?;
                 edited_note(&clone);
             } else {
-                std::fs::remove_dir_all(&target)?;
+                // A helper may keep this directory open on Windows. Removing the tree
+                // deletes its files before failing on the held directory, leaving an empty
+                // mod. Refresh owned files in place and prune only obsolete shipped files.
+                if let Some(previous) = installed.get(name) {
+                    for path in previous.keys().filter(|path| !shipped.contains_key(*path)) {
+                        std::fs::remove_file(target.join(path))?;
+                    }
+                }
             }
         }
         for (path, bytes) in shipped_mods.iter().filter(|(p, _)| p.starts_with(&format!("{name}/"))) {
             let file = mods.join(path);
             std::fs::create_dir_all(file.parent().unwrap())?;
-            std::fs::write(&file, bytes)?;
+            write_if_changed(&file, bytes)?;
         }
         installed.insert(name.to_owned(), shipped);
     }
@@ -1483,6 +1490,25 @@ mod tests {
         std::fs::remove_file(dir.join("a.json")).unwrap();
         sync_layouts(&root, &[("a", "a3")]).unwrap();
         assert_eq!(std::fs::read_to_string(dir.join("a.json")).unwrap(), "a3");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn default_mods_update_while_the_directory_is_in_use() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let root = std::env::temp_dir().join(format!("atrous-sync-locked-{}", std::process::id()));
+        let (mods, record) = (root.join("mods"), root.join("installed.json"));
+        sync_defaults(&mods, &record, &[("browser/main.js", b"old"), ("browser/obsolete.js", b"old")]).unwrap();
+        // A browser helper can retain its working directory after the app closes. Windows
+        // permits updating its files but prevents removing the directory itself.
+        let held = std::fs::OpenOptions::new().read(true).share_mode(3).custom_flags(0x02000000)
+            .open(mods.join("browser")).unwrap();
+        let result = sync_defaults(&mods, &record, &[("browser/main.js", b"new"), ("browser/helper.js", b"new")]);
+        drop(held);
+        assert!(result.is_ok(), "updating a held directory failed: {result:?}");
+        assert_eq!(std::fs::read(mods.join("browser/main.js")).unwrap(), b"new");
+        assert!(!mods.join("browser/obsolete.js").exists());
         std::fs::remove_dir_all(root).unwrap();
     }
 
