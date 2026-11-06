@@ -107,6 +107,8 @@ those files or the generated guide. The app rewrites them on start.
   callback receives its own. Native animations, not redraw timers, keep
   the window cheap to run. Root `on_size_change((size, cx) => …)` reports
   logical pixels after layout, including resizes without pointer movement.
+  `on_bounds_change((bounds, cx) => …)` also reports `x` and `y` in window-client
+  logical pixels, including moves without a size change; give the element a stable id.
   Optional `View.close(cx)` gets one bounded final call; start cleanup there,
   not in an earlier task. The installed guide explains its 250 ms quit budget
   and which cleanup commands go out before shutdown.

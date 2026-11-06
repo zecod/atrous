@@ -62,6 +62,7 @@ import os from "node:os";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { registerDevtools } from "./devtools-dom.mjs"; // devtools-dom hook
+import { nativeBuildInputs } from "./native-build.mjs";
 import { devtoolsNet } from "./devtools-net.mjs"; // devtools-net hook
 import zlib from "node:zlib";
 
@@ -310,18 +311,18 @@ function runQuiet(cmd, args, opts = {}) {
 }
 
 // The host is built from native/ (sources only in the mod) into BASE/host, the first time and
-// whenever a source is newer than the exe. The build runs in BASE/host-build, so no bin/obj
+// whenever its source content changes. The build runs in BASE/host-build, so no bin/obj
 // ever lands in the mod folder.
 async function ensureHostBuilt() {
-  let srcs = [];
-  try { srcs = fs.readdirSync(NATIVE_SRC).filter((f) => /\.(cs|csproj|manifest|json)$/i.test(f)); } catch {}
-  if (!srcs.length) throw new Error(`no native sources in ${NATIVE_SRC}`);
-  const newest = Math.max(...srcs.map((f) => fs.statSync(path.join(NATIVE_SRC, f)).mtimeMs));
-  let built = 0;
-  try { built = fs.statSync(HOST_EXE).mtimeMs; } catch {}
-  if (built && built >= newest) return;
+  const { files: srcs, key } = nativeBuildInputs(NATIVE_SRC);
+  const stamp = path.join(HOST_DIR, "source.sha256");
+  const built = fs.existsSync(HOST_EXE);
+  if (built && fs.existsSync(stamp) && fs.readFileSync(stamp, "utf8") === key) return;
   const work = path.join(BASE, API_PORT === 9734 ? "host-build" : `host-build-${API_PORT}`);
   fs.mkdirSync(work, { recursive: true });
+  for (const f of fs.readdirSync(work)) {
+    if (/\.(cs|csproj|manifest|json)$/i.test(f) && !srcs.includes(f)) fs.unlinkSync(path.join(work, f));
+  }
   for (const f of srcs) fs.copyFileSync(path.join(NATIVE_SRC, f), path.join(work, f));
   S.phase = "Building the native browser view (first run, about a minute)…";
   bump();
@@ -332,7 +333,7 @@ async function ensureHostBuilt() {
     log("host build failed:", r.out.slice(-1500));
     if (!built) throw new Error("the native host didn't build (is the .NET 9 SDK installed?)");
     log("keeping the host built before");
-  }
+  } else fs.writeFileSync(stamp, key); // a failed build must be retried next time
 }
 
 // The first native start brings the panel's sign-ins, history and bookmarks over from the
@@ -1895,6 +1896,18 @@ async function main() {
   cdp.listeners.push(onEvent);
   devnet.connect(cdp); // devtools-net hook
 
+  // The CDP port opens before WebView2 finishes creating the first controller. Wait for the
+  // host's selected tab, otherwise ensurePage can create a blank tab during restoration.
+  let nativeActive = null;
+  if (NATIVE) {
+    for (let i = 0; i < 150; i++) {
+      const hs = await hostState();
+      if (hs?.error) throw new Error(hs.error);
+      if (hs?.ready && hs.active) { nativeActive = hs.active; break; }
+      await sleep(100);
+    }
+    if (!nativeActive) throw new Error("The native browser didn't create its first tab");
+  }
   const { targetInfos } = await cdp.send("Target.getTargets");
   for (const t of targetInfos) if (t.type === "page") targets.set(t.targetId, { id: t.targetId, url: t.url, title: t.title, order: ++order });
   await cdp.send("Target.setDiscoverTargets", { discover: true });
@@ -1903,9 +1916,12 @@ async function main() {
 
   let last = null;
   try { last = fs.readFileSync(path.join(BASE, `last-target${SUFFIX}`), "utf8").trim(); } catch {}
+  if (nativeActive) last = nativeActive;
   await serial(() => (last && targets.has(last) ? follow(last) : ensurePage()));
   setReady();
-  if (opt.url && S.url === "about:blank") navigate(opt.url).catch(() => {});
+  // The native host owns initial navigation and tab restoration. Its first target may still
+  // report about:blank while navigation commits; never overwrite that restored page here.
+  if (!NATIVE && opt.url && S.url === "about:blank") navigate(opt.url).catch(() => {});
 
   setInterval(() => { if (!watching() && S.casting) stopCast(); }, 1000);
   if (NATIVE) hostWatch();

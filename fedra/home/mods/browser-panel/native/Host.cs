@@ -1,15 +1,15 @@
 // atrous-browser-host: the Browser panel's page, drawn natively. A WebView2 lives in a borderless
 // popup owned by Atrous's main window and kept exactly over the panel's page area. (Not a child
 // window: Atrous draws through DirectComposition above its child windows, so a child never shows.)
-// The panel (browser-panel mod) says how big the area is and whether it shows; the host finds
-// where it is in Atrous's own frame. Agents drive the pages over the DevTools Protocol.
+// The panel sends its layout rectangle and visibility. Older panels use marker detection in
+// Atrous's own frame. Agents drive the pages over the DevTools Protocol.
 //
 //   atrous-browser-host --home <Atrous home> [--port 9735] [--cdp-port 9733] [--data <dir>] [--url <url>]
 //                      [--atrous-pid <pid>] [--frames mods/browser-panel-frames] [--no-occlusion]
 //
 // API (127.0.0.1:<port>, JSON):
 //   GET  /state?since=<ver>&wait=<ms>   what the host shows (long poll)
-//   POST /place {visible, frozen, w, h, sig, keys?, stillShown?, pid?}   from the panel, on every change and each second
+//   POST /place {visible, frozen, w, h, sig, bounds?: {x,y,width,height}, keys?, stillShown?, pid?}
 //   POST /tabs/new {url?, activate?} -> {id}    /tabs/activate {id}    /tabs/close {id}
 //   POST /focus {page}   page: true puts the keyboard in the page, false gives it back to Atrous
 //   POST /still -> {path}   a still of the page, written where Atrous can show it
@@ -128,6 +128,7 @@ sealed class Host : ApplicationContext
     readonly List<Tab> tabs = new();
     Tab active;
     bool ready;
+    bool restoring;
     string error;
 
     // Atrous's window
@@ -149,6 +150,7 @@ sealed class Host : ApplicationContext
     // where the view is: the page area's top left in Atrous's client pixels, found in Atrous's own frame
     Point origin;
     bool originKnown;
+    RectangleF? layoutBounds; // exact logical client bounds, supplied after GPUI layout
     int marginRight; // client width - page area right edge, at the last detection (a window resize keeps it)
     string detectedKey = "";
     long detectAt;
@@ -259,9 +261,14 @@ sealed class Host : ApplicationContext
                 activeAt = (int?)saved?["active"] ?? 0;
             }
             catch { }
-            if (urls.Length == 0) await NewTab(string.IsNullOrEmpty(o.Url) ? "https://www.google.com" : o.Url, true);
-            else for (int i = 0; i < urls.Length; i++) await NewTab(urls[i], i == Math.Clamp(activeAt, 0, urls.Length - 1));
+            restoring = true;
+            activeAt = Math.Clamp(activeAt, 0, Math.Max(0, urls.Length - 1));
+            await NewTab(urls.Length == 0 ? (string.IsNullOrEmpty(o.Url) ? "https://www.google.com" : o.Url) : urls[activeAt], true);
             ready = true;
+            Bump(); // the shown tab can be used while the other controllers restore
+            for (int i = 0; i < urls.Length; i++)
+                if (i != activeAt) await NewTab(urls[i], false, i);
+            restoring = false;
             SaveTabs();
             Log($"ready, browser {env.BrowserVersionString}");
         }
@@ -433,6 +440,13 @@ sealed class Host : ApplicationContext
             if (Math.Abs(w - areaW) > 0.01 || Math.Abs(h - areaH) > 0.01) { areaW = w; areaH = h; changed = true; }
         }
         if (b["sig"] != null) sig = (string)b["sig"];
+        if (b["bounds"] is JsonObject bounds)
+        {
+            var next = new RectangleF((float)bounds["x"], (float)bounds["y"], (float)bounds["width"], (float)bounds["height"]);
+            if (next != layoutBounds) { layoutBounds = next; changed = true; }
+            originKnown = true;
+            detectAt = 0;
+        }
         // testing: a page area origin in client pixels, without looking for it
         if (b["ox"] != null && b["oy"] != null) { origin = new Point((int)b["ox"], (int)b["oy"]); originKnown = true; detectedKey = DetectKey(); changed = true; }
         if (b["keys"] is JsonArray ka)
@@ -446,7 +460,9 @@ sealed class Host : ApplicationContext
         }
         if (b["stillShown"] != null) stillAck = (string)b["stillShown"];
         if (b["pid"] != null && (int)b["pid"] != o.AtrousPid) { o.AtrousPid = (int)b["pid"]; lastFind = 0; }
-        if (DetectKey() != detectedKey && !detecting && detectAt == 0) detectAt = Environment.TickCount64 + 40;
+        if (layoutBounds == null && DetectKey() != detectedKey && !detecting && detectAt == 0) detectAt = Environment.TickCount64 + 40;
+        if (!want) SetShown(false);
+        else if (shown && layoutBounds != null) Move();
         if (changed) Bump();
     }
 
@@ -551,19 +567,19 @@ sealed class Host : ApplicationContext
             {
                 // A resize keeps the side panel's distance from the window's right edge: follow it now,
                 // and look again in Atrous's frame once the size settles.
-                if (originKnown && dpi == lastDpi && lastClient != Size.Empty)
+                if (layoutBounds == null && originKnown && dpi == lastDpi && lastClient != Size.Empty)
                 {
                     int w = (int)Math.Round(areaW * dpi / 96.0);
                     origin = new Point(client.Width - marginRight - w, origin.Y);
                 }
-                if (dpi != lastDpi) originKnown = false;
+                if (dpi != lastDpi && layoutBounds == null) originKnown = false;
                 lastClient = client;
                 lastDpi = dpi;
-                detectAt = now + 200;
+                if (layoutBounds == null) detectAt = now + 200;
             }
             Follow();
         }
-        if (detectAt != 0 && now >= detectAt && ok && !detecting && areaW > 0) { detectAt = 0; _ = Detect(); }
+        if (layoutBounds == null && detectAt != 0 && now >= detectAt && ok && !detecting && areaW > 0) { detectAt = 0; _ = Detect(); }
 
         bool alive = now - lastPlace < 4000;
         bool target = ok && want && alive && originKnown && areaW >= 20 && areaH >= 20 && ready && active != null;
@@ -600,6 +616,13 @@ sealed class Host : ApplicationContext
     Rectangle WantRect()
     {
         double s = lastDpi / 96.0;
+        if (layoutBounds is RectangleF b)
+        {
+            // Round edges, not sizes: fractional DPI must not leave a one-pixel seam.
+            var rect = Rectangle.FromLTRB((int)Math.Round(b.Left * s), (int)Math.Round(b.Top * s),
+                (int)Math.Round(b.Right * s), (int)Math.Round(b.Bottom * s));
+            return Rectangle.Intersect(rect, new Rectangle(Point.Empty, lastClient));
+        }
         int w = (int)Math.Round(areaW * s), h = (int)Math.Round(areaH * s);
         return new Rectangle(origin.X, origin.Y, w, h);
     }
@@ -610,8 +633,8 @@ sealed class Host : ApplicationContext
         if (r == cur) return;
         cur = r;
         var at = Screen(r.Location);
-        N.SetWindowPos(view.Handle, IntPtr.Zero, at.X, at.Y, r.Width, r.Height, N.SWP_NOACTIVATE | N.SWP_NOOWNERZORDER | N.SWP_NOZORDER);
         foreach (var t in tabs) { try { t.C.Bounds = new Rectangle(0, 0, r.Width, r.Height); } catch { } }
+        N.SetWindowPos(view.Handle, IntPtr.Zero, at.X, at.Y, r.Width, r.Height, N.SWP_NOACTIVATE | N.SWP_NOOWNERZORDER | N.SWP_NOZORDER);
         Bump();
     }
 
@@ -716,6 +739,7 @@ sealed class Host : ApplicationContext
             using var bmp = await Shot();
             if (bmp == null) { Log("detect: no shot"); detectAt = Environment.TickCount64 + 500; return; }
             var found = await Task.Run(() => FindMarkers(bmp));
+            if (layoutBounds != null || key != DetectKey()) return; // a newer layout superseded this shot
             double s = lastDpi / 96.0;
             int ew = (int)Math.Round(areaW * s), eh = (int)Math.Round(areaH * s);
             if (found is Rectangle r && Math.Abs(r.Width - ew) <= 3 && Math.Abs(r.Height - eh) <= 3)
@@ -995,7 +1019,7 @@ sealed class Host : ApplicationContext
 
     // ---- tabs ----
 
-    async Task<Tab> NewTab(string url, bool activate)
+    async Task<Tab> NewTab(string url, bool activate, int index = -1)
     {
         var c = await env.CreateCoreWebView2ControllerAsync(view.Handle);
         var t = new Tab { C = c };
@@ -1030,7 +1054,8 @@ sealed class Host : ApplicationContext
         c.AcceleratorKeyPressed += (_, e) => OnKey(t, e);
         c.GotFocus += (_, _) => { focused = true; Bump(); };
         c.LostFocus += (_, _) => { focused = false; Bump(); };
-        tabs.Add(t);
+        if (index < 0) tabs.Add(t);
+        else tabs.Insert(Math.Min(index, tabs.Count), t);
         if (activate) Activate(t);
         if (!string.IsNullOrEmpty(url)) w.Navigate(url);
         Log($"tab {t.Id} {url}");
@@ -1059,7 +1084,7 @@ sealed class Host : ApplicationContext
 
     void SaveTabs()
     {
-        if (!ready || quitting) return; // closing the tabs on the way out isn't a change to remember
+        if (!ready || restoring || quitting) return; // don't save an incomplete restored session
         try
         {
             var json = new JsonObject

@@ -444,6 +444,7 @@ struct Behavior {
     /// Reports the panel sizes of a resizable group once a drag has ended.
     on_resize: Option<CallbackId>,
     on_size_change: Option<CallbackId>,
+    on_bounds_change: Option<CallbackId>,
     /// Reports which item of a `VirtualList` was clicked.
     ///
     /// One handler for the whole list rather than one per row, and that is a
@@ -2152,6 +2153,7 @@ fn flex_element(
         && behavior.on_click.is_none()
         && behavior.on_mouse_move.is_none()
         && behavior.on_size_change.is_none()
+        && behavior.on_bounds_change.is_none()
         && behavior.on_hover.is_none()
         && behavior.on_key_down.is_none()
         && behavior.on_key_up.is_none()
@@ -2223,7 +2225,7 @@ fn flex_element(
                 .into_any_element(),
             (false, false) => stateful.into_any_element(),
         };
-        return observe_size(element, identity, behavior.on_size_change, runtime, window, cx);
+        return observe_layout(element, identity, &behavior, runtime, window, cx);
     }
     // The scroll position lives in window element state under this element's
     // own identity, which is the slot an explicit `Scrollbar` elsewhere in the
@@ -2245,19 +2247,29 @@ fn flex_element(
         }
         (false, false) => stateful,
     };
-    observe_size(finish(stateful, refinement, children), identity, behavior.on_size_change, runtime, window, cx)
+    observe_layout(finish(stateful, refinement, children), identity, &behavior, runtime, window, cx)
 }
 
-fn observe_size(
+fn observe_layout(
+    element: AnyElement, identity: gpui::ElementId, behavior: &Behavior,
+    runtime: &Rc<ShellRuntime>, window: &mut Window, cx: &mut App,
+) -> AnyElement {
+    let element = observe_bounds(element, identity.clone(), behavior.on_size_change, false, runtime, window, cx);
+    observe_bounds(element, identity, behavior.on_bounds_change, true, runtime, window, cx)
+}
+
+fn observe_bounds(
     element: AnyElement, identity: gpui::ElementId, callback: Option<CallbackId>,
+    report_origin: bool,
     runtime: &Rc<ShellRuntime>, window: &mut Window, cx: &mut App,
 ) -> AnyElement {
     let Some(callback) = callback.filter(|_| !checking()) else { return element };
-    let last = window.use_keyed_state((identity, "size-change"), cx, |_, _| {
-        Rc::new(Cell::new(None::<(Option<u64>, gpui::Size<Pixels>)>))
+    let key = if report_origin { "bounds-change" } else { "size-change" };
+    let last = window.use_keyed_state((identity, key), cx, |_, _| {
+        Rc::new(Cell::new(None::<(Option<u64>, Bounds<Pixels>)>))
     }).read(cx).clone();
     SizeObserver {
-        element, last, callback,
+        element, last, callback, report_origin,
         application: runtime.callback_application_id(callback),
         runtime: Rc::downgrade(runtime),
     }.into_any_element()
@@ -2266,7 +2278,8 @@ fn observe_size(
 // Reuse the element's layout node: a full-size canvas child excludes its borders.
 struct SizeObserver {
     element: AnyElement,
-    last: Rc<Cell<Option<(Option<u64>, gpui::Size<Pixels>)>>>,
+    last: Rc<Cell<Option<(Option<u64>, Bounds<Pixels>)>>>,
+    report_origin: bool,
     application: Option<u64>,
     callback: CallbackId,
     runtime: Weak<ShellRuntime>,
@@ -2296,13 +2309,15 @@ impl gpui::Element for SizeObserver {
         bounds: Bounds<Pixels>, _: &mut (), window: &mut Window, cx: &mut App,
     ) {
         self.element.prepaint(window, cx);
-        let current = (self.application, bounds.size);
+        let measured = if self.report_origin { bounds } else { Bounds { origin: Default::default(), size: bounds.size } };
+        let current = (self.application, measured);
         if self.last.replace(Some(current)) != Some(current) {
             let runtime = self.runtime.clone();
             let callback = self.callback;
+            let report_origin = self.report_origin;
             window.defer(cx, move |window, cx| {
                 if let Some(runtime) = runtime.upgrade() {
-                    runtime.dispatch_size_change(callback, bounds.size, window, cx);
+                    runtime.dispatch_layout_change(callback, bounds, report_origin, window, cx);
                 }
             });
         }
@@ -2723,6 +2738,7 @@ pub(in crate::materialize) fn resolve_ops(
                 "on_scroll_wheel" => behavior.on_scroll_wheel = Some(*id),
                 "on_resize" => behavior.on_resize = Some(*id),
                 "on_size_change" => behavior.on_size_change = Some(*id),
+                "on_bounds_change" => behavior.on_bounds_change = Some(*id),
                 "on_change" => behavior.on_change = Some(*id),
                 "token" => behavior.token = Some(*id),
                 "on_token_click" => behavior.on_token_click = Some(*id),
