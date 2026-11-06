@@ -36,7 +36,14 @@ function Start-AtrousAccount([string]$Tool, $Rest) {
   # The Node supervisor preserves native terminal stdio and resumes this CLI only after a
   # confirmed quota stop. Old/custom shell functions keep the original launcher below.
   $program = Get-Command $Tool -ErrorAction SilentlyContinue
-  if ((Get-Command node -ErrorAction SilentlyContinue) -and $program.Source -and (Test-Path -LiteralPath $program.Source)) {
+  $native = $program.Source -match '\.(exe|ps1)$'
+  if ($program.Source -match '\.cmd$') {
+    # Only known npm shims have an executable argv entry point. Custom cmd/bat launchers
+    # retain PowerShell's existing invocation instead of passing their arguments to cmd /c.
+    $entry = if ($Tool -eq 'codex') { 'node_modules/@openai/codex/bin/codex.js' } else { 'node_modules/@anthropic-ai/claude-code/bin/claude.exe' }
+    $native = Test-Path -LiteralPath (Join-Path (Split-Path $program.Source) $entry)
+  }
+  if ($native -and (Get-Command node -ErrorAction SilentlyContinue) -and $program.Source -and (Test-Path -LiteralPath $program.Source)) {
     & node (Join-Path $PSScriptRoot 'launch.mjs') $Tool --command $program.Source -- @Rest
     return
   }

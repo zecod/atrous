@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 import { binding, chooseAccount, quotaMessage, codexRecord, claudeRecord, claudeQuotaRecord, resumeArgs, CONTINUE, FRESH_MS } from "../fedra/home/accounts/handoff.mjs";
 import { supervise, codexSession, invocation } from "../fedra/home/accounts/launch.mjs";
 const id = "019a0000-0000-7000-8000-000000000001";
@@ -70,6 +71,18 @@ test("shared account normalization copies remain identical", async () => {
   assert.equal(files[0], files[1]); assert.equal(files[0], files[2]);
 });
 
+test("Windows custom cmd launchers retain the original shell fallback", { skip: process.platform !== "win32" }, async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "atrous-custom-launcher-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.writeFile(path.join(root, "codex.cmd"), "@echo fixture-custom-launcher\r\n");
+  for (const file of ["launch.ps1", "codex.ps1"]) await fs.copyFile(new URL(`../fedra/home/accounts/${file}`, import.meta.url), path.join(root, file));
+  const env = { ...process.env, Path: root + path.delimiter + process.env.Path };
+  delete env.ATC_TERMINAL_ID;
+  const result = spawnSync("powershell.exe", ["-NoProfile", "-File", path.join(root, "codex.ps1")], { env, encoding: "utf8", windowsHide: true });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /fixture-custom-launcher/);
+});
+
 async function fixture(t, tool, mode = "handoff") {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "atrous-handoff-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
@@ -91,7 +104,7 @@ async function fixture(t, tool, mode = "handoff") {
     const starts = rows.filter(r => r.type === "start");
     assert.equal(starts.length, 2); assert.equal(keys, 1);
     assert.equal(starts[0].home, paid); assert.equal(starts[1].home, free);
-    assert.equal(starts[0].cwd, process.cwd()); assert.equal(starts[1].cwd, worktree);
+    assert.equal(starts[0].cwd, process.cwd()); assert.equal(await fs.realpath(starts[1].cwd), await fs.realpath(worktree));
     assert.equal(starts[1].args.includes(id), true); assert.equal(starts[1].args.includes("original task"), false);
     assert.equal(starts[1].args.includes(CONTINUE), true);
     assert.equal(rows.findIndex(r => r.type === "exit"), rows.findIndex(r => r.type === "start" && r.resumed) - 1);
