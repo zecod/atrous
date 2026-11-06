@@ -74,11 +74,12 @@ async function fixture(t, tool, mode = "handoff") {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "atrous-handoff-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const accounts = path.join(root, "accounts"), paid = path.join(accounts, "paid"), free = path.join(accounts, "free");
+  const worktree = path.join(root, "existing-worktree"); await fs.mkdir(worktree);
   for (const dir of [paid, free]) { await fs.mkdir(dir, { recursive: true }); await fs.writeFile(path.join(dir, ".atrous-account.json"), "{}"); }
   await fs.writeFile(path.join(accounts, "profile.mjs"), "process.exitCode = 0;");
   await fs.writeFile(path.join(accounts, "state.json"), JSON.stringify({ active: { [tool]: "paid" }, auto: { enabled: true, resume: mode !== "disabled" }, accounts: [{ tool, id: "paid", dir: paid }, { tool, id: "free", dir: free }] }));
   await fs.writeFile(path.join(accounts, "usage.json"), JSON.stringify({ [`${tool}:paid`]: entry(100), ...(mode === "unavailable" ? {} : { [`${tool}:free`]: entry(0) }) }));
-  const env = { ...process.env, ATC_TERMINAL_ID: "fixture:1", FIXTURE_TOOL: tool, FIXTURE_ROOT: root, FIXTURE_MODE: mode };
+  const env = { ...process.env, ATC_TERMINAL_ID: "fixture:1", FIXTURE_TOOL: tool, FIXTURE_ROOT: root, FIXTURE_MODE: mode, FIXTURE_CWD: worktree };
   for (const key of ["OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_ACCESS_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX"]) delete env[key];
   const labels = []; let keys = 0;
   const control = async args => { if (args[0] === "keys") { keys++; await fs.writeFile(path.join(root, "stop"), ""); } else labels.push(args[2]); return { code: 0 }; };
@@ -90,6 +91,7 @@ async function fixture(t, tool, mode = "handoff") {
     const starts = rows.filter(r => r.type === "start");
     assert.equal(starts.length, 2); assert.equal(keys, 1);
     assert.equal(starts[0].home, paid); assert.equal(starts[1].home, free);
+    assert.equal(starts[0].cwd, process.cwd()); assert.equal(starts[1].cwd, worktree);
     assert.equal(starts[1].args.includes(id), true); assert.equal(starts[1].args.includes("original task"), false);
     assert.equal(starts[1].args.includes(CONTINUE), true);
     assert.equal(rows.findIndex(r => r.type === "exit"), rows.findIndex(r => r.type === "start" && r.resumed) - 1);

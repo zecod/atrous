@@ -37,8 +37,8 @@ async function executable(tool, command) {
   throw new Error(`Use the ${tool} PowerShell launcher or executable instead of a cmd shim`);
 }
 
-function start(exe, args, env, stdio = "inherit") {
-  const child = spawn(exe.command, [...exe.prefix, ...args], { env, stdio, windowsHide: true });
+function start(exe, args, env, cwd) {
+  const child = spawn(exe.command, [...exe.prefix, ...args], { env, cwd, stdio: "inherit", windowsHide: true });
   const done = new Promise(resolve => {
     child.once("error", error => resolve({ code: 127, error }));
     child.once("exit", (code, signal) => resolve({ code: code ?? 1, signal }));
@@ -188,7 +188,7 @@ export async function supervise({ tool, command, args, accounts = HERE, env = pr
   let account = st?.accounts?.find(a => a.tool === tool && a.id === st.active?.[tool]);
   if (account?.pending || !await valid(account)) account = { tool, id: "default" };
   const failed = new Map(), runId = randomUUID();
-  let launchArgs = args, session = null, generation = 0, stopped = false, pendingNotice = null;
+  let launchArgs = args, launchCwd = process.cwd(), session = null, generation = 0, stopped = false, pendingNotice = null;
   let lastRun;
   const onSignal = signal => { stopped = true; if (lastRun?.child.exitCode === null) lastRun.child.kill(signal); };
   const onInterrupt = () => onSignal("SIGINT"), onTerminate = () => onSignal("SIGTERM");
@@ -232,7 +232,7 @@ export async function supervise({ tool, command, args, accounts = HERE, env = pr
           reader = new Lines(childEnv.ATROUS_ACCOUNT_EVENTS);
         }
       }
-      const running = start(exe, inputArgs, childEnv);
+      const running = start(exe, inputArgs, childEnv, launchCwd);
       lastRun = running;
       let exited = false, result;
       running.done.then(value => { exited = true; result = value; });
@@ -322,7 +322,7 @@ export async function supervise({ tool, command, args, accounts = HERE, env = pr
       }
       console.log(`Atrous: resuming ${tool === "codex" ? "Codex" : "Claude Code"} conversation ${session.id} on ${title(handoff.next)}.`);
       const previous = account;
-      account = handoff.next; launchArgs = handoff.resumed;
+      account = handoff.next; launchArgs = handoff.resumed; launchCwd = session.cwd;
       pendingNotice = { id: `${runId}-${currentGeneration}`, tool, from: previous.id, to: account.id, name: title(account), session: session.id };
     }
   } finally {
