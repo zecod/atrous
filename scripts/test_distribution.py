@@ -51,7 +51,7 @@ class DistributionTests(unittest.TestCase):
             with self.subTest(os_name=os_name):
                 result = self.run_script("distribution/install.sh", os_name, "x86_64")
                 self.assertEqual(result.returncode, 1)
-                self.assertIn("/app/install.ps1 | iex", result.stderr)
+                self.assertIn("https://github.com/zecod/atrous/releases/latest/download/install.ps1 | iex", result.stderr)
                 self.assertNotIn("unexpected download", result.stderr)
 
     def test_unknown_os_installer_names_it(self):
@@ -225,19 +225,36 @@ printf 'dev PATH added' >> "$3"''')
     def test_packages_keep_full_notices_on_every_platform(self):
         checkout = self.bin / "checkout"
         for path in [
-            "Cargo.toml", "LICENSE", "THIRD-PARTY-NOTICES", "scripts/package",
+            "Cargo.toml", "LICENSE", "THIRD-PARTY-NOTICES", "scripts/package", "scripts/stage-core",
+            "core/crates/atrous-core/THIRD-PARTY-NOTICES", "core/scripts/mac-bundle",
+            "core/distribution/macos-Info.plist",
             "assets/brand/atrous.svg", "assets/brand/Atrous.icns",
         ]:
             destination = checkout / path
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / path, destination)
+            if "scripts" in Path(path).parts:
+                destination.write_text((ROOT / path).read_text(), newline="\n")
         sign = checkout / "scripts/mac-sign"
         sign.write_text("#!/bin/sh\nexit 0\n")
         sign.chmod(0o755)
+        core_sign = checkout / "core/scripts/mac-sign"
+        core_sign.write_text("#!/bin/sh\nexit 0\n")
+        core_sign.chmod(0o755)
         release = checkout / "target/release"
         release.mkdir(parents=True)
         for name in ("atrous", "atrous.exe"):
             (release / name).write_bytes(b"test binary")
+        version = next(line.split('"')[1] for line in (checkout / "Cargo.toml").read_text().splitlines() if line.startswith("version = "))
+        core_release = checkout / "core/target/release"
+        core_release.mkdir(parents=True)
+        for name in ("atrous-core", "atrous-core.exe"):
+            binary = core_release / name
+            binary.write_text(f'#!/bin/sh\necho "atc {version}"\n')
+            binary.chmod(0o755)
+        # Windows staging asks its installer for ConPTY; no downloads in this fixture.
+        self.stub("cygpath", 'printf "%s\\n" "$2"')
+        self.stub("powershell.exe", "exit 0")
         self.stub("cargo", "exit 0")
         for os_name, arch, target, prefix in (
             ("Linux", "x86_64", "linux-x86_64", "atrous"),
@@ -253,8 +270,12 @@ printf 'dev PATH added' >> "$3"''')
                             archive.extractfile(f"{prefix}/{name}").read(),
                             (ROOT / name).read_bytes(),
                         )
+                    self.assertEqual(
+                        archive.extractfile(f"{prefix}/THIRD-PARTY-NOTICES-atrous-core").read(),
+                        (ROOT / "core/crates/atrous-core/THIRD-PARTY-NOTICES").read_bytes(),
+                    )
         self.stub("cargo", 'echo "unexpected build" >&2; exit 97')
-        for name in ("LICENSE", "THIRD-PARTY-NOTICES"):
+        for name in ("LICENSE", "THIRD-PARTY-NOTICES", "core/crates/atrous-core/THIRD-PARTY-NOTICES"):
             notice = checkout / name
             original = notice.read_bytes()
             for state in ("empty", "missing"):
