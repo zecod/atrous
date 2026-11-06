@@ -68,6 +68,50 @@ export default class extends View {
 }
 
 #[gpui::test]
+fn bounds_change_reports_moves_without_repeating_size_changes(cx: &mut TestAppContext) {
+    cx.update(gpui_shell::init);
+    let fixture = Fixture::new(r#"
+import { View, div } from "gpui-kit";
+import { note, sized } from "fixture";
+export default class extends View {
+  render() {
+    return div().size_full().relative().child(div().id("page").absolute().right(10).top(12).w(100).h(40)
+      .on_bounds_change((b, cx) => { note(b.x, b.y, b.width, b.height); cx.notify(); })
+      .on_size_change(() => sized()));
+  }
+}"#);
+    let bounds = Rc::new(RefCell::new(Vec::new()));
+    let calls = bounds.clone();
+    let sizes = Rc::new(Cell::new(0));
+    let size_calls = sizes.clone();
+    gpui_shell::policy::set_default(Policy::new().with_host_module(
+        HostModule::new("fixture").function("note", move |a| {
+            calls.borrow_mut().push((a.number(0)?, a.number(1)?, a.number(2)?, a.number(3)?));
+            Ok(HostValue::Null)
+        }).function("sized", move |_| {
+            size_calls.set(size_calls.get() + 1);
+            Ok(HostValue::Null)
+        })
+    ).unwrap());
+    let runtime = ShellRuntime::new_isolated().unwrap();
+    let window = cx.add_window(|window, cx| Mounted(runtime.try_load(&fixture.0, window, cx).unwrap()));
+    let mut visual = VisualTestContext::from_window(*window.deref(), cx);
+    visual.update(|window, cx| window.draw(cx).clear(cx));
+    visual.run_until_parked();
+    assert_eq!(bounds.borrow().len(), 1);
+    assert_eq!(sizes.get(), 1);
+    visual.update(|window, cx| window.draw(cx).clear(cx));
+    visual.run_until_parked();
+    assert_eq!(bounds.borrow().len(), 1, "unchanged bounds must not repeat the callback");
+    visual.simulate_resize(gpui::size(gpui::px(720.), gpui::px(480.)));
+    visual.update(|window, cx| window.draw(cx).clear(cx));
+    visual.run_until_parked();
+    assert_eq!(bounds.borrow().last().copied(), Some((610., 12., 100., 40.)));
+    assert_eq!(bounds.borrow().len(), 2);
+    assert_eq!(sizes.get(), 1, "moving without resizing must preserve on_size_change behavior");
+}
+
+#[gpui::test]
 fn external_file_drops_reach_mod_elements(cx: &mut TestAppContext) {
     use gpui::{ExternalPaths, FileDropEvent, InputEvent};
     cx.update(gpui_shell::init);

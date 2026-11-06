@@ -54,7 +54,7 @@ build-app:
     cargo build --locked
 
 test:
-    bun test scripts/files.test.ts scripts/picker.test.ts scripts/palette.test.ts scripts/agents.test.ts scripts/spaces.test.ts scripts/worktree.test.ts
+    bun test scripts/files.test.ts scripts/picker.test.ts scripts/palette.test.ts scripts/agents.test.ts scripts/spaces.test.ts scripts/worktree.test.ts scripts/browser.test.ts
     cargo test --locked
 
 # atrous-core's own tests (core/ is its own workspace).

@@ -133,6 +133,9 @@ jobs:
         run: |
           ~/.bun/bin/bun test scripts/docs.test.ts
           ~/.bun/bin/bun scripts/docs.ts check
+      - name: Browser helper regressions
+        if: matrix.platform == 'linux-x86_64'
+        run: ~/.bun/bin/bun test scripts/browser.test.ts
 
   # atrous-core (core/, its own workspace): clippy and tests on each platform,
   # as its own repository ran them before it moved in.

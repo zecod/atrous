@@ -152,7 +152,10 @@ export function registerDevtools(ctx) {
     for (const s of n.shadowRoots ?? []) { addNode(s, rec.id); rec.extra.push(s.nodeId); }
     if (n.contentDocument) { addNode(n.contentDocument, rec.id); rec.extra.push(n.contentDocument.nodeId); }
     if (n.children) {
-      if (old?.kids) for (const k of old.kids) if (!n.children.some((c) => c.nodeId === k)) dropSubtree(k);
+      if (old?.kids) {
+        const incoming = new Set(n.children.map((c) => c.nodeId));
+        for (const k of old.kids) if (!incoming.has(k)) dropSubtree(k);
+      }
       rec.kids = n.children.map((c) => (addNode(c, rec.id), c.nodeId));
       rec.count = rec.kids.length;
       const ws = D.kidWaiters.get(rec.id);
@@ -373,7 +376,10 @@ export function registerDevtools(ctx) {
       case "DOM.setChildNodes": {
         const parent = D.nodes.get(p.parentId);
         if (!parent) break;
-        if (parent.kids) for (const k of parent.kids) if (!p.nodes.some((c) => c.nodeId === k)) dropSubtree(k);
+        if (parent.kids) {
+          const incoming = new Set(p.nodes.map((c) => c.nodeId));
+          for (const k of parent.kids) if (!incoming.has(k)) dropSubtree(k);
+        }
         parent.kids = p.nodes.map((c) => (addNode(c, parent.id), c.nodeId));
         parent.count = parent.kids.length;
         const ws = D.kidWaiters.get(parent.id);
@@ -555,6 +561,32 @@ export function registerDevtools(ctx) {
     if (n.type === 9 && id === D.doc) return pageHtml();
     const { outerHTML } = await send("DOM.getOuterHTML", { nodeId: id }, 20000);
     return n.type === 1 && (n.local === "html" || n.local === "body") ? outerHTML.replace(STRIP_ATROUS, "") : outerHTML;
+  }
+
+  // Slice element HTML inside Chromium: sending megabytes over CDP just to discard them in
+  // the helper stalls both the browser and the panel on large documents.
+  async function nodePreview(id, max) {
+    const n = D.nodes.get(id);
+    if (!n) throw httpErr(404, "That node is gone from the page");
+    if (n.type !== 1) {
+      const html = await nodeHtml(id);
+      return { total: html.length, truncated: html.length > max, html: html.slice(0, max) };
+    }
+    const { object } = await send("DOM.resolveNode", { nodeId: id });
+    if (!object?.objectId) throw httpErr(404, "That node is gone from the page");
+    try {
+      const r = await send("Runtime.callFunctionOn", {
+        objectId: object.objectId, returnByValue: true,
+        functionDeclaration: `function(max, strip) {
+          let html = this.outerHTML;
+          if (strip) html = html.replace(${STRIP_ATROUS}, "");
+          return { total: html.length, truncated: html.length > max, html: html.slice(0, max) };
+        }`,
+        arguments: [{ value: max }, { value: n.local === "html" || n.local === "body" }],
+      }, 20000);
+      if (r.exceptionDetails) throw new Error("Couldn't read this element's HTML");
+      return r.result.value;
+    } finally { await send("Runtime.releaseObject", { objectId: object.objectId }).catch(() => {}); }
   }
 
   async function setHtml(id, html, select = true) {
@@ -1134,9 +1166,9 @@ export function registerDevtools(ctx) {
       if (!q.get("id")) return agentHtml(q);
       const id = Number(q.get("id"));
       const max = Math.max(1000, Math.min(2_000_000, Number(q.get("max")) || HTML_MAX));
-      const html = await nodeHtml(id);
+      const html = await nodePreview(id, max);
       const n = D.nodes.get(id);
-      return { ok: true, id, label: label(n), kind: n?.type ?? 0, total: html.length, truncated: html.length > max, html: html.length > max ? html.slice(0, max) : html };
+      return { ok: true, id, label: label(n), kind: n?.type ?? 0, ...html };
     },
     "POST /dom/open": async () => { D.open = true; D.lastPoll = Date.now(); await ensureDoc(); return { ok: true }; },
     "POST /dom/close": async () => { await closeDom(); return { ok: true }; },
