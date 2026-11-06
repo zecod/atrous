@@ -97,6 +97,8 @@ async function fixture(t, tool, mode = "handoff") {
   await fs.writeFile(path.join(accounts, "usage.json"), JSON.stringify({ [`${tool}:paid`]: entry(100), ...(mode === "unavailable" ? {} : { [`${tool}:free`]: entry(0) }) }));
   const env = { ...process.env, ATC_TERMINAL_ID: "fixture:1", FIXTURE_TOOL: tool, FIXTURE_ROOT: root, FIXTURE_MODE: mode, FIXTURE_CWD: worktree };
   for (const key of ["OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_ACCESS_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX"]) delete env[key];
+  // A key for a different provider must not disable this tool's OAuth-account handoff.
+  env[tool === "codex" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY"] = "unused-fixture-key";
   const labels = []; let keys = 0;
   const control = async args => { if (args[0] === "keys") { assert.equal(args[2], "ctrl+d"); keys++; await fs.writeFile(path.join(root, "stop"), ""); } else labels.push(args[2]); return { code: 0 }; };
   const args = tool === "codex" ? ["--sandbox", "workspace-write", "original task"] : ["--permission-mode", "acceptEdits", "--settings", JSON.stringify({ fixture: true, hooks: { SessionStart: [] } }), "original task"];

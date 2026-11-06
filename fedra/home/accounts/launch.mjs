@@ -203,10 +203,13 @@ export async function supervise({ tool, command, args, accounts = HERE, env = pr
       }
       await label("atrous-account", `${tool}:${account.id}`);
       const childEnv = { ...env, [VAR[tool]]: home };
+      const pinnedAuth = tool === "codex"
+        ? env.OPENAI_API_KEY || env.CODEX_API_KEY || env.CODEX_ACCESS_TOKEN
+        : env.CLAUDE_CODE_OAUTH_TOKEN || env.ANTHROPIC_API_KEY || env.ANTHROPIC_AUTH_TOKEN || env.CLAUDE_CODE_USE_BEDROCK || env.CLAUDE_CODE_USE_VERTEX;
       // Interactive local account launches only; commands, API-key/provider runs, remote TUIs,
       // non-persistent sessions and custom options we cannot preserve are never restarted.
-      let canMonitor = interactive && terminal && !env.OPENAI_API_KEY && !env.CODEX_API_KEY && !env.CODEX_ACCESS_TOKEN && !env.CLAUDE_CODE_OAUTH_TOKEN && !env.ANTHROPIC_API_KEY && !env.ANTHROPIC_AUTH_TOKEN &&
-        !env.CLAUDE_CODE_USE_BEDROCK && !env.CLAUDE_CODE_USE_VERTEX && !args.some(a => /^(?:--remote|--cloud|--bg|--background|--tmux|--no-session-persistence|--safe-mode|--bare)/.test(a) || tool === "claude" && /^(?:--print(?:=|$)|-p$)/.test(a)) &&
+      let canMonitor = interactive && terminal && !pinnedAuth &&
+        !args.some(a => /^(?:--remote|--cloud|--bg|--background|--tmux|--no-session-persistence|--safe-mode|--bare)/.test(a) || tool === "claude" && /^(?:--print(?:=|$)|-p$)/.test(a)) &&
         resumeArgs(tool, args, randomUUID()) !== null;
       if (canMonitor && tool === "claude") {
         const version = await capture(exe.command, [...exe.prefix, "--version"], childEnv);
