@@ -88,7 +88,7 @@ first frame or during GPU recovery it reports an error instead of a PNG.
 | `programs.json` | how programs show (name, icon, tile), on top of the built-in table | live |
 | `icons/` | the shipped program icons | written by Atrous (put your own elsewhere) |
 | `frame/` | the app's own screens (What's new, the command palette, feedback) | rewritten by Atrous on every start: don't edit, it won't stick |
-| `accounts/` | Fedra's account launchers (`claude`, `codex` `.ps1`/`.sh`, `launch`, `login`, `profile.mjs`); `state.json` and the account folders are the person's | launchers rewritten by Atrous on start |
+| `accounts/` | Fedra's account launchers (`claude`, `codex` `.ps1`/`.sh`, `launch`, `login`, `profile.mjs`, `handoff.mjs`); `state.json` and the account folders are the person's; `usage.json` is a credential-free quota snapshot | launchers rewritten by Atrous on start |
 | `skills/<name>/` | agent skills Atrous ships (`atrous-browser`), linked into `~/.claude/skills` and `~/.codex/skills` by Fedra | rewritten by Atrous on start |
 | `view.json` | this screen's selected space/tab/pane, zoom, settled tabs, recent spaces and seen attention | written by Atrous |
 | `shared.json`, `data/`, `seen.json`, `installed.json`, `window.json`, `windows.json` | mod state, bookkeeping, where the window was (size, maximized), mods' windows (spots, kept ones) | written by Atrous |
@@ -178,6 +178,26 @@ the highlighted line shows where it will land.
 - **Agent navigation order** belongs to the mods. A mod displaying agents calls
   `setAgentOrder(list.map(a => a.address))` on render so `agent.next` /
   `agent.prev` follow its list.
+
+## Accounts
+
+Settings > Accounts picks the default for new Claude Code and Codex agents. Automatic
+switching at the configured warning threshold changes that default. With "Resume running
+agents after a quota limit" enabled (`accounts/state.json` `auto.resume`, default true),
+interactive agents started through these launchers can also continue their exact saved
+conversation on another linked account after a confirmed quota error. The warning threshold
+never interrupts a running agent. Both `auto.enabled` and `auto.resume` must be enabled.
+Claude Code requires 2.1.318 or newer. Existing processes started by older launchers,
+noninteractive commands, remote/background sessions, API-key/provider overrides and
+unsupported CLI options retain their existing behavior. Manual exits never restart.
+
+Handoffs require a fresh successful quota check for the destination account, preserve the
+launch permissions and options, and wait for the original CLI to exit before resuming its
+exact session ID. Without an eligible account the conversation stays open. A failed account
+is not retried in that run until its known limit resets and a newer quota check succeeds.
+The usage card writes credential-free `accounts/usage.json`; launch-private metadata in
+`data/account-runs/` is removed on exit. `atrous-account` labels track the running account;
+`atrous.account.handoff` is JSON with a `switching`, `waiting` or `resumed` phase.
 
 ## Layouts: `layouts/<name>.json`
 
