@@ -155,7 +155,9 @@ export function poll(view, cx, candidates) {
   cx.spawn(async (cx) => {
     let text = null;
     try {
-      const r = await core(["read", due.address, "--lines", "30"]);
+      // The screen only. Asking for history (--lines) makes the core scroll a full-screen agent
+      // (Claude Code) to read it, holding what the person types for about a second each time.
+      const r = await core(["read", due.address]);
       if (r.code === 0) text = r.stdout.replace(/\n\[atc\][^\n]*\s*$/, "");
     } catch {}
     view.promptBusy = false;
